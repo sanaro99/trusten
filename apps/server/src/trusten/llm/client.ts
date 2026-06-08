@@ -2,9 +2,9 @@
  * Trusten LLM Client
  *
  * Lightweight LLM utility for semantic analysis in Trusten analyzers.
- * Supports: Nvidia NIM (primary), Google Gemini (fallback), Ollama (local).
+ * Supports: Nvidia NIM, Google Gemini, DeepSeek, OpenRouter, Ollama (local).
  *
- * All three providers expose an OpenAI-compatible chat completions API,
+ * All providers expose an OpenAI-compatible chat completions API,
  * so we use a single fetch-based implementation with provider-specific
  * base URLs, auth headers, and default models.
  */
@@ -18,6 +18,7 @@ interface ProviderDefaults {
   baseUrl: string
   defaultModel: string
   authHeader: (apiKey: string) => Record<string, string>
+  extraHeaders?: Record<string, string>
 }
 
 const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
@@ -31,12 +32,35 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
     defaultModel: 'gemini-2.0-flash',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
   },
+  deepseek: {
+    baseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
+  },
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'deepseek/deepseek-chat',
+    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
+    extraHeaders: {
+      'HTTP-Referer': 'https://trusten.app',
+      'X-Title': 'Trusten Dark Pattern Scanner',
+    },
+  },
   ollama: {
     baseUrl: 'http://localhost:11434/v1',
     defaultModel: 'llama3.1',
-    authHeader: () => ({}), // No auth needed for local Ollama
+    authHeader: () => ({}),
   },
 }
+
+/** Auto-detect + fallback order when TRUSTEN_LLM_PROVIDER is not set */
+const FALLBACK_CHAIN: TrustenLLMProvider[] = [
+  'nvidia-nim',
+  'gemini',
+  'deepseek',
+  'openrouter',
+  'ollama',
+]
 
 // ─── Reliability knobs ───
 
@@ -60,65 +84,80 @@ function markUnreachable(p: TrustenLLMProvider): void {
   unreachableUntil.set(p, Date.now() + UNREACHABLE_TTL_MS)
 }
 
+// ─── Credential helpers ───
+
+function getApiKey(provider: TrustenLLMProvider): string {
+  switch (provider) {
+    case 'nvidia-nim':
+      return process.env.NVIDIA_NIM_API_KEY ?? ''
+    case 'gemini':
+      return process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
+    case 'deepseek':
+      return process.env.DEEPSEEK_API_KEY ?? ''
+    case 'openrouter':
+      return process.env.OPENROUTER_API_KEY ?? ''
+    case 'ollama':
+      return ''
+  }
+}
+
+function hasCredentials(provider: TrustenLLMProvider): boolean {
+  return provider === 'ollama' || getApiKey(provider).length > 0
+}
+
 // ─── Environment-based config resolution ───
 
+function resolveExplicitConfig(provider: TrustenLLMProvider): TrustenLLMConfig {
+  switch (provider) {
+    case 'nvidia-nim':
+      return {
+        provider,
+        apiKey: process.env.NVIDIA_NIM_API_KEY,
+        baseUrl: process.env.NVIDIA_NIM_BASE_URL,
+        model: process.env.NVIDIA_NIM_MODEL,
+      }
+    case 'gemini':
+      return {
+        provider,
+        apiKey: process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY,
+        baseUrl: process.env.GEMINI_BASE_URL,
+        model: process.env.GEMINI_MODEL,
+      }
+    case 'deepseek':
+      return {
+        provider,
+        apiKey: process.env.DEEPSEEK_API_KEY,
+        baseUrl: process.env.DEEPSEEK_BASE_URL,
+        model: process.env.DEEPSEEK_MODEL,
+      }
+    case 'openrouter':
+      return {
+        provider,
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseUrl: process.env.OPENROUTER_BASE_URL,
+        model: process.env.OPENROUTER_MODEL,
+      }
+    case 'ollama':
+      return {
+        provider,
+        baseUrl: process.env.OLLAMA_BASE_URL,
+        model: process.env.OLLAMA_MODEL,
+      }
+  }
+}
+
 function resolveConfig(): TrustenLLMConfig {
-  // Explicit override wins, regardless of which keys happen to be set.
-  const explicit = process.env.TRUSTEN_LLM_PROVIDER as
-    | TrustenLLMProvider
-    | undefined
-  if (explicit === 'ollama') {
-    return {
-      provider: 'ollama',
-      baseUrl: process.env.OLLAMA_BASE_URL,
-      model: process.env.OLLAMA_MODEL,
-    }
-  }
-  if (explicit === 'gemini') {
-    return {
-      provider: 'gemini',
-      apiKey: process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY,
-      baseUrl: process.env.GEMINI_BASE_URL,
-      model: process.env.GEMINI_MODEL,
-    }
-  }
-  if (explicit === 'nvidia-nim') {
-    return {
-      provider: 'nvidia-nim',
-      apiKey: process.env.NVIDIA_NIM_API_KEY,
-      baseUrl: process.env.NVIDIA_NIM_BASE_URL,
-      model: process.env.NVIDIA_NIM_MODEL,
-    }
+  const explicit = process.env.TRUSTEN_LLM_PROVIDER as TrustenLLMProvider | undefined
+  if (explicit && explicit in PROVIDER_DEFAULTS) {
+    return resolveExplicitConfig(explicit)
   }
 
-  // Otherwise auto-detect in priority order: NIM → Gemini → Ollama
-  const nimKey = process.env.NVIDIA_NIM_API_KEY
-  if (nimKey) {
-    return {
-      provider: 'nvidia-nim',
-      apiKey: nimKey,
-      baseUrl: process.env.NVIDIA_NIM_BASE_URL,
-      model: process.env.NVIDIA_NIM_MODEL,
-    }
+  // Auto-detect in chain order: first provider with credentials wins
+  for (const provider of FALLBACK_CHAIN) {
+    if (hasCredentials(provider)) return resolveExplicitConfig(provider)
   }
 
-  const geminiKey =
-    process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY
-  if (geminiKey) {
-    return {
-      provider: 'gemini',
-      apiKey: geminiKey,
-      baseUrl: process.env.GEMINI_BASE_URL,
-      model: process.env.GEMINI_MODEL,
-    }
-  }
-
-  // Default to Ollama (local, no key needed)
-  return {
-    provider: 'ollama',
-    baseUrl: process.env.OLLAMA_BASE_URL,
-    model: process.env.OLLAMA_MODEL,
-  }
+  return resolveExplicitConfig('ollama')
 }
 
 // ─── Types ───
@@ -181,21 +220,18 @@ export class TrustenLLMClient {
   async complete(options: LLMCompletionOptions): Promise<string> {
     const provider = options.provider ?? this.config.provider
 
-    // Skip a provider we already know is down this run — go straight to fallback.
     if (isUnreachable(provider)) {
-      if (provider === 'nvidia-nim') return this.tryFallback(options, 'gemini')
-      if (provider === 'gemini') return this.tryFallback(options, 'ollama')
+      const next = this.nextInChain(provider)
+      if (next) return this.tryFallback(options, next)
       throw new Error(`Trusten LLM: ${provider} unreachable`)
     }
 
     const defaults = PROVIDER_DEFAULTS[provider]
-
     const baseUrl = this.config.baseUrl ?? defaults.baseUrl
     const model = this.config.model ?? defaults.defaultModel
-    const apiKey = this.config.apiKey ?? ''
+    const apiKey = this.config.apiKey ?? getApiKey(provider)
 
     const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
-
     const body = {
       model,
       messages: options.messages,
@@ -205,6 +241,7 @@ export class TrustenLLMClient {
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      ...(defaults.extraHeaders ?? {}),
       ...(apiKey ? defaults.authHeader(apiKey) : {}),
     }
 
@@ -229,16 +266,9 @@ export class TrustenLLMClient {
 
       return data.choices[0].message.content
     } catch (error) {
-      // Network error / timeout — remember this provider is down for a bit.
       markUnreachable(provider)
-      // If primary provider fails and we have a fallback, try it
-      if (provider === 'nvidia-nim') {
-        return this.tryFallback(options, 'gemini')
-      }
-      if (provider === 'gemini') {
-        return this.tryFallback(options, 'ollama')
-      }
-
+      const next = this.nextInChain(provider)
+      if (next) return this.tryFallback(options, next)
       const msg = error instanceof Error ? error.message : String(error)
       logger.error('Trusten LLM request failed (all providers)', { error: msg })
       throw new Error(`Trusten LLM failed: ${msg}`)
@@ -328,6 +358,16 @@ Analyze the above content and return your findings as JSON.`
     })
   }
 
+  /** Returns the next available provider after `current` in the fallback chain. */
+  private nextInChain(current: TrustenLLMProvider): TrustenLLMProvider | null {
+    const idx = FALLBACK_CHAIN.indexOf(current)
+    for (let i = idx + 1; i < FALLBACK_CHAIN.length; i++) {
+      const next = FALLBACK_CHAIN[i]
+      if (!isUnreachable(next) && hasCredentials(next)) return next
+    }
+    return null
+  }
+
   private async tryFallback(
     options: LLMCompletionOptions,
     fallbackProvider: TrustenLLMProvider,
@@ -336,34 +376,17 @@ Analyze the above content and return your findings as JSON.`
       `Trusten LLM: primary provider failed, trying fallback: ${fallbackProvider}`,
     )
 
-    // Skip a fallback we already know is down this run.
-    if (isUnreachable(fallbackProvider)) {
-      if (fallbackProvider !== 'ollama')
-        return this.tryFallback(options, 'ollama')
+    if (isUnreachable(fallbackProvider) || !hasCredentials(fallbackProvider)) {
+      const next = this.nextInChain(fallbackProvider)
+      if (next) return this.tryFallback(options, next)
       throw new Error('Trusten LLM: all providers unreachable')
     }
 
-    // Check if fallback has credentials
-    if (fallbackProvider === 'gemini') {
-      const key =
-        process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY
-      if (!key) {
-        logger.warn('Gemini fallback unavailable: no API key')
-        return this.tryFallback(options, 'ollama')
-      }
-    }
-
-    const fallbackDefaults = PROVIDER_DEFAULTS[fallbackProvider]
-    const fallbackBaseUrl = fallbackDefaults.baseUrl
-    const fallbackModel = fallbackDefaults.defaultModel
-    const fallbackKey =
-      fallbackProvider === 'gemini'
-        ? process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
-        : ''
-
-    const url = `${fallbackBaseUrl}/chat/completions`
+    const defaults = PROVIDER_DEFAULTS[fallbackProvider]
+    const apiKey = getApiKey(fallbackProvider)
+    const url = `${defaults.baseUrl}/chat/completions`
     const body = {
-      model: fallbackModel,
+      model: defaults.defaultModel,
       messages: options.messages,
       temperature: options.temperature ?? 0.1,
       max_tokens: options.maxTokens ?? 1024,
@@ -371,7 +394,8 @@ Analyze the above content and return your findings as JSON.`
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(fallbackKey ? fallbackDefaults.authHeader(fallbackKey) : {}),
+      ...(defaults.extraHeaders ?? {}),
+      ...(apiKey ? defaults.authHeader(apiKey) : {}),
     }
 
     try {
@@ -397,9 +421,8 @@ Analyze the above content and return your findings as JSON.`
       return data.choices[0].message.content
     } catch (error) {
       markUnreachable(fallbackProvider)
-      if (fallbackProvider !== 'ollama') {
-        return this.tryFallback(options, 'ollama')
-      }
+      const next = this.nextInChain(fallbackProvider)
+      if (next) return this.tryFallback(options, next)
       const msg = error instanceof Error ? error.message : String(error)
       throw new Error(`All LLM providers failed. Last error: ${msg}`)
     }
