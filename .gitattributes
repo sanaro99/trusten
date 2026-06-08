@@ -1,0 +1,2 @@
+# Generated/vendored — keep out of language stats
+scripts/*.py linguist-generated

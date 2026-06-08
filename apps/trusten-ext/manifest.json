@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Trusten — Dark Pattern Scanner",
+  "version": "1.0.0",
+  "description": "Instantly scan any page for dark patterns. Powered by the Trusten dark-pattern detection engine.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://localhost:9200/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Scan for Dark Patterns",
+    "default_icon": {
+      "16": "icons/icon16.svg",
+      "48": "icons/icon48.svg",
+      "128": "icons/icon128.svg"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon48.svg",
+    "128": "icons/icon128.svg"
+  }
+}

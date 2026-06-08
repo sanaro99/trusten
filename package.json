@@ -1,0 +1,42 @@
+{
+  "name": "trusten-monorepo",
+  "version": "0.1.0",
+  "description": "Trusten — dark-pattern detection (headless scanner server, browser extension, shared packages)",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "bun run --filter @trusten/server start",
+    "dev": "bun run --filter @trusten/server dev",
+    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "bunx biome check",
+    "lint:fix": "bunx biome check --write --unsafe",
+    "clean": "rimraf dist"
+  },
+  "author": "Trusten",
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "@biomejs/biome": "2.4.8",
+    "@types/bun": "^1.3.5",
+    "@types/node": "^24.3.3",
+    "lefthook": "^2.0.12",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.9.2"
+  },
+  "trustedDependencies": [
+    "lefthook",
+    "puppeteer",
+    "ffmpeg-static"
+  ],
+  "engines": {
+    "bun": ">=1.3.6"
+  },
+  "packageManager": "bun@1.3.6",
+  "overrides": {
+    "serialize-javascript": "7.0.3",
+    "lodash-es": "4.17.23"
+  }
+}
