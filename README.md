@@ -1,205 +1,95 @@
-<div align="center">
-<img width="693" height="379" alt="github-banner" src="https://github.com/user-attachments/assets/1e37941c-4dbc-4662-9c8c-3bbe9971301d" />
+# Trusten
 
-<br></br>
-[![Discord](https://img.shields.io/badge/Discord-Join%20us-blue)](https://discord.gg/YKwjt5vuKr)
-[![Slack](https://img.shields.io/badge/Slack-Join%20us-4A154B?logo=slack&logoColor=white)](https://dub.sh/browserOS-slack)
-[![Twitter](https://img.shields.io/twitter/follow/browserOS_ai?style=social)](https://twitter.com/browseros_ai)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/Docs-docs.browseros.com-blue)](https://docs.browseros.com)
-<br></br>
-<a href="https://files.browseros.com/download/BrowserOS.dmg">
-  <img src="https://img.shields.io/badge/Download-macOS-black?style=flat&logo=apple&logoColor=white" alt="Download for macOS (beta)" />
-</a>
-<a href="https://files.browseros.com/download/BrowserOS_installer.exe">
-  <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=flat&logo=windows&logoColor=white" alt="Download for Windows (beta)" />
-</a>
-<a href="https://files.browseros.com/download/BrowserOS.AppImage">
-  <img src="https://img.shields.io/badge/Download-Linux-FCC624?style=flat&logo=linux&logoColor=black" alt="Download for Linux (beta)" />
-</a>
-<a href="https://cdn.browseros.com/download/BrowserOS.deb">
-  <img src="https://img.shields.io/badge/Download-Debian-D70A53?style=flat&logo=debian&logoColor=white" alt="Download Debian package" />
-</a>
-<br />
-</div>
+**Dark-pattern detection & consumer-trust auditing.** Trusten scans any website for
+manipulative UI/UX ("dark patterns"), grades it on an A–F trust scale, and maps every finding
+to the regulations it likely violates — with screenshot, video, and PDF evidence.
 
-BrowserOS is an open-source Chromium fork that runs AI agents natively. **The privacy-first alternative to ChatGPT Atlas, Perplexity Comet, and Dia.**
+![Trusten dashboard](docs/images/dashboard-home.png)
 
-Use your own API keys or run local models with Ollama. Your data never leaves your machine.
+> Trusten began as a fork of BrowserOS (an agentic browser) on the assumption that scanning
+> needed an in-browser AI agent. It doesn't: scans run on a plain **headless browser**
+> (Puppeteer/Chromium). The BrowserOS apparatus has been removed; what remains is a focused
+> TypeScript/Bun service.
 
-> **[Documentation](https://docs.browseros.com)** · **[Discord](https://discord.gg/YKwjt5vuKr)** · **[Slack](https://dub.sh/browserOS-slack)** · **[Twitter](https://x.com/browserOS_ai)** · **[Feature Requests](https://github.com/browseros-ai/BrowserOS/issues/99)**
+## What it does
 
-## Quick Start
+- **Quick Scan** — single-page detection. The browser extension sends the live DOM to the
+  server (or the server navigates to a URL headlessly), runs 11 analyzers, and returns a grade
+  + findings in seconds.
+- **Deep Scan** — multi-step workflow traversal on a headless browser, using **fixed** workflows
+  (checkout, signup, cookie consent, pricing, cancellation) or **agentically discovered** ones
+  (the agent explores the site and plans tailored journeys, TestSprite-style, falling back to
+  the fixed library if the LLM is unavailable). Captures an annotated screenshot per step,
+  records a **session video**, and produces an HTML + PDF report. Optionally **watch it live**
+  in the dashboard (CDP screencast over WebSocket) with real-time step progress.
+- **Quick-scan cache** — a Quick Scan on a page you're browsing merges in cached Deep Scan
+  findings for that page, so the richer audit results surface instantly.
+- **Scoring** — deterministic A–F grade (100 − weighted severity deductions).
+- **Regulatory mapping** — every finding maps to provisions across 14 frameworks (GDPR,
+  FTC Act §5, EU DSA, CCPA/CPRA, EU UCPD/CRD, and more).
+- **Evidence** — annotated screenshots, **network + cookie capture** (drip pricing, trackers,
+  httpOnly cookies), and per-finding regulatory citations.
+- **Guardrails** — respects robots.txt and per-domain scan rate limits.
+- **Dashboard** — server-rendered UI for scans, history, leaderboard, evidence, and reports.
 
-1. **Download and install** BrowserOS — [macOS](https://files.browseros.com/download/BrowserOS.dmg) · [Windows](https://files.browseros.com/download/BrowserOS_installer.exe) · [Linux (AppImage)](https://files.browseros.com/download/BrowserOS.AppImage) · [Linux (Debian)](https://cdn.browseros.com/download/BrowserOS.deb)
-2. **Import your Chrome data** (optional) — bookmarks, passwords, extensions all carry over
-3. **Connect your AI provider** — Claude, OpenAI, Gemini, ChatGPT Pro via OAuth, or local models via Ollama/LM Studio
+## Demo
 
-## Features
+Every finding is paired with visible proof. A scan report shows the trust grade, a severity
+breakdown, the detected patterns grouped by category, the offending evidence, and the exact
+regulation each pattern violates:
 
-| Feature | Description | Docs |
-|---------|-------------|------|
-| **AI Agent** | 53+ browser automation tools — navigate, click, type, extract data, all with natural language | [Guide](https://docs.browseros.com/getting-started) |
-| **MCP Server** | Control the browser from Claude Code, Gemini CLI, or any MCP client | [Setup](https://docs.browseros.com/features/use-with-claude-code) |
-| **Workflows** | Build repeatable browser automations with a visual graph builder | [Docs](https://docs.browseros.com/features/workflows) |
-| **Cowork** | Combine browser automation with local file operations — research the web, save reports to your folder | [Docs](https://docs.browseros.com/features/cowork) |
-| **Scheduled Tasks** | Run agents on autopilot — daily, hourly, or every few minutes | [Docs](https://docs.browseros.com/features/scheduled-tasks) |
-| **Memory** | Persistent memory across conversations — your assistant remembers context over time | [Docs](https://docs.browseros.com/features/memory) |
-| **SOUL.md** | Define your AI's personality and instructions in a single markdown file | [Docs](https://docs.browseros.com/features/soul-md) |
-| **LLM Hub** | Compare Claude, ChatGPT, and Gemini responses side-by-side on any page | [Docs](https://docs.browseros.com/features/llm-chat-hub) |
-| **40+ App Integrations** | Gmail, Slack, GitHub, Linear, Notion, Figma, Salesforce, and more via MCP | [Docs](https://docs.browseros.com/features/connect-apps) |
-| **Vertical Tabs** | Side-panel tab management — stay organized even with 100+ tabs open | [Docs](https://docs.browseros.com/features/vertical-tabs) |
-| **Ad Blocking** | uBlock Origin + Manifest V2 support — [10x more protection](https://docs.browseros.com/features/ad-blocking) than Chrome | [Docs](https://docs.browseros.com/features/ad-blocking) |
-| **Cloud Sync** | Sync browser config and agent history across devices | [Docs](https://docs.browseros.com/features/sync) |
-| **Skills** | Custom instruction sets that shape how your AI assistant behaves | [Docs](https://docs.browseros.com/features/skills) |
-| **Smart Nudges** | Contextual suggestions to connect apps and use features at the right moment | [Docs](https://docs.browseros.com/features/smart-nudges) |
+![Scan report with evidence and regulatory mapping](docs/images/scan-report.png)
 
-## Demos
+Run a full audit with **fixed or auto-discovered** workflows, and optionally **watch the
+headless browser live** while it works:
 
-### BrowserOS agent in action
-[![BrowserOS agent in action](docs/videos/browserOS-agent-in-action.gif)](https://www.youtube.com/watch?v=SoSFev5R5dI)
-<br/><br/>
+![Audit page with auto-discover and watch-live](docs/images/audit.png)
 
-### Install [BrowserOS as MCP](https://docs.browseros.com/features/use-with-claude-code) and control it from `claude-code`
+Deep Scans record a **session video** of the whole automated browse alongside the annotated
+per-step screenshots and a downloadable PDF:
 
-https://github.com/user-attachments/assets/c725d6df-1a0d-40eb-a125-ea009bf664dc
+![Deep Scan report with session recording](docs/images/deep-scan.png)
 
-<br/><br/>
+## Quick start
 
-### Use BrowserOS to chat
-
-https://github.com/user-attachments/assets/726803c5-8e36-420e-8694-c63a2607beca
-
-<br/><br/>
-
-### Use BrowserOS to scrape data
-
-https://github.com/user-attachments/assets/9f038216-bc24-4555-abf1-af2adcb7ebc0
-
-<br/><br/>
-
-## Install `browseros-cli`
-
-Use `browseros-cli` to launch and control BrowserOS from the terminal or from AI coding agents like Claude Code.
-
-**macOS / Linux:**
+Prereqs: [Bun](https://bun.sh) ≥ 1.3.6.
 
 ```bash
-curl -fsSL https://cdn.browseros.com/cli/install.sh | bash
+bun install                              # from the repo root
+bunx puppeteer browsers install chrome   # one-time: download Chromium for Puppeteer
+bun run start                            # serves http://localhost:9200/trusten
 ```
 
-**Windows:**
+Optional — set an LLM key to enable hybrid detection, smarter Deep Scan navigation, and agentic
+discovery: `TRUSTEN_LLM_PROVIDER` + `NVIDIA_NIM_API_KEY`, or `TRUSTEN_GEMINI_API_KEY` /
+`GEMINI_API_KEY`, or run Ollama locally. Without a key, deterministic detection and the
+fixed-workflow fallback still run. See [docs/development.md](docs/development.md).
 
-```powershell
-irm https://cdn.browseros.com/cli/install.ps1 | iex
-```
+**Extension:** load `apps/trusten-ext/` unpacked in Chrome (`chrome://extensions` → Developer
+mode → Load unpacked) to Quick Scan the page you're viewing.
 
-After install, run `browseros-cli init` to connect the CLI to your running BrowserOS instance.
+## Documentation
 
-## LLM Providers
+- [Architecture](docs/architecture.md) — components and the one seam to the browser
+- [Scanning](docs/scanning.md) — Quick/Deep Scan, workflows, agentic discovery, watch-live, caching
+- [Detection](docs/detection.md) — analyzers, categories, scoring, regulatory mapping
+- [API](docs/api.md) — HTTP + WebSocket endpoints
+- [Browser extension](docs/extension.md)
+- [Development](docs/development.md) — setup, configuration, scripts, conventions
 
-BrowserOS works with any LLM. Bring your own keys, use OAuth, or run models locally.
+The full product spec lives in `Trusten_PRD.docx`.
 
-| Provider | Type | Auth |
-|----------|------|------|
-| Kimi K2.5 | Cloud (default) | Built-in |
-| ChatGPT Pro/Plus | Cloud | [OAuth](https://docs.browseros.com/features/chatgpt) |
-| GitHub Copilot | Cloud | [OAuth](https://docs.browseros.com/features/github-copilot) |
-| Qwen Code | Cloud | [OAuth](https://docs.browseros.com/features/qwen-code) |
-| Claude (Anthropic) | Cloud | API key |
-| GPT-4o / o3 (OpenAI) | Cloud | API key |
-| Gemini (Google) | Cloud | API key |
-| Azure OpenAI | Cloud | API key |
-| AWS Bedrock | Cloud | IAM credentials |
-| OpenRouter | Cloud | API key |
-| Ollama | Local | [Setup](https://docs.browseros.com/features/ollama) |
-| LM Studio | Local | [Setup](https://docs.browseros.com/features/lm-studio) |
-
-## How We Compare
-
-| | BrowserOS | Chrome | Brave | Dia | Comet | Atlas |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Open Source | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| AI Agent | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| MCP Server | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Visual Workflows | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Cowork (files + browser) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Scheduled Tasks | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Bring Your Own Keys | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Local Models (Ollama) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Local-first Privacy | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Ad Blocking (MV2) | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
-
-**Detailed comparisons:**
-- [BrowserOS vs Chrome DevTools MCP](https://docs.browseros.com/comparisons/chrome-devtools-mcp) — developer-focused comparison for browser automation
-- [BrowserOS vs Claude Cowork](https://docs.browseros.com/comparisons/claude-cowork) — getting real work done with AI
-- [BrowserOS vs OpenClaw](https://docs.browseros.com/comparisons/openclaw) — everyday AI assistance
-
-## Architecture
-
-BrowserOS is a monorepo with two main subsystems: the **browser** (Chromium fork) and the **agent platform** (TypeScript/Go).
+## Architecture at a glance
 
 ```
-BrowserOS/
-├── packages/browseros/              # Chromium fork + build system (Python)
-│   ├── chromium_patches/            # Patches applied to Chromium source
-│   ├── build/                       # Build CLI and modules
-│   └── resources/                   # Icons, entitlements, signing
-│
-├── packages/browseros-agent/        # Agent platform (TypeScript/Go)
-│   ├── apps/
-│   │   ├── server/                  # MCP server + AI agent loop (Bun)
-│   │   ├── agent/                   # Browser extension UI (WXT + React)
-│   │   ├── cli/                     # CLI tool (Go)
-│   │   ├── eval/                    # Benchmark framework
-│   │   └── controller-ext/          # Chrome API bridge extension
-│   │
-│   └── packages/
-│       ├── agent-sdk/               # Node.js SDK (npm: @browseros-ai/agent-sdk)
-│       ├── cdp-protocol/            # CDP type bindings
-│       └── shared/                  # Shared constants
+apps/
+  server/          Trusten API + dashboard + headless scan engine (TS / Bun / Hono / SQLite)
+  trusten-ext/     Chrome MV3 extension (Quick Scan popup + on-page highlight overlay)
+packages/
+  shared/          shared constants/types
 ```
 
-| Package | What it does |
-|---------|-------------|
-| [`packages/browseros`](packages/browseros/) | Chromium fork — patches, build system, signing |
-| [`apps/server`](packages/browseros-agent/apps/server/) | Bun server exposing 53+ MCP tools and running the AI agent loop |
-| [`apps/agent`](packages/browseros-agent/apps/agent/) | Browser extension — new tab, side panel chat, onboarding, settings |
-| [`apps/cli`](packages/browseros-agent/apps/cli/) | Go CLI — control BrowserOS from the terminal or AI coding agents |
-| [`apps/eval`](packages/browseros-agent/apps/eval/) | Benchmark framework — WebVoyager, Mind2Web evaluation |
-| [`agent-sdk`](packages/browseros-agent/packages/agent-sdk/) | Node.js SDK for browser automation with natural language |
-| [`cdp-protocol`](packages/browseros-agent/packages/cdp-protocol/) | Type-safe Chrome DevTools Protocol bindings |
-
-## Contributing
-
-We'd love your help making BrowserOS better! See our [Contributing Guide](CONTRIBUTING.md) for details.
-
-- [Report bugs](https://github.com/browseros-ai/BrowserOS/issues)
-- [Suggest features](https://github.com/browseros-ai/BrowserOS/issues/99)
-- [Join Discord](https://discord.gg/YKwjt5vuKr) · [Join Slack](https://dub.sh/browserOS-slack)
-- [Follow on Twitter](https://x.com/browserOS_ai)
-
-**Agent development** (TypeScript/Go) — see the [agent monorepo README](packages/browseros-agent/README.md) for setup instructions.
-
-**Browser development** (C++/Python) — requires ~100GB disk space. See [`packages/browseros`](packages/browseros/) for build instructions.
-
-## Credits
-
-- [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) — BrowserOS uses some patches for enhanced privacy. Thanks to everyone behind this project!
-- [The Chromium Project](https://www.chromium.org/) — at the core of BrowserOS, making it possible to exist in the first place.
-
-## License
-
-BrowserOS is open source under the [AGPL-3.0 license](LICENSE).
-
-Copyright &copy; 2026 Felafax, Inc.
-
-## Stargazers
-
-Thank you to all our supporters!
-
-[![Star History Chart](https://api.star-history.com/svg?repos=browseros-ai/BrowserOS&type=Date)](https://www.star-history.com/#browseros-ai/BrowserOS&Date)
-
-<p align="center">
-Built with ❤️ from San Francisco
-</p>
+The single seam to the browser is `apps/server/src/trusten/browser/driver.ts` (`BrowserDriver`),
+implemented by `PuppeteerDriver`. (Playwright was the original choice but cannot launch under
+Bun — its pipe transport needs inherited fds Bun doesn't provide; Puppeteer's WebSocket
+transport works.) See [docs/architecture.md](docs/architecture.md).
