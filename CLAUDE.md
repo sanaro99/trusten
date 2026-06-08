@@ -9,3 +9,14 @@ When updating documentation that involves new screenshots or images:
 3. Example: `python scripts/save_clipboard.py docs/images/agent-step.png`
 
 This saves the clipboard image directly to the docs folder without manual file management.
+
+## Git Workflow
+
+Every major feature must be developed on its own branch off `main`:
+
+```bash
+git checkout main && git pull
+git checkout -b feat/<short-description>
+```
+
+Open a PR when ready; do not commit major features directly to `main`. The branch owner (user) reviews and merges.
