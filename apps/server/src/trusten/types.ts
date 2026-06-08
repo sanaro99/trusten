@@ -242,7 +242,7 @@ export interface AnalyzerResult {
 
 // ─── LLM Provider Config ───
 
-export type TrustenLLMProvider = 'nvidia-nim' | 'gemini' | 'ollama'
+export type TrustenLLMProvider = 'nvidia-nim' | 'gemini' | 'deepseek' | 'openrouter' | 'ollama'
 
 export interface TrustenLLMConfig {
   provider: TrustenLLMProvider
