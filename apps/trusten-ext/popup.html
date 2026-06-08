@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trusten</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 380px;
+      min-height: 120px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      background: #fff;
+      color: #1e293b;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: #0f172a;
+      padding: 14px 16px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-left { display: flex; align-items: center; gap: 9px; }
+    .logo-shield {
+      width: 28px; height: 28px; flex-shrink: 0;
+    }
+    .header-title { color: #fff; font-weight: 700; font-size: 15px; }
+    .header-sub { color: #64748b; font-size: 11px; margin-top: 1px; }
+    .header-link {
+      color: #475569; font-size: 11px; text-decoration: none;
+      padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;
+      transition: border-color .15s;
+    }
+    .header-link:hover { border-color: #64748b; color: #94a3b8; }
+
+    /* ── URL bar ── */
+    .url-bar {
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 9px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .url-bar svg { flex-shrink: 0; color: #94a3b8; }
+    .url-text {
+      font-size: 12px; color: #64748b;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1;
+    }
+
+    /* ── Idle state ── */
+    .idle-body {
+      padding: 24px 16px;
+      text-align: center;
+    }
+    .idle-body p {
+      color: #64748b; font-size: 12px; margin-bottom: 16px; line-height: 1.5;
+    }
+    .btn-scan {
+      width: 100%;
+      background: #0ea5e9;
+      color: #fff;
+      border: none;
+      padding: 11px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-scan:hover { background: #0284c7; }
+    .btn-scan:active { transform: scale(.98); }
+    .btn-scan:disabled { background: #94a3b8; cursor: default; transform: none; }
+
+    /* ── Loading state ── */
+    .loading-body {
+      padding: 28px 16px;
+      text-align: center;
+      display: none;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #0ea5e9;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-label { color: #64748b; font-size: 13px; }
+    .loading-hint { color: #94a3b8; font-size: 11px; margin-top: 4px; }
+
+    /* ── Error state ── */
+    .error-body {
+      padding: 20px 16px;
+      display: none;
+    }
+    .error-box {
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px;
+      padding: 14px;
+    }
+    .error-title { color: #dc2626; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+    .error-msg { color: #7f1d1d; font-size: 12px; line-height: 1.5; }
+    .btn-retry {
+      margin-top: 12px;
+      width: 100%;
+      background: #fff; color: #dc2626;
+      border: 1px solid #fca5a5; border-radius: 8px;
+      padding: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-retry:hover { background: #fef2f2; }
+
+    /* ── Results state ── */
+    .results-body { display: none; }
+
+    .score-band {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .grade-circle {
+      width: 56px; height: 56px; border-radius: 50%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      border: 3px solid;
+    }
+    .grade-letter { font-size: 24px; font-weight: 900; line-height: 1; }
+    .grade-num { font-size: 10px; color: #94a3b8; margin-top: 1px; }
+
+    .score-info { flex: 1; }
+    .score-domain { font-weight: 700; font-size: 14px; color: #1e293b; }
+    .score-summary { font-size: 11px; color: #64748b; line-height: 1.45; margin-top: 3px; }
+
+    .severity-badges {
+      padding: 8px 16px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .badge {
+      font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff;
+    }
+    .badge-critical { background: #dc2626; }
+    .badge-high { background: #ea580c; }
+    .badge-medium { background: #d97706; }
+    .badge-low { background: #16a34a; }
+    .badge-clean { background: #16a34a; }
+
+    /* ── Pattern list ── */
+    .patterns-header {
+      padding: 10px 16px 6px;
+      font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .patterns-list {
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .pattern-row {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f8fafc;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 10px;
+      align-items: start;
+    }
+    .pattern-row:last-child { border-bottom: none; }
+    .pattern-badge {
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      padding: 2px 6px; border-radius: 999px; color: #fff;
+      margin-top: 1px;
+    }
+    .pattern-right {}
+    .pattern-cat { font-weight: 600; font-size: 12px; color: #1e293b; }
+    .pattern-desc { font-size: 11px; color: #64748b; line-height: 1.4; margin-top: 2px; }
+    .pattern-reg { font-size: 10px; color: #94a3b8; margin-top: 2px; }
+    .no-patterns {
+      padding: 20px 16px; text-align: center; color: #16a34a; font-size: 13px;
+    }
+
+    /* ── Action bar ── */
+    .action-bar {
+      padding: 10px 12px;
+      border-top: 1px solid #f1f5f9;
+      display: flex;
+      gap: 8px;
+    }
+    .btn-annotate {
+      flex: 1;
+      background: #0f172a; color: #fff;
+      border: none; border-radius: 8px;
+      padding: 9px 12px; font-size: 12px; font-weight: 600;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+      transition: background .15s;
+    }
+    .btn-annotate:hover { background: #1e293b; }
+    .btn-annotate.active { background: #0ea5e9; }
+    .btn-dashboard {
+      background: #f8fafc; color: #475569;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 9px 12px; font-size: 12px; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-dashboard:hover { background: #f1f5f9; }
+
+    /* ── Scan again ── */
+    .btn-rescan {
+      width: 100%;
+      background: transparent; color: #94a3b8;
+      border: none; padding: 8px; font-size: 11px;
+      cursor: pointer; border-top: 1px solid #f1f5f9;
+    }
+    .btn-rescan:hover { color: #64748b; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 99px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <svg class="logo-shield" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 2L4 8v8c0 8.8 5.2 16.6 12 18 6.8-1.4 12-9.2 12-18V8L16 2z" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/>
+        <text x="16" y="22" text-anchor="middle" fill="#0ea5e9" font-weight="900" font-size="13" font-family="-apple-system,BlinkMacSystemFont,sans-serif">T</text>
+      </svg>
+      <div>
+        <div class="header-title">Trusten</div>
+        <div class="header-sub">Dark Pattern Scanner</div>
+      </div>
+    </div>
+    <a id="dashboardLink" href="http://localhost:9200/trusten/" target="_blank" class="header-link">Dashboard ↗</a>
+  </div>
+
+  <!-- URL bar -->
+  <div class="url-bar">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </svg>
+    <span class="url-text" id="urlText">Loading…</span>
+  </div>
+
+  <!-- Idle -->
+  <div class="idle-body" id="stateIdle">
+    <p>Analyze this page for manipulative design patterns using all 10 Trusten detectors.</p>
+    <button class="btn-scan" id="btnScan">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      Scan This Page
+    </button>
+  </div>
+
+  <!-- Loading -->
+  <div class="loading-body" id="stateLoading">
+    <div class="spinner"></div>
+    <div class="loading-label">Scanning for dark patterns…</div>
+    <div class="loading-hint">Analyzing DOM, text, and structure</div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-body" id="stateError">
+    <div class="error-box">
+      <div class="error-title" id="errorTitle">Could not connect to Trusten</div>
+      <div class="error-msg" id="errorMsg">Make sure BrowserOS is running, then try again.</div>
+    </div>
+    <button class="btn-retry" id="btnRetry">Try Again</button>
+  </div>
+
+  <!-- Results -->
+  <div class="results-body" id="stateResults">
+    <div class="score-band">
+      <div class="grade-circle" id="gradeCircle">
+        <span class="grade-letter" id="gradeLetter">—</span>
+        <span class="grade-num" id="gradeNum">—/100</span>
+      </div>
+      <div class="score-info">
+        <div class="score-domain" id="resultDomain">—</div>
+        <div class="score-summary" id="resultSummary">—</div>
+      </div>
+    </div>
+
+    <div class="severity-badges" id="severityBadges"></div>
+
+    <div class="patterns-header" id="patternsHeader">Detected Patterns</div>
+    <div class="patterns-list" id="patternsList"></div>
+
+    <div class="action-bar">
+      <button class="btn-annotate" id="btnAnnotate">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+        </svg>
+        Highlight on Page
+      </button>
+      <a class="btn-dashboard" id="btnFullReport" href="#" target="_blank">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
+        Full Report
+      </a>
+    </div>
+
+    <button class="btn-rescan" id="btnRescan">↺ Scan again</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
