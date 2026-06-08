@@ -17,15 +17,17 @@
 **/.wrangler/
 **/node_modules/
 
+# TypeScript / build artifacts
+**/*.tsbuildinfo
 
+# Logs
+**/*.log
 
-nxtscape-cli-access.json
-gclient.json
 .env
-.grove/
-**/resources/binaries/
+**/.env.*
+!**/.env.example
 
-packages/browseros/build/tools/
+.grove/
 
 # AI SDK DevTools traces
 .devtools/
