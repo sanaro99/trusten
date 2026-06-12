@@ -443,6 +443,22 @@ export class PuppeteerDriver implements BrowserDriver {
     return false
   }
 
+  async waitForIdle(
+    pageId: number,
+    opts?: { timeout?: number },
+  ): Promise<void> {
+    const { page } = this.entry(pageId)
+    try {
+      await page.waitForNetworkIdle({
+        idleTime: 500,
+        timeout: opts?.timeout ?? 6000,
+      })
+    } catch {
+      // Best-effort: a heavy page may never go fully idle within the budget —
+      // proceed with whatever has rendered rather than failing the step.
+    }
+  }
+
   async videoPath(pageId: number): Promise<string | null> {
     const e = this.pages.get(pageId)
     return e?.videoFile ?? null

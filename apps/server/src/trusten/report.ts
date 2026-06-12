@@ -485,13 +485,30 @@ export function generateReportHtml(
 
 // ─── Internal renderers ───
 
+const STEP_STATUS_STYLE: Record<string, [string, string, string]> = {
+  reached: ['Reached', '#15a05a', '#e9f6ef'],
+  observed: ['Observed', '#6d28d9', '#f1ecfb'],
+  'not-reached': ['Did not advance', '#e0651b', '#fbefe6'],
+  skipped: ['Skipped — prior step failed', '#8a8398', '#f1eee9'],
+  'no-navigation': ['Navigation unavailable', '#d23b34', '#fbeceb'],
+}
+
+function stepStatusBadge(step: WorkflowStep): string {
+  const s = step.status ? STEP_STATUS_STYLE[step.status] : undefined
+  if (!s) return ''
+  const title = step.navReason ? ` title="${escapeHtml(step.navReason)}"` : ''
+  return `<span${title} style="flex-shrink:0;align-self:flex-start;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:3px 9px;border-radius:999px;color:${s[1]};background:${s[2]}">${s[0]}</span>`
+}
+
 function renderStep(step: WorkflowStep): string {
+  const skipped = step.status === 'skipped' || step.status === 'no-navigation'
   const imgHtml = step.screenshot
     ? `<img class="step-img" src="data:image/jpeg;base64,${step.screenshot}" alt="Step ${step.stepNumber} screenshot">`
-    : `<div style="background:#f1f5f9;border-radius:8px;padding:20px;text-align:center;color:#94a3b8;font-size:12px;margin:12px 0">No screenshot captured</div>`
+    : `<div style="background:#f3f0e9;border-radius:8px;padding:20px;text-align:center;color:#9791a6;font-size:12px;margin:12px 0">${skipped ? escapeHtml(step.navReason || 'Step not performed') : 'No screenshot captured'}</div>`
 
-  const patternsHtml =
-    step.patternsFound.length === 0
+  const patternsHtml = skipped
+    ? `<div style="font-size:12px;color:#9791a6">${escapeHtml(step.navReason || 'This step was not performed, so nothing was analyzed here.')}</div>`
+    : step.patternsFound.length === 0
       ? `<div class="no-patterns">✓ No dark patterns detected at this step</div>`
       : step.patternsFound
           .slice(0, 6)
@@ -502,10 +519,11 @@ function renderStep(step: WorkflowStep): string {
 <div class="step">
   <div class="step-header">
     <div class="step-num">${step.stepNumber}</div>
-    <div>
+    <div style="flex:1">
       <div class="step-action">${escapeHtml(step.action)}</div>
       <div class="step-url">${escapeHtml(step.url)}</div>
     </div>
+    ${stepStatusBadge(step)}
   </div>
   ${imgHtml}
   <div class="step-patterns">${patternsHtml}</div>
