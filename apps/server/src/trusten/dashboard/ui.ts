@@ -1220,6 +1220,20 @@ function patternCard(p: DetectedPattern): string {
 </div>`
 }
 
+const STEP_STATUS_LABEL: Record<string, [string, string, string]> = {
+  reached: ['reached', '#15a05a', '#e9f6ef'],
+  observed: ['observed', '#6d28d9', '#f1ecfb'],
+  'not-reached': ['did not advance', '#e0651b', '#fbefe6'],
+  skipped: ['skipped', '#8a8398', '#f1eee9'],
+  'no-navigation': ['no navigation', '#d23b34', '#fbeceb'],
+}
+
+function stepStatusBadge(step: WorkflowStep): string {
+  const s = step.status ? STEP_STATUS_LABEL[step.status] : undefined
+  if (!s) return ''
+  return `<span class="sev" title="${esc(step.navReason ?? '')}" style="background:${s[2]};color:${s[1]}">${esc(s[0])}</span>`
+}
+
 function workflowStepCard(
   scanId: string,
   step: WorkflowStep,
@@ -1243,10 +1257,11 @@ function workflowStepCard(
             <div class="text-sm font-bold" style="word-break:break-all;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(step.url)}</div>
             <div class="text-sm text-muted mt-8">${esc(step.action.slice(0, 180))}</div>
           </div>
-          <div class="flex gap-8" style="flex-shrink:0">
+          <div class="flex gap-8 items-center" style="flex-shrink:0">
+            ${stepStatusBadge(step)}
             ${critCount > 0 ? `<span class="sev" style="background:${SEVERITY_BG.critical};color:${SEVERITY_COLOR.critical}">${critCount} critical</span>` : ''}
             ${highCount > 0 ? `<span class="sev" style="background:${SEVERITY_BG.high};color:${SEVERITY_COLOR.high}">${highCount} high</span>` : ''}
-            ${stepPatterns.length === 0 ? `<span class="sev" style="background:${SEVERITY_BG.low};color:${SEVERITY_COLOR.low}">clean</span>` : ''}
+            ${stepPatterns.length === 0 && step.status !== 'skipped' && step.status !== 'no-navigation' ? `<span class="sev" style="background:${SEVERITY_BG.low};color:${SEVERITY_COLOR.low}">clean</span>` : ''}
           </div>
         </div>
       </div>`

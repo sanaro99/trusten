@@ -134,6 +134,22 @@ export interface DarkPatternScore {
 
 // ─── Workflow ───
 
+/**
+ * Outcome of a workflow step's navigation, so the report never presents a
+ * non-journey as a journey:
+ *  - reached       expected to advance and did (URL/DOM changed)
+ *  - observed      did not need to advance (e.g. inspect the current page)
+ *  - not-reached   expected to advance but the page did not change
+ *  - skipped       an earlier funnel step failed, so this dependent step was skipped
+ *  - no-navigation no LLM configured and no deterministic fallback to attempt
+ */
+export type WorkflowStepStatus =
+  | 'reached'
+  | 'observed'
+  | 'not-reached'
+  | 'skipped'
+  | 'no-navigation'
+
 export interface WorkflowStep {
   stepNumber: number
   action: string
@@ -142,6 +158,12 @@ export interface WorkflowStep {
   screenshotPath?: string // Absolute path to saved JPEG file
   patternsFound: DetectedPattern[]
   timestamp: string
+  /** Whether the step reached its target / advanced the journey. */
+  status?: WorkflowStepStatus
+  /** The page URL or DOM materially changed during this step. */
+  navAdvanced?: boolean
+  /** Human-readable explanation of the navigation outcome. */
+  navReason?: string
 }
 
 export interface WorkflowStepDefinition {
@@ -169,6 +191,14 @@ export interface WorkflowStepDefinition {
    */
   fillSearch?: string
   successCriteria?: string
+  /**
+   * Whether this step is expected to advance the journey (move to a new
+   * page/state). When true, a step that does not change the page is reported as
+   * `not-reached` and breaks the funnel for dependent steps. When false/omitted
+   * the step is treated as an in-place observation (e.g. inspect a cookie
+   * banner or a form on the current page).
+   */
+  expectsNavigation?: boolean
   timeout: number
   screenshotBefore: boolean
   screenshotAfter: boolean
