@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <path d="M64 8L16 32v32c0 29.3 19.5 56.7 48 64 28.5-7.3 48-34.7 48-64V32L64 8z" fill="#0f172a"/>
-  <path d="M64 14L22 36v28c0 26.2 17.5 50.4 42 57.3 24.5-6.9 42-31.1 42-57.3V36L64 14z" fill="#0ea5e9"/>
-  <text x="64" y="84" text-anchor="middle" fill="white" font-weight="900" font-size="52" font-family="-apple-system,BlinkMacSystemFont,sans-serif">T</text>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <path d="M64 10 18 28v32c0 31.6 19.2 55.6 46 64 26.8-8.4 46-32.4 46-64V28L64 10Z" fill="#1b1430"/>
+  <path d="M64 18 26 33v27c0 26.6 16 47.4 38 54.4 22-7 38-27.8 38-54.4V33L64 18Z" fill="url(#g)"/>
+  <path d="M46 64.5 58 76.5 84 49" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>
