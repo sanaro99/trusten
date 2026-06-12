@@ -20,23 +20,23 @@ let overlayActive = false
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const SEV_COLOR = {
-  critical: '#dc2626',
-  high: '#ea580c',
-  medium: '#d97706',
-  low: '#16a34a',
+  critical: '#d23b34',
+  high: '#e0651b',
+  medium: '#cf8a00',
+  low: '#15a05a',
 }
 const SEV_BG = {
-  critical: '#fef2f2',
-  high: '#fff7ed',
-  medium: '#fffbeb',
-  low: '#f0fdf4',
+  critical: '#fbeceb',
+  high: '#fbefe6',
+  medium: '#fbf3e0',
+  low: '#e9f6ef',
 }
 const GRADE_COLOR = {
-  A: '#16a34a',
-  B: '#65a30d',
-  C: '#d97706',
-  D: '#ea580c',
-  F: '#dc2626',
+  A: '#15a05a',
+  B: '#7d9b1f',
+  C: '#cf8a00',
+  D: '#e0651b',
+  F: '#d23b34',
 }
 const CAT_LABEL = {
   fake_urgency: 'Fake Urgency',
@@ -216,23 +216,23 @@ function __trustenInjectOverlay(
   }
 
   var SEV_COLOR = {
-    critical: '#dc2626',
-    high: '#ea580c',
-    medium: '#d97706',
-    low: '#16a34a',
+    critical: '#d23b34',
+    high: '#e0651b',
+    medium: '#cf8a00',
+    low: '#15a05a',
   }
   var SEV_BG = {
-    critical: '#fef2f2',
-    high: '#fff7ed',
-    medium: '#fffbeb',
-    low: '#f0fdf4',
+    critical: '#fbeceb',
+    high: '#fbefe6',
+    medium: '#fbf3e0',
+    low: '#e9f6ef',
   }
   var GRADE_COLOR = {
-    A: '#16a34a',
-    B: '#65a30d',
-    C: '#d97706',
-    D: '#ea580c',
-    F: '#dc2626',
+    A: '#15a05a',
+    B: '#7d9b1f',
+    C: '#cf8a00',
+    D: '#e0651b',
+    F: '#d23b34',
   }
   var CAT_LABEL = {
     fake_urgency: 'Fake Urgency',
@@ -358,13 +358,13 @@ function __trustenInjectOverlay(
   ].join(';')
 
   panel.innerHTML =
-    '<div style="background:#0f172a;padding:14px 16px;border-radius:16px 16px 0 0;flex-shrink:0">' +
+    '<div style="background:#1b1430;padding:14px 16px;border-radius:16px 16px 0 0;flex-shrink:0">' +
     '<div style="display:flex;justify-content:space-between;align-items:center">' +
     '<div>' +
     '<div style="display:flex;align-items:center;gap:8px">' +
-    '<svg width="18" height="18" viewBox="0 0 32 32" fill="none"><path d="M16 2L4 8v8c0 8.8 5.2 16.6 12 18 6.8-1.4 12-9.2 12-18V8L16 2z" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/><text x="16" y="22" text-anchor="middle" fill="#0ea5e9" font-weight="900" font-size="13" font-family="sans-serif">T</text></svg>' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5.5 3.4 9.7 8 11 4.6-1.3 8-5.5 8-11V5l-8-3Z" fill="#7c3aed"/><path d="m8.5 12 2.4 2.4L15.5 9.7" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>' +
     '<span style="color:#fff;font-weight:700;font-size:14px">Trusten</span>' +
-    '<span style="color:#475569;font-size:11px">dark pattern scan</span>' +
+    '<span style="color:#a99fc4;font-size:11px">dark pattern scan</span>' +
     '</div>' +
     '<div style="margin-top:4px">' +
     badgeSummary +
@@ -390,10 +390,10 @@ function __trustenInjectOverlay(
     '<div style="overflow-y:auto;flex:1">' +
     patternRows +
     '</div>' +
-    '<div style="padding:10px 14px;border-top:1px solid #f1f5f9;background:#f8fafc;border-radius:0 0 16px 16px;flex-shrink:0">' +
+    '<div style="padding:10px 14px;border-top:1px solid #f1f5f9;background:#faf9f6;border-radius:0 0 16px 16px;flex-shrink:0">' +
     '<a href="' +
     dashUrl +
-    '" target="_blank" style="display:block;text-align:center;background:#0f172a;color:#fff;text-decoration:none;font-size:12px;font-weight:600;padding:8px 12px;border-radius:8px">' +
+    '" target="_blank" style="display:block;text-align:center;background:#7c3aed;color:#fff;text-decoration:none;font-size:12px;font-weight:600;padding:9px 12px;border-radius:9px">' +
     'View full report in Trusten dashboard →' +
     '</a>' +
     '</div>'
@@ -495,7 +495,7 @@ async function runScan() {
     if (err instanceof TypeError && err.message.includes('fetch')) {
       showError(
         'Trusten server not running',
-        'Open BrowserOS to start the Trusten server, then try again.',
+        'Start the Trusten server (bun run start) on localhost:9200, then try again.',
       )
     } else {
       showError('Scan failed', err.message || String(err))

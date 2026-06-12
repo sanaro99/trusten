@@ -91,7 +91,9 @@ function getApiKey(provider: TrustenLLMProvider): string {
     case 'nvidia-nim':
       return process.env.NVIDIA_NIM_API_KEY ?? ''
     case 'gemini':
-      return process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
+      return (
+        process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
+      )
     case 'deepseek':
       return process.env.DEEPSEEK_API_KEY ?? ''
     case 'openrouter':
@@ -119,7 +121,8 @@ function resolveExplicitConfig(provider: TrustenLLMProvider): TrustenLLMConfig {
     case 'gemini':
       return {
         provider,
-        apiKey: process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY,
+        apiKey:
+          process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY,
         baseUrl: process.env.GEMINI_BASE_URL,
         model: process.env.GEMINI_MODEL,
       }
@@ -147,7 +150,9 @@ function resolveExplicitConfig(provider: TrustenLLMProvider): TrustenLLMConfig {
 }
 
 function resolveConfig(): TrustenLLMConfig {
-  const explicit = process.env.TRUSTEN_LLM_PROVIDER as TrustenLLMProvider | undefined
+  const explicit = process.env.TRUSTEN_LLM_PROVIDER as
+    | TrustenLLMProvider
+    | undefined
   if (explicit && explicit in PROVIDER_DEFAULTS) {
     return resolveExplicitConfig(explicit)
   }

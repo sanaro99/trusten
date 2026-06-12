@@ -11,18 +11,18 @@ import type { DetectedPattern, ScanResult, WorkflowStep } from './types'
 // ─── Severity styling ───
 
 const SEVERITY_COLOR: Record<string, string> = {
-  critical: '#dc2626',
-  high: '#ea580c',
-  medium: '#d97706',
-  low: '#65a30d',
+  critical: '#d23b34',
+  high: '#e0651b',
+  medium: '#cf8a00',
+  low: '#15a05a',
 }
 
 const GRADE_COLOR: Record<string, string> = {
-  A: '#16a34a',
-  B: '#65a30d',
-  C: '#d97706',
-  D: '#ea580c',
-  F: '#dc2626',
+  A: '#15a05a',
+  B: '#7d9b1f',
+  C: '#cf8a00',
+  D: '#e0651b',
+  F: '#d23b34',
 }
 
 // ─── Screenshot annotation ───
@@ -44,16 +44,16 @@ export function buildAnnotationScript(
 
   const badgeHtml = [
     critical.length
-      ? `<span style="background:#dc2626;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${critical.length} CRITICAL</span>`
+      ? `<span style="background:#d23b34;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${critical.length} CRITICAL</span>`
       : '',
     high.length
-      ? `<span style="background:#ea580c;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${high.length} HIGH</span>`
+      ? `<span style="background:#e0651b;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${high.length} HIGH</span>`
       : '',
     medium.length
-      ? `<span style="background:#d97706;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${medium.length} MEDIUM</span>`
+      ? `<span style="background:#cf8a00;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${medium.length} MEDIUM</span>`
       : '',
     low.length
-      ? `<span style="background:#65a30d;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${low.length} LOW</span>`
+      ? `<span style="background:#15a05a;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${low.length} LOW</span>`
       : '',
   ].join('')
 
@@ -82,19 +82,19 @@ export function buildAnnotationScript(
   const overlayHtml = `
 <div style="
   position:fixed;top:12px;right:12px;z-index:2147483647;
-  background:rgba(10,10,20,0.93);color:#f1f5f9;
-  border-radius:10px;padding:12px 16px;font-family:system-ui,sans-serif;
-  max-width:320px;box-shadow:0 4px 24px rgba(0,0,0,0.6);
-  border:1px solid rgba(255,255,255,0.12);line-height:1.4;
+  background:rgba(27,20,48,0.94);color:#f3f0fb;
+  border-radius:14px;padding:13px 17px;font-family:system-ui,sans-serif;
+  max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.55);
+  border:1px solid rgba(167,139,250,0.30);line-height:1.4;
 ">
-  <div style="font-size:10px;color:#94a3b8;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:6px">
+  <div style="font-size:10px;color:#a78bfa;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">
     TRUSTEN · Step ${stepNumber} of ${totalSteps}
   </div>
-  <div style="font-size:12px;color:#e2e8f0;margin-bottom:8px;font-weight:500">${actionText}</div>
+  <div style="font-size:12px;color:#e9e4f6;margin-bottom:8px;font-weight:500">${actionText}</div>
   <div>${patterns.length > 0 ? badgeHtml : ''}</div>
   ${topPatterns}
   ${noPatterns}
-  ${patterns.length > 4 ? `<div style="font-size:11px;color:#94a3b8;margin-top:4px">+${patterns.length - 4} more patterns</div>` : ''}
+  ${patterns.length > 4 ? `<div style="font-size:11px;color:#b3a9cf;margin-top:4px">+${patterns.length - 4} more patterns</div>` : ''}
 </div>`
 
   // Inject the overlay — return the element ID for type-safe cleanup
@@ -134,23 +134,23 @@ export function buildLiveAnnotationScript(
   serverPort = 9200,
 ): string {
   const GRADE_COLORS: Record<string, string> = {
-    A: '#16a34a',
-    B: '#65a30d',
-    C: '#d97706',
-    D: '#ea580c',
-    F: '#dc2626',
+    A: '#15a05a',
+    B: '#7d9b1f',
+    C: '#cf8a00',
+    D: '#e0651b',
+    F: '#d23b34',
   }
   const SEV_COLORS: Record<string, string> = {
-    critical: '#dc2626',
-    high: '#ea580c',
-    medium: '#d97706',
-    low: '#16a34a',
+    critical: '#d23b34',
+    high: '#e0651b',
+    medium: '#cf8a00',
+    low: '#15a05a',
   }
   const SEV_BG: Record<string, string> = {
-    critical: '#fef2f2',
-    high: '#fff7ed',
-    medium: '#fffbeb',
-    low: '#f0fdf4',
+    critical: '#fbeceb',
+    high: '#fbefe6',
+    medium: '#fbf3e0',
+    low: '#e9f6ef',
   }
   const CAT_LABELS: Record<string, string> = {
     fake_urgency: 'Fake Urgency',
@@ -293,13 +293,13 @@ export function buildLiveAnnotationScript(
   ].join(';');
 
   panel.innerHTML = [
-    '<div style="background:#0f172a;padding:14px 16px;border-radius:16px 16px 0 0;flex-shrink:0">',
+    '<div style="background:#1b1430;padding:14px 16px;border-radius:16px 16px 0 0;flex-shrink:0">',
       '<div style="display:flex;justify-content:space-between;align-items:center">',
         '<div>',
           '<div style="display:flex;align-items:center;gap:8px">',
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#0ea5e9" stroke-width="2"/><path d="M12 7v5l3 3" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round"/></svg>',
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5.5 3.4 9.7 8 11 4.6-1.3 8-5.5 8-11V5l-8-3Z" fill="#7c3aed"/><path d="m8.5 12 2.4 2.4L15.5 9.7" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
             '<span style="color:#fff;font-weight:700;font-size:14px">Trusten</span>',
-            '<span style="color:#475569;font-size:11px;font-weight:500">dark pattern scan</span>',
+            '<span style="color:#a99fc4;font-size:11px;font-weight:500">dark pattern scan</span>',
           '</div>',
           '<div style="margin-top:4px">' + badgeSummary + '</div>',
         '</div>',
@@ -313,8 +313,8 @@ export function buildLiveAnnotationScript(
       '</div>',
     '</div>',
     '<div style="overflow-y:auto;flex:1">' + patternRows + '</div>',
-    '<div style="padding:10px 14px;border-top:1px solid #f1f5f9;background:#f8fafc;border-radius:0 0 16px 16px;flex-shrink:0">',
-      '<a href="' + dashUrl + '" target="_blank" style="display:block;text-align:center;background:#0f172a;color:#fff;text-decoration:none;font-size:12px;font-weight:600;padding:8px 12px;border-radius:8px">',
+    '<div style="padding:10px 14px;border-top:1px solid #f1f5f9;background:#faf9f6;border-radius:0 0 16px 16px;flex-shrink:0">',
+      '<a href="' + dashUrl + '" target="_blank" style="display:block;text-align:center;background:#7c3aed;color:#fff;text-decoration:none;font-size:12px;font-weight:600;padding:9px 12px;border-radius:9px">',
         'View full report in Trusten dashboard →',
       '</a>',
     '</div>',
@@ -368,66 +368,71 @@ export function generateReportHtml(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Trusten Report — ${escapeHtml(result.domain)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
-  body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #1e293b; font-size: 14px; line-height: 1.6 }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #faf9f6; color: #211c2e; font-size: 14px; line-height: 1.6 }
+  h1, h2, h3, .domain, .grade { font-family: 'Fraunces', Georgia, 'Times New Roman', serif; letter-spacing: -0.01em }
   .page { max-width: 960px; margin: 0 auto; padding: 32px 24px }
   /* Header */
-  .header { background: #0f172a; color: #f8fafc; border-radius: 12px; padding: 28px 32px; margin-bottom: 24px }
-  .header-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px }
-  .logo { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #94a3b8; margin-bottom: 6px }
-  .domain { font-size: 22px; font-weight: 700; word-break: break-all }
-  .url { font-size: 12px; color: #64748b; margin-top: 4px; word-break: break-all }
-  .meta { font-size: 11px; color: #64748b; margin-top: 8px }
+  .header { background: #1b1430; color: #f3f0fb; border-radius: 16px; padding: 30px 34px; margin-bottom: 22px; position: relative; overflow: hidden }
+  .header::before { content: ''; position: absolute; inset: 0; background: radial-gradient(420px 260px at 90% -20%, rgba(139,92,246,.38), transparent 60%); pointer-events: none }
+  .header-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; position: relative }
+  .logo { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #a78bfa; margin-bottom: 8px }
+  .domain { font-size: 24px; font-weight: 600; word-break: break-all }
+  .url { font-size: 12px; color: #9d92bd; margin-top: 4px; word-break: break-all }
+  .meta { font-size: 11px; color: #9d92bd; margin-top: 8px }
   /* Score card */
-  .score-card { display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 16px 20px }
-  .grade { font-size: 48px; font-weight: 900; line-height: 1; color: ${gradeColor} }
+  .score-card { display: flex; align-items: center; gap: 14px; background: rgba(167,139,250,0.10); border: 1px solid rgba(167,139,250,0.18); border-radius: 12px; padding: 16px 22px }
+  .grade { font-size: 50px; font-weight: 600; line-height: 1; color: ${gradeColor} }
   .score-details { }
-  .score-num { font-size: 20px; font-weight: 700; color: #f1f5f9 }
-  .score-label { font-size: 11px; color: #94a3b8; margin-top: 2px }
+  .score-num { font-size: 20px; font-weight: 700; color: #f3f0fb; font-family: 'Fraunces', Georgia, serif }
+  .score-label { font-size: 11px; color: #9d92bd; margin-top: 2px }
   /* Severity bar */
-  .severity-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px }
-  .sev-pill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600 }
-  .sev-critical { background: #fef2f2; color: #dc2626 }
-  .sev-high     { background: #fff7ed; color: #ea580c }
-  .sev-medium   { background: #fffbeb; color: #d97706 }
-  .sev-low      { background: #f0fdf4; color: #16a34a }
+  .severity-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; position: relative }
+  .sev-pill { display: flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 999px; font-size: 12px; font-weight: 600 }
+  .sev-critical { background: #fbeceb; color: #d23b34 }
+  .sev-high     { background: #fbefe6; color: #e0651b }
+  .sev-medium   { background: #fbf3e0; color: #cf8a00 }
+  .sev-low      { background: #e9f6ef; color: #15a05a }
   /* Section */
-  .section { background: #fff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 24px; margin-bottom: 20px }
-  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9 }
+  .section { background: #fff; border-radius: 14px; border: 1px solid #e9e3d8; padding: 26px; margin-bottom: 18px }
+  .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6c6577; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid #efeae0 }
   /* Workflow step */
-  .step { margin-bottom: 28px; padding-bottom: 28px; border-bottom: 1px solid #f1f5f9 }
+  .step { margin-bottom: 28px; padding-bottom: 28px; border-bottom: 1px solid #efeae0 }
   .step:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none }
-  .step-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
-  .step-num { width: 28px; height: 28px; border-radius: 50%; background: #0f172a; color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
-  .step-action { font-size: 13px; font-weight: 600; color: #334155 }
-  .step-url { font-size: 11px; color: #94a3b8; margin-top: 2px; word-break: break-all }
-  .step-img { width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; display: block; margin: 12px 0 }
+  .step-header { display: flex; align-items: center; gap: 11px; margin-bottom: 12px }
+  .step-num { width: 30px; height: 30px; border-radius: 50%; background: #7c3aed; color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: 'Fraunces', Georgia, serif }
+  .step-action { font-size: 13px; font-weight: 600; color: #3a3349 }
+  .step-url { font-size: 11px; color: #9791a6; margin-top: 2px; word-break: break-all }
+  .step-img { width: 100%; border-radius: 10px; border: 1px solid #e9e3d8; display: block; margin: 12px 0 }
   .step-patterns { margin-top: 10px }
-  .no-patterns { font-size: 12px; color: #16a34a; font-weight: 500 }
+  .no-patterns { font-size: 12px; color: #15a05a; font-weight: 600 }
   /* Pattern item */
-  .pattern { padding: 12px; border-radius: 8px; border-left: 3px solid; margin-bottom: 10px; background: #fafafa }
-  .pattern-critical { border-color: #dc2626 }
-  .pattern-high     { border-color: #ea580c }
-  .pattern-medium   { border-color: #d97706 }
-  .pattern-low      { border-color: #65a30d }
-  .pattern-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px }
-  .pattern-sev { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border-radius: 999px; color: #fff }
-  .pattern-sev-critical { background: #dc2626 }
-  .pattern-sev-high     { background: #ea580c }
-  .pattern-sev-medium   { background: #d97706 }
-  .pattern-sev-low      { background: #65a30d }
-  .pattern-category { font-size: 11px; color: #64748b; font-weight: 500 }
-  .pattern-desc { font-size: 13px; color: #334155; margin-bottom: 6px }
-  .pattern-evidence { font-size: 11px; color: #64748b; background: #f1f5f9; padding: 6px 10px; border-radius: 4px; font-family: monospace; word-break: break-word }
-  .pattern-regs { margin-top: 6px; font-size: 10px; color: #94a3b8 }
-  .confidence { font-size: 10px; color: #94a3b8; margin-left: auto }
+  .pattern { padding: 13px 15px; border-radius: 10px; border-left: 3px solid; margin-bottom: 10px; background: #faf8f4; border: 1px solid #efeae0 }
+  .pattern-critical { border-left-color: #d23b34 }
+  .pattern-high     { border-left-color: #e0651b }
+  .pattern-medium   { border-left-color: #cf8a00 }
+  .pattern-low      { border-left-color: #15a05a }
+  .pattern-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px }
+  .pattern-sev { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 8px; border-radius: 999px; color: #fff }
+  .pattern-sev-critical { background: #d23b34 }
+  .pattern-sev-high     { background: #e0651b }
+  .pattern-sev-medium   { background: #cf8a00 }
+  .pattern-sev-low      { background: #15a05a }
+  .pattern-category { font-size: 11px; color: #6c6577; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em }
+  .pattern-desc { font-size: 13px; color: #3a3349; margin-bottom: 6px }
+  .pattern-evidence { font-size: 11px; color: #5b5468; background: #f3f0e9; padding: 7px 11px; border-radius: 7px; font-family: ui-monospace, Menlo, monospace; word-break: break-word }
+  .pattern-regs { margin-top: 6px; font-size: 10px; color: #6d28d9; font-weight: 500 }
+  .confidence { font-size: 10px; color: #9791a6; margin-left: auto }
   /* Footer */
-  .footer { text-align: center; font-size: 11px; color: #94a3b8; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0 }
+  .footer { text-align: center; font-size: 11px; color: #9791a6; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e9e3d8 }
   @media print {
     body { background: #fff }
     .page { padding: 0 }
-    .section { break-inside: avoid; border: 1px solid #e2e8f0 }
+    .section { break-inside: avoid; border: 1px solid #e9e3d8 }
     .step { break-inside: avoid }
   }
 </style>
