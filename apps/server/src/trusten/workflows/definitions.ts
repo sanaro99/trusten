@@ -22,6 +22,8 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
   steps: [
     {
       id: 'find-product',
+      expectsNavigation: true,
+      fillSearch: 'shirt',
       instruction:
         'Find the site\'s main search or browse functionality and search for a popular product or service relevant to this site. For travel sites: search for a trip. For e-commerce: search for "shirt" or a common product. For streaming: look for a plan.',
       aiGoal:
@@ -38,6 +40,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'select-product',
+      expectsNavigation: true,
       instruction:
         'Select the first or cheapest product/flight/hotel from the results page and open its detail page.',
       aiGoal:
@@ -55,6 +58,14 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'add-to-cart',
+      expectsNavigation: true,
+      clickText: [
+        'add to cart',
+        'add to bag',
+        'add to basket',
+        'buy now',
+        'select',
+      ],
       instruction:
         'Add the product/flight/hotel to cart or initiate the booking. Note any pre-added extras, insurance, or add-ons.',
       aiGoal:
@@ -71,6 +82,8 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'cart-review',
+      expectsNavigation: true,
+      clickText: ['cart', 'basket', 'bag', 'view cart', 'your trip'],
       instruction:
         'Navigate to the cart or order summary page and review what is present.',
       aiGoal:
@@ -87,6 +100,8 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'checkout-start',
+      expectsNavigation: true,
+      clickText: ['proceed to checkout', 'checkout', 'continue', 'book now'],
       instruction:
         'Click Checkout or Proceed to Checkout and observe any new fees, charges, or pre-selected options that appear.',
       aiGoal:
@@ -112,6 +127,7 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
   steps: [
     {
       id: 'account-settings',
+      expectsNavigation: true,
       instruction: 'Navigate to the account or profile settings page.',
       aiGoal:
         'Find and click on the account settings, profile settings, or membership management area. Look for a user/account icon, avatar, "My Account", "Profile", "Account Settings", or similar in the header or navigation. Click it to open the account menu or settings page.',
@@ -123,6 +139,7 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'find-cancel',
+      expectsNavigation: true,
       instruction:
         'Look for a "Cancel subscription", "Cancel membership", "Delete account", or "Manage subscription" option.',
       aiGoal:
@@ -146,6 +163,7 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'cancel-flow',
+      expectsNavigation: true,
       instruction:
         'Begin the cancellation process and observe every retention tactic, guilt trip, and friction point.',
       aiGoal:
@@ -178,6 +196,7 @@ export const SIGNUP_WORKFLOW: ScanWorkflow = {
   steps: [
     {
       id: 'find-signup',
+      expectsNavigation: true,
       instruction: 'Click the Sign Up, Register, or Create Account button.',
       aiGoal:
         'Find and click the "Sign Up", "Register", "Create Account", "Join", "Join free", or "Get started" button or link. It is typically in the site header, hero section, or top navigation. After clicking, you should see a registration/signup form.',
@@ -256,6 +275,7 @@ export const COOKIE_CONSENT_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'reject-path',
+      expectsNavigation: true,
       instruction:
         'Click Manage Preferences, Cookie Settings, or the reject/opt-out path in the cookie banner.',
       aiGoal:
@@ -306,6 +326,7 @@ export const PRICING_WORKFLOW: ScanWorkflow = {
   steps: [
     {
       id: 'find-pricing',
+      expectsNavigation: true,
       instruction: 'Navigate to the pricing, plans, or upgrade page.',
       aiGoal:
         'Find and click on "Pricing", "Plans", "Upgrade", "Premium", "Subscribe", or "Membership" in the site navigation (usually in the header or footer). You should reach a page that shows different subscription tiers or pricing plans. If the site has no explicit pricing page but has a "Pro" or "Business" option, navigate there.',
@@ -344,6 +365,15 @@ export const PRICING_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'select-plan',
+      expectsNavigation: true,
+      clickText: [
+        'get started',
+        'choose',
+        'select plan',
+        'subscribe',
+        'buy now',
+        'upgrade',
+      ],
       instruction:
         'Click on the most expensive plan and observe what happens — extra charges, confusing terms.',
       aiGoal:
@@ -410,6 +440,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'signup-form',
+      expectsNavigation: true,
       instruction:
         'Find the signup or registration page and fill in the form using generated fake test credentials.',
       aiGoal:
@@ -444,6 +475,8 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'search-product',
+      expectsNavigation: true,
+      fillSearch: 'shirt',
       instruction:
         "Use the site's main search or browse to find a relevant product or service.",
       aiGoal:
@@ -460,6 +493,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'select-product',
+      expectsNavigation: true,
       instruction:
         'Select the first or cheapest result and open its detail page.',
       aiGoal:
@@ -477,6 +511,14 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'add-to-cart',
+      expectsNavigation: true,
+      clickText: [
+        'add to cart',
+        'add to bag',
+        'add to basket',
+        'buy now',
+        'select',
+      ],
       instruction:
         'Add the product to the cart and document any pre-added extras, insurance, or automatic add-ons.',
       aiGoal:
@@ -493,6 +535,8 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'cart-review',
+      expectsNavigation: true,
+      clickText: ['cart', 'basket', 'bag', 'view cart', 'your trip'],
       instruction:
         'Review the cart or order summary for unexpected items, hidden fees, or price changes from the product page.',
       aiGoal:
@@ -509,6 +553,8 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'checkout',
+      expectsNavigation: true,
+      clickText: ['proceed to checkout', 'checkout', 'continue', 'book now'],
       instruction:
         'Proceed to checkout and observe all new fees, pre-selected charges, and friction points.',
       aiGoal:

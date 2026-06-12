@@ -28,9 +28,14 @@ export interface NavigationAction {
 
 export interface NavigationResult {
   success: boolean
+  /** The page URL or DOM structure materially changed during this step. */
+  advanced: boolean
   stepsExecuted: number
+  startUrl: string
   finalUrl: string
   reason: string
+  /** Human-readable action summaries, used to give later steps journey context. */
+  actionLog: string[]
 }
 
 const SYSTEM_PROMPT = `You are a web navigation agent. Your job is to navigate a web page step by step to accomplish a goal.
@@ -71,55 +76,139 @@ Return ONLY valid JSON, no explanation outside it:
   "stuck": false
 }`
 
+/** Per-call LLM timeout for navigation — sequential & critical-path, so longer
+ * than the parallel analyzers' default. */
+const NAV_LLM_TIMEOUT_MS = Number(
+  process.env.TRUSTEN_NAV_LLM_TIMEOUT_MS ?? 20_000,
+)
+
 /**
- * Execute a natural language navigation goal using BrowserOS + LLM.
+ * Cheap page fingerprint used to decide whether an action actually moved the
+ * page. Combines the URL, title, first heading, and a coarse text-length
+ * bucket so a real navigation (homepage → results/product/cart) registers a
+ * change while incidental re-renders do not.
+ */
+async function pageSignature(
+  browser: BrowserDriver,
+  pageId: number,
+): Promise<{ url: string; sig: string }> {
+  const pages = await browser.listPages()
+  const url = pages.find((p) => p.pageId === pageId)?.url ?? ''
+  let sig = url
+  try {
+    const r = await browser.evaluate(
+      pageId,
+      `(function(){
+        var t=(document.title||'');
+        var h1=(document.querySelector('h1,h2')?document.querySelector('h1,h2').textContent:'').trim().slice(0,80);
+        var len=document.body?document.body.innerText.length:0;
+        return location.href+'|'+t+'|'+h1+'|'+Math.round(len/300);
+      })()`,
+    )
+    if (typeof r.value === 'string' && r.value) sig = r.value
+  } catch {
+    /* keep url-only signature */
+  }
+  return { url, sig }
+}
+
+/** One LLM hiccup must not abort a whole step — retry a couple of times. */
+async function completeWithRetry(
+  goal: string,
+  userPrompt: string,
+  attempts = 2,
+): Promise<string> {
+  const llm = getTrustenLLM()
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await llm.complete({
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.1,
+        maxTokens: 256,
+        timeoutMs: NAV_LLM_TIMEOUT_MS,
+      })
+    } catch (err) {
+      lastErr = err
+      logger.warn('Trusten AI navigator: LLM attempt failed', {
+        attempt: i + 1,
+        goal: goal.slice(0, 60),
+        error: String(err),
+      })
+      await sleep(500)
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}
+
+/**
+ * Execute a natural language navigation goal using the accessibility tree + LLM.
  *
- * @param browser  The Browser instance
- * @param pageId   Page to navigate
- * @param goal     Natural language goal e.g. "Search for flights Seattle to Delhi"
- * @param maxSteps Max LLM iterations before giving up
+ * @param browser       The Browser driver
+ * @param pageId        Page to navigate
+ * @param goal          Natural language goal e.g. "Search for flights Seattle to Delhi"
+ * @param maxSteps      Max LLM iterations before giving up
+ * @param priorContext  Action summaries from earlier steps, for journey continuity
  */
 export async function navigateWithAI(
   browser: BrowserDriver,
   pageId: number,
   goal: string,
   maxSteps = 10,
+  priorContext: string[] = [],
 ): Promise<NavigationResult> {
-  const llm = getTrustenLLM()
   const actionHistory: string[] = []
   let stepsExecuted = 0
+
+  const start = await pageSignature(browser, pageId)
+  let lastSig = start.sig
+  let noChangeCount = 0
 
   logger.info('Trusten AI navigator starting', {
     goal: goal.slice(0, 80),
     maxSteps,
+    startUrl: start.url,
+  })
+
+  const result = (
+    reason: string,
+    success: boolean,
+    end: { url: string; sig: string },
+  ): NavigationResult => ({
+    success,
+    advanced: end.sig !== start.sig,
+    stepsExecuted,
+    startUrl: start.url,
+    finalUrl: end.url,
+    reason,
+    actionLog: actionHistory,
   })
 
   for (let step = 0; step < maxSteps; step++) {
-    // Get current page state
     const pages = await browser.listPages()
-    const pageInfo = pages.find((p) => p.pageId === pageId)
-    const currentUrl = pageInfo?.url ?? ''
+    const currentUrl = pages.find((p) => p.pageId === pageId)?.url ?? ''
 
     // Get accessibility tree (what the agent sees)
     let accessibilityTree = ''
     try {
-      accessibilityTree = await browser.snapshot(pageId)
-      // Truncate to keep within token budget — keep the most interactive elements
-      accessibilityTree = truncateSnapshot(accessibilityTree, 3000)
+      accessibilityTree = truncateSnapshot(await browser.snapshot(pageId), 3500)
     } catch (err) {
       logger.warn('Trusten AI navigator: snapshot failed', {
         error: String(err),
       })
-      // Fall back to markdown if snapshot fails
       try {
-        accessibilityTree = await browser.contentAsMarkdown(pageId, {
-          viewportOnly: true,
-          includeLinks: true,
-          includeImages: false,
-        })
-        accessibilityTree = accessibilityTree.slice(0, 3000)
+        accessibilityTree = (
+          await browser.contentAsMarkdown(pageId, {
+            viewportOnly: true,
+            includeLinks: true,
+            includeImages: false,
+          })
+        ).slice(0, 3500)
       } catch {
-        break
+        return result('Page snapshot unavailable', false, start)
       }
     }
 
@@ -132,7 +221,7 @@ export async function navigateWithAI(
     const userPrompt = `GOAL: ${goal}
 
 CURRENT URL: ${currentUrl}
-
+${priorContext.length ? `\nEARLIER IN THIS JOURNEY:\n${priorContext.slice(-6).join('\n')}\n` : ''}
 RECENT ACTIONS (avoid repeating):
 ${actionHistory.slice(-4).join('\n') || '(none yet)'}
 
@@ -143,26 +232,20 @@ What single action should you take next to accomplish the goal?`
 
     let action: NavigationAction
     try {
-      const raw = await llm.complete({
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.1,
-        maxTokens: 256,
-      })
-
-      action = parseAction(raw)
+      action = parseAction(await completeWithRetry(goal, userPrompt))
     } catch (err) {
-      logger.warn('Trusten AI navigator: LLM call failed', {
+      logger.warn('Trusten AI navigator: LLM unavailable for step', {
         step,
         error: String(err),
       })
-      break
+      return result(`LLM unavailable: ${String(err).slice(0, 80)}`, false, {
+        url: currentUrl,
+        sig: lastSig,
+      })
     }
 
     stepsExecuted++
-    const actionSummary = `Step ${step + 1}: ${action.action}${action.elementId ? ` [${action.elementId}]` : ''}${action.value ? ` "${action.value.slice(0, 40)}"` : ''} — ${action.reasoning.slice(0, 80)}`
+    const actionSummary = `${action.action}${action.elementId ? ` [${action.elementId}]` : ''}${action.value ? ` "${action.value.slice(0, 40)}"` : ''} — ${action.reasoning.slice(0, 80)}`
     actionHistory.push(actionSummary)
 
     logger.info('Trusten AI navigator action', {
@@ -174,12 +257,11 @@ What single action should you take next to accomplish the goal?`
     })
 
     if (action.done || action.action === 'done') {
-      return {
-        success: true,
-        stepsExecuted,
-        finalUrl: currentUrl,
-        reason: `Goal accomplished: ${action.reasoning}`,
-      }
+      return result(
+        `Goal accomplished: ${action.reasoning}`,
+        true,
+        await pageSignature(browser, pageId),
+      )
     }
 
     if (action.stuck || action.action === 'stuck') {
@@ -187,19 +269,23 @@ What single action should you take next to accomplish the goal?`
         goal: goal.slice(0, 60),
         step,
       })
-      return {
-        success: false,
-        stepsExecuted,
-        finalUrl: currentUrl,
-        reason: `Stuck: ${action.reasoning}`,
-      }
+      return result(
+        `Stuck: ${action.reasoning}`,
+        false,
+        await pageSignature(browser, pageId),
+      )
     }
 
     // Execute the action
     try {
       await executeAction(browser, pageId, action)
-      // Wait for the page to react
-      await sleep(1200)
+      // Let SPA route changes / XHR settle before re-observing.
+      if (browser.waitForIdle) {
+        await browser
+          .waitForIdle(pageId, { timeout: 6000 })
+          .catch(() => undefined)
+      }
+      await sleep(700)
     } catch (err) {
       logger.warn('Trusten AI navigator: action execution failed', {
         action: action.action,
@@ -208,17 +294,31 @@ What single action should you take next to accomplish the goal?`
       })
       // Don't abort — try the next step anyway
     }
+
+    // No-progress detection: if several actions in a row change nothing, bail
+    // rather than burning the whole step budget on a dead end.
+    const sig = (await pageSignature(browser, pageId)).sig
+    if (sig === lastSig) {
+      noChangeCount++
+      if (noChangeCount >= 3) {
+        return result(
+          'No progress after repeated actions',
+          false,
+          await pageSignature(browser, pageId),
+        )
+      }
+    } else {
+      noChangeCount = 0
+      lastSig = sig
+    }
   }
 
-  const pages = await browser.listPages()
-  const finalUrl = pages.find((p) => p.pageId === pageId)?.url ?? ''
-
-  return {
-    success: false,
-    stepsExecuted,
-    finalUrl,
-    reason: `Reached max steps (${maxSteps}) without completing goal`,
-  }
+  const end = await pageSignature(browser, pageId)
+  return result(
+    `Reached max steps (${maxSteps}) without an explicit done`,
+    end.sig !== start.sig,
+    end,
+  )
 }
 
 async function executeAction(

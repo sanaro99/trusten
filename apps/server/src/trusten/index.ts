@@ -26,6 +26,7 @@ import { VisualAnalyzer } from './analyzers/visual'
 import type { BrowserDriver } from './browser/driver'
 import { cachePageFindings, getCachedPageFindings } from './db'
 import { publish } from './live/hub'
+import { getTrustenLLM } from './llm/client'
 import { calculateScore } from './scoring/engine'
 import type {
   AnalyzerContext,
@@ -34,6 +35,7 @@ import type {
   ScanResult,
   ScanWorkflow,
   WorkflowStep,
+  WorkflowStepStatus,
 } from './types'
 import { normalizeUrlKey } from './utils/url'
 
@@ -57,6 +59,25 @@ const ALL_ANALYZERS: BaseAnalyzer[] = [
 const ANALYZER_BY_NAME = new Map<string, BaseAnalyzer>(
   ALL_ANALYZERS.map((a) => [a.name, a]),
 )
+
+/**
+ * Collapse patterns that are effectively the same finding seen on the same page
+ * across multiple steps (keyed by category + severity + normalized URL +
+ * description prefix). Keeps the first occurrence. This prevents a page that was
+ * analyzed more than once — e.g. when a step did not advance — from inflating
+ * the score or the report.
+ */
+function dedupePatterns(patterns: DetectedPattern[]): DetectedPattern[] {
+  const seen = new Set<string>()
+  const out: DetectedPattern[] = []
+  for (const p of patterns) {
+    const key = `${p.category}|${p.severity}|${normalizeUrlKey(p.url ?? '')}|${(p.description ?? '').trim().slice(0, 120)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(p)
+  }
+  return out
+}
 
 // ─── Orchestrator ───
 
@@ -189,9 +210,27 @@ export class TrustenEngine {
         modalsDismissed,
       })
 
+      // Decide the navigation strategy once up front. LLM-primary: when a real
+      // LLM is configured we use the AI navigator; otherwise we fall back to
+      // deterministic actions, and where neither can act we report honestly
+      // rather than analyzing the homepage and pretending it was a journey.
+      const llmReady = getTrustenLLM().isConfigured()
+      const journeyLog: string[] = []
+      let funnelBroken = false
+      logger.info('Trusten deep scan navigation mode', {
+        llmReady,
+        mode: llmReady ? 'ai-primary' : 'deterministic-fallback',
+      })
+
       for (let i = 0; i < workflow.steps.length; i++) {
         const stepDef = workflow.steps[i]
         const stepNumber = i + 1
+        const expectsNav = stepDef.expectsNavigation === true
+        const hasDeterministic = !!(
+          stepDef.clickText?.length ||
+          stepDef.fillSearch ||
+          stepDef.navigate
+        )
 
         logger.info(
           `Trusten step ${stepNumber}/${workflow.steps.length}: ${stepDef.instruction.slice(0, 80)}`,
@@ -206,42 +245,100 @@ export class TrustenEngine {
           })
         }
 
-        // ── AI-driven navigation (primary) ──────────────────────────────
-        if (stepDef.aiGoal) {
-          // Resolve {{template}} variables (e.g. {{email}}, {{password}}) so
-          // signup steps receive real fake credentials at runtime.
+        const beforeUrl =
+          (await this.browser.listPages()).find((p) => p.pageId === pid)?.url ??
+          url
+
+        let status: WorkflowStepStatus | undefined
+        let navAdvanced = false
+        let navReason = ''
+
+        if (funnelBroken && expectsNav) {
+          // A prior funnel step never advanced — running this dependent step
+          // would just re-analyze the same (earlier) page. Skip it honestly.
+          status = 'skipped'
+          navReason =
+            'Skipped: an earlier funnel step did not advance, so this page was never reached'
+          logger.info(`Trusten step ${stepNumber} skipped`, {
+            reason: navReason,
+          })
+        } else if (llmReady && stepDef.aiGoal) {
+          // ── AI-driven navigation (primary) ────────────────────────────
           const resolvedGoal = resolveGoalTemplate(stepDef.aiGoal, fakeProfile)
           const navResult = await navigateWithAI(
             this.browser,
             pid,
             resolvedGoal,
             Math.min(Math.floor(stepDef.timeout / 4), 10),
+            journeyLog,
+          )
+          navAdvanced = navResult.advanced
+          navReason = navResult.reason
+          journeyLog.push(
+            `Step ${stepNumber} (${stepDef.id}): ${navResult.reason.slice(0, 100)}`,
           )
           logger.info(`Trusten step ${stepNumber} navigation result`, {
             success: navResult.success,
+            advanced: navResult.advanced,
             steps: navResult.stepsExecuted,
             url: navResult.finalUrl,
             reason: navResult.reason.slice(0, 80),
           })
-        } else {
-          // ── Fallback: deterministic navigation ───────────────────────
+        } else if (hasDeterministic) {
+          // ── Deterministic fallback (no LLM, or aiGoal-less step) ──────
           await this.executeStepNavigation(pid, stepDef, url)
+          navReason = llmReady
+            ? 'Deterministic navigation'
+            : 'Deterministic navigation (no LLM configured)'
+        } else {
+          // No LLM and no deterministic actions: cannot attempt this step.
+          status = 'no-navigation'
+          navReason =
+            'No LLM configured and no deterministic fallback for this step'
+          if (expectsNav) funnelBroken = true
+          logger.warn(`Trusten step ${stepNumber} has no way to navigate`, {
+            llmReady,
+          })
         }
 
-        // Allow page to settle after navigation
+        // Allow SPA route changes / XHR to settle after navigation.
+        if (this.browser.waitForIdle) {
+          await this.browser
+            .waitForIdle(pid, { timeout: 6000 })
+            .catch(() => undefined)
+        }
         await new Promise((r) => setTimeout(r, 800))
 
-        const context = await this.captureContext(pid)
-
-        const targetAnalyzers = stepDef.analyzersToRun
-          .map((name) => ANALYZER_BY_NAME.get(name))
-          .filter((a): a is BaseAnalyzer => a !== undefined)
-
-        const stepPatterns = await this.runAnalyzers(targetAnalyzers, context)
-        allPatterns.push(...stepPatterns)
-
         const pages = await this.browser.listPages()
-        const currentUrl = pages.find((p) => p.pageId === pid)?.url ?? url
+        const currentUrl = pages.find((p) => p.pageId === pid)?.url ?? beforeUrl
+        const urlChanged =
+          normalizeUrlKey(currentUrl) !== normalizeUrlKey(beforeUrl)
+        const advanced = navAdvanced || urlChanged
+
+        // Resolve the step's outcome status if not already decided.
+        if (status === undefined) {
+          if (!expectsNav) {
+            status = 'observed'
+          } else if (advanced) {
+            status = 'reached'
+          } else {
+            status = 'not-reached'
+            funnelBroken = true
+          }
+        }
+
+        // Only analyze when we actually navigated (or legitimately observed the
+        // current page). Skipped / no-navigation steps would just re-analyze an
+        // already-covered page and inflate duplicate findings.
+        let stepPatterns: DetectedPattern[] = []
+        if (status !== 'skipped' && status !== 'no-navigation') {
+          const context = await this.captureContext(pid)
+          const targetAnalyzers = stepDef.analyzersToRun
+            .map((name) => ANALYZER_BY_NAME.get(name))
+            .filter((a): a is BaseAnalyzer => a !== undefined)
+          stepPatterns = await this.runAnalyzers(targetAnalyzers, context)
+          allPatterns.push(...stepPatterns)
+        }
 
         // Cache this page's findings so a later Quick Scan of the same page can
         // surface them instantly.
@@ -329,16 +426,24 @@ export class TrustenEngine {
           screenshotPath,
           patternsFound: stepPatterns,
           timestamp: new Date().toISOString(),
+          status,
+          navAdvanced: advanced,
+          navReason,
         } as WorkflowStep & { screenshotPath: string })
 
         logger.info(`Trusten step ${stepNumber} done`, {
+          status,
           patternsFound: stepPatterns.length,
           url: currentUrl,
-          navigated: currentUrl !== url,
+          advanced,
         })
       }
 
-      const score = calculateScore(allPatterns)
+      // Collapse duplicate findings that the same page produced across steps
+      // (e.g. when a step did not advance) so a re-analyzed page can't inflate
+      // the score or clutter the report.
+      const dedupedPatterns = dedupePatterns(allPatterns)
+      const score = calculateScore(dedupedPatterns)
       const completedAt = new Date().toISOString()
 
       const result: ScanResult = {
@@ -348,7 +453,7 @@ export class TrustenEngine {
         scanType: 'deep',
         startedAt,
         completedAt,
-        patterns: allPatterns,
+        patterns: dedupedPatterns,
         score,
         workflowSteps,
       }

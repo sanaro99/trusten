@@ -93,6 +93,13 @@ export interface BrowserDriver {
   ): Promise<boolean>
 
   /**
+   * Best-effort wait until the page is network-idle. Used after a navigation
+   * action so SPA route changes settle before the next snapshot/screenshot.
+   * Optional — callers skip it when the driver does not implement it.
+   */
+  waitForIdle?(pageId: number, opts?: { timeout?: number }): Promise<void>
+
+  /**
    * Resolve the recorded session video path for a page (if `videoDir` was set
    * on `newPage`). Optional — drivers without recording return null/omit it.
    */

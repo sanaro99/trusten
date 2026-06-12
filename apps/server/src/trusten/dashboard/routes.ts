@@ -464,15 +464,27 @@ async function runAuditJob(
         scanIds.push(result.id)
         progress.completedWorkflows.push(workflow.id)
         updateAuditJob(jobId, { scanIds })
+        const steps = result.workflowSteps ?? []
+        const advancedCount = steps.filter(
+          (s) => s.status === 'reached' || s.status === 'observed',
+        ).length
+        const reachedFunnel = steps.some((s) => s.status === 'reached')
+        const funnelNote = steps.length
+          ? reachedFunnel
+            ? ` · navigated ${advancedCount}/${steps.length} steps`
+            : ` · could not navigate the journey (${advancedCount}/${steps.length} steps)`
+          : ''
         publish(jobId, {
           type: 'progress',
-          action: `Completed: ${workflow.name} (${result.patterns.length} patterns, grade ${result.score.grade})`,
+          action: `Completed: ${workflow.name} (${result.patterns.length} patterns, grade ${result.score.grade})${funnelNote}`,
           grade: result.score.grade,
         })
         logger.info('Trusten audit job: workflow complete', {
           jobId,
           workflowId: workflow.id,
           patterns: result.patterns.length,
+          advancedSteps: advancedCount,
+          totalSteps: steps.length,
         })
       } catch (err) {
         logger.warn('Trusten audit job: workflow failed', {

@@ -75,13 +75,32 @@ const LLM_TIMEOUT_MS = Number(process.env.TRUSTEN_LLM_TIMEOUT_MS ?? 8000)
 const UNREACHABLE_TTL_MS = 60_000
 const unreachableUntil = new Map<TrustenLLMProvider, number>()
 
+/**
+ * A single transient failure (e.g. one slow call during the ~11 parallel
+ * analyzer requests) must NOT disable a provider for a full minute — that
+ * would poison the deep scan that runs moments later. Only circuit-break a
+ * provider after this many consecutive failures; any success resets the count.
+ */
+const STRIKE_THRESHOLD = Number(process.env.TRUSTEN_LLM_STRIKES ?? 3)
+const failureStrikes = new Map<TrustenLLMProvider, number>()
+
 function isUnreachable(p: TrustenLLMProvider): boolean {
   const until = unreachableUntil.get(p)
   return until !== undefined && Date.now() < until
 }
 
 function markUnreachable(p: TrustenLLMProvider): void {
-  unreachableUntil.set(p, Date.now() + UNREACHABLE_TTL_MS)
+  const strikes = (failureStrikes.get(p) ?? 0) + 1
+  failureStrikes.set(p, strikes)
+  if (strikes >= STRIKE_THRESHOLD) {
+    unreachableUntil.set(p, Date.now() + UNREACHABLE_TTL_MS)
+  }
+}
+
+/** A successful call clears the circuit breaker and strike count. */
+function markReachable(p: TrustenLLMProvider): void {
+  failureStrikes.delete(p)
+  unreachableUntil.delete(p)
 }
 
 // ─── Credential helpers ───
@@ -182,6 +201,11 @@ export interface LLMCompletionOptions {
   maxTokens?: number
   /** Override the provider for this specific call */
   provider?: TrustenLLMProvider
+  /**
+   * Per-call HTTP timeout override (ms). Navigation calls are sequential and
+   * critical-path, so they pass a longer budget than the parallel analyzers.
+   */
+  timeoutMs?: number
 }
 
 interface ChatCompletionResponse {
@@ -216,6 +240,45 @@ export class TrustenLLMClient {
 
   get provider(): TrustenLLMProvider {
     return this.config.provider
+  }
+
+  /**
+   * Whether a usable LLM is configured: an explicitly-selected provider with
+   * credentials (or Ollama), or — in auto-detect mode — any cloud provider key.
+   * Note this reflects *configuration*, not live reachability; transient
+   * outages are handled by retries + the circuit breaker. The engine uses this
+   * to decide between AI-driven navigation and the deterministic fallback, and
+   * to report honestly when no LLM is available at all.
+   */
+  isConfigured(): boolean {
+    const explicit = process.env.TRUSTEN_LLM_PROVIDER as
+      | TrustenLLMProvider
+      | undefined
+    if (explicit && explicit in PROVIDER_DEFAULTS) {
+      return explicit === 'ollama' || hasCredentials(explicit)
+    }
+    // Auto-detect: only count a real cloud key as "configured". Falling back to
+    // local Ollama when nothing is set should NOT read as configured, since it
+    // usually is not running.
+    return FALLBACK_CHAIN.some((p) => p !== 'ollama' && hasCredentials(p))
+  }
+
+  /**
+   * Whether the configured model can accept images. Sending a screenshot to a
+   * text-only model (e.g. `meta/llama-3.1-70b-instruct`) returns a 400
+   * "not a multimodal model" — so visual analysis must fall back to text-only.
+   * Override with TRUSTEN_LLM_VISION=1/0; otherwise inferred from the model name.
+   */
+  supportsImages(): boolean {
+    const env = process.env.TRUSTEN_LLM_VISION?.toLowerCase()
+    if (env === '1' || env === 'true') return true
+    if (env === '0' || env === 'false') return false
+    const model = (
+      this.config.model ?? PROVIDER_DEFAULTS[this.config.provider].defaultModel
+    ).toLowerCase()
+    return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|qwen.*vl|multimodal/.test(
+      model,
+    )
   }
 
   /**
@@ -255,7 +318,7 @@ export class TrustenLLMClient {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+        signal: AbortSignal.timeout(options.timeoutMs ?? LLM_TIMEOUT_MS),
       })
 
       if (!response.ok) {
@@ -269,6 +332,7 @@ export class TrustenLLMClient {
         throw new Error('LLM response missing content')
       }
 
+      markReachable(provider)
       return data.choices[0].message.content
     } catch (error) {
       markUnreachable(provider)
@@ -336,8 +400,10 @@ ${params.domFragment ? `Relevant DOM fragment:\n${params.domFragment}` : ''}
 
 Analyze the above content and return your findings as JSON.`
 
-    // Include screenshot for visual analysis if provided
-    const userContent: LLMContentPart[] | string = params.screenshotBase64
+    // Include the screenshot only when the model can actually accept images —
+    // otherwise the request 400s and we lose the (still useful) text analysis.
+    const useImage = !!params.screenshotBase64 && this.supportsImages()
+    const userContent: LLMContentPart[] | string = useImage
       ? [
           { type: 'text', text: textContent },
           {
@@ -408,7 +474,7 @@ Analyze the above content and return your findings as JSON.`
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+        signal: AbortSignal.timeout(options.timeoutMs ?? LLM_TIMEOUT_MS),
       })
 
       if (!response.ok) {
@@ -423,6 +489,7 @@ Analyze the above content and return your findings as JSON.`
         throw new Error('Fallback LLM response missing content')
       }
 
+      markReachable(fallbackProvider)
       return data.choices[0].message.content
     } catch (error) {
       markUnreachable(fallbackProvider)
