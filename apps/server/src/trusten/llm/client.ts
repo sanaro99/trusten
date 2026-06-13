@@ -34,7 +34,7 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
   },
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'deepseek-v4-flash',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
   },
   openrouter: {
@@ -55,9 +55,9 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
 
 /** Auto-detect + fallback order when TRUSTEN_LLM_PROVIDER is not set */
 const FALLBACK_CHAIN: TrustenLLMProvider[] = [
+  'deepseek',
   'nvidia-nim',
   'gemini',
-  'deepseek',
   'openrouter',
   'ollama',
 ]
@@ -101,6 +101,38 @@ function markUnreachable(p: TrustenLLMProvider): void {
 function markReachable(p: TrustenLLMProvider): void {
   failureStrikes.delete(p)
   unreachableUntil.delete(p)
+}
+
+/**
+ * Models that have rejected image input at runtime (learned the first time a
+ * screenshot call 400s with a "not multimodal" error). Lets us attempt vision
+ * on e.g. deepseek-v4-flash once, then fall back to text-only for the session.
+ */
+const textOnlyModels = new Set<string>()
+
+function messagesHaveImage(messages: LLMMessage[]): boolean {
+  return messages.some(
+    (m) =>
+      Array.isArray(m.content) && m.content.some((c) => c.type === 'image_url'),
+  )
+}
+
+function stripImages(messages: LLMMessage[]): LLMMessage[] {
+  return messages.map((m) =>
+    Array.isArray(m.content)
+      ? {
+          ...m,
+          content: m.content.filter((c) => c.type !== 'image_url'),
+        }
+      : m,
+  )
+}
+
+/** Heuristic for "the model can't take images" given the provider's error text. */
+function isImageRejection(errorText: string): boolean {
+  return /multimodal|image input|image_url|vision|does not support image|not a multimodal/i.test(
+    errorText,
+  )
 }
 
 // ─── Credential helpers ───
@@ -276,7 +308,11 @@ export class TrustenLLMClient {
     const model = (
       this.config.model ?? PROVIDER_DEFAULTS[this.config.provider].defaultModel
     ).toLowerCase()
-    return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|qwen.*vl|multimodal/.test(
+    // Learned at runtime that this model rejects images → don't send them again.
+    if (textOnlyModels.has(model)) return false
+    // Attempt vision for known/likely multimodal models. DeepSeek V4 is included
+    // optimistically; if it rejects the image we cache it and fall back to text.
+    return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|qwen.*vl|multimodal|deepseek-v4/.test(
       model,
     )
   }
@@ -335,10 +371,23 @@ export class TrustenLLMClient {
       markReachable(provider)
       return data.choices[0].message.content
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      // The model can't accept images → cache that, drop the screenshot, and
+      // retry text-only once on the same provider (it is reachable, just text).
+      if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
+        textOnlyModels.add(model.toLowerCase())
+        logger.warn(
+          'Trusten LLM: model rejected image input, retrying text-only',
+          { provider, model },
+        )
+        return this.complete({
+          ...options,
+          messages: stripImages(options.messages),
+        })
+      }
       markUnreachable(provider)
       const next = this.nextInChain(provider)
       if (next) return this.tryFallback(options, next)
-      const msg = error instanceof Error ? error.message : String(error)
       logger.error('Trusten LLM request failed (all providers)', { error: msg })
       throw new Error(`Trusten LLM failed: ${msg}`)
     }
@@ -492,10 +541,22 @@ Analyze the above content and return your findings as JSON.`
       markReachable(fallbackProvider)
       return data.choices[0].message.content
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      // Fallback model can't accept images → cache + retry text-only once.
+      if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
+        textOnlyModels.add(defaults.defaultModel.toLowerCase())
+        logger.warn(
+          'Trusten LLM: fallback model rejected image input, retrying text-only',
+          { provider: fallbackProvider, model: defaults.defaultModel },
+        )
+        return this.tryFallback(
+          { ...options, messages: stripImages(options.messages) },
+          fallbackProvider,
+        )
+      }
       markUnreachable(fallbackProvider)
       const next = this.nextInChain(fallbackProvider)
       if (next) return this.tryFallback(options, next)
-      const msg = error instanceof Error ? error.message : String(error)
       throw new Error(`All LLM providers failed. Last error: ${msg}`)
     }
   }

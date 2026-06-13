@@ -25,96 +25,136 @@ const GRADE_COLOR: Record<string, string> = {
   F: '#d23b34',
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  fake_urgency: 'Fake Urgency',
+  fake_scarcity: 'Fake Scarcity',
+  fake_social_proof: 'Fake Social Proof',
+  confirmshaming: 'Confirmshaming',
+  trick_wording: 'Trick Wording',
+  visual_interference: 'Visual Interference',
+  basket_sneaking: 'Basket Sneaking',
+  drip_pricing: 'Drip Pricing',
+  bait_and_switch: 'Bait & Switch',
+  roach_motel: 'Roach Motel',
+  forced_continuity: 'Forced Continuity',
+  hard_to_cancel: 'Hard to Cancel',
+  forced_registration: 'Forced Registration',
+  forced_sharing: 'Forced Sharing',
+  gamification_pressure: 'Gamification',
+  preselected_options: 'Preselected Options',
+  hidden_defaults: 'Hidden Defaults',
+  repeated_prompts: 'Repeated Prompts',
+  disguised_ads: 'Disguised Ads',
+  comparison_prevention: 'Comparison Prevention',
+  information_hiding: 'Information Hiding',
+  privacy_zuckering: 'Privacy Zuckering',
+  cookie_wall: 'Cookie Wall',
+  dark_consent: 'Dark Consent',
+  fake_hierarchy: 'Fake Hierarchy',
+}
+
 // ─── Screenshot annotation ───
 
 /**
- * Returns a JS expression that injects a floating annotation panel onto the page.
- * Must be evaluated via browser.evaluate() before taking the step screenshot.
+ * Returns a JS expression that draws a labeled bounding box around each detected
+ * dark-pattern element, evaluated via browser.evaluate() right before the step
+ * screenshot. The box is colored by severity and labeled with the pattern
+ * category only — the full explanation lives in the report caption, not on the
+ * image. The most severe locatable element is scrolled into view first.
+ *
+ * `stepNumber`/`totalSteps`/`action` are kept for call-site compatibility; the
+ * step context is shown in the report, not painted onto the screenshot.
  */
 export function buildAnnotationScript(
-  stepNumber: number,
-  totalSteps: number,
-  action: string,
+  _stepNumber: number,
+  _totalSteps: number,
+  _action: string,
   patterns: DetectedPattern[],
 ): string {
-  const critical = patterns.filter((p) => p.severity === 'critical')
-  const high = patterns.filter((p) => p.severity === 'high')
-  const medium = patterns.filter((p) => p.severity === 'medium')
-  const low = patterns.filter((p) => p.severity === 'low')
+  const sevOrder: Record<string, number> = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+  }
+  const slim = [...patterns]
+    .sort((a, b) => (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9))
+    .slice(0, 8)
+    .map((p) => ({
+      cat:
+        CATEGORY_LABELS[p.category as string] ??
+        String(p.category).replace(/_/g, ' '),
+      sev: p.severity,
+      sel: p.element?.selector ?? '',
+      text: (p.element?.text ?? '').trim().slice(0, 48),
+    }))
 
-  const badgeHtml = [
-    critical.length
-      ? `<span style="background:#d23b34;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${critical.length} CRITICAL</span>`
-      : '',
-    high.length
-      ? `<span style="background:#e0651b;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${high.length} HIGH</span>`
-      : '',
-    medium.length
-      ? `<span style="background:#cf8a00;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${medium.length} MEDIUM</span>`
-      : '',
-    low.length
-      ? `<span style="background:#15a05a;color:#fff;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px">${low.length} LOW</span>`
-      : '',
-  ].join('')
+  const pJson = JSON.stringify(slim)
+  const sevJson = JSON.stringify(SEVERITY_COLOR)
 
-  const topPatterns = patterns
-    .sort((a, b) => {
-      const order = { critical: 0, high: 1, medium: 2, low: 3 }
-      return order[a.severity] - order[b.severity]
-    })
-    .slice(0, 4)
-    .map(
-      (p) =>
-        `<div style="margin-top:4px;font-size:11px;opacity:0.9">` +
-        `<span style="color:${SEVERITY_COLOR[p.severity] ?? '#aaa'};font-weight:600;text-transform:uppercase;font-size:10px">${p.severity}</span>` +
-        ` ${escapeHtml(p.description.slice(0, 70))}${p.description.length > 70 ? '…' : ''}` +
-        `</div>`,
-    )
-    .join('')
-
-  const noPatterns =
-    patterns.length === 0
-      ? `<div style="margin-top:6px;font-size:11px;color:#86efac">✓ No dark patterns detected at this step</div>`
-      : ''
-
-  const actionText = escapeHtml(action.slice(0, 80))
-
-  const overlayHtml = `
-<div style="
-  position:fixed;top:12px;right:12px;z-index:2147483647;
-  background:rgba(27,20,48,0.94);color:#f3f0fb;
-  border-radius:14px;padding:13px 17px;font-family:system-ui,sans-serif;
-  max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.55);
-  border:1px solid rgba(167,139,250,0.30);line-height:1.4;
-">
-  <div style="font-size:10px;color:#a78bfa;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">
-    TRUSTEN · Step ${stepNumber} of ${totalSteps}
-  </div>
-  <div style="font-size:12px;color:#e9e4f6;margin-bottom:8px;font-weight:500">${actionText}</div>
-  <div>${patterns.length > 0 ? badgeHtml : ''}</div>
-  ${topPatterns}
-  ${noPatterns}
-  ${patterns.length > 4 ? `<div style="font-size:11px;color:#b3a9cf;margin-top:4px">+${patterns.length - 4} more patterns</div>` : ''}
-</div>`
-
-  // Inject the overlay — return the element ID for type-safe cleanup
-  const escaped = JSON.stringify(overlayHtml)
   return `(function(){
-    var existing = document.getElementById('__trusten_overlay__');
-    if (existing) existing.remove();
-    var el = document.createElement('div');
-    el.id = '__trusten_overlay__';
-    el.innerHTML = ${escaped};
-    document.body.appendChild(el);
-    return '__trusten_overlay__';
+    try {
+      document.querySelectorAll('[data-trusten-box]').forEach(function(e){ e.remove(); });
+      var patterns = ${pJson};
+      var SEV = ${sevJson};
+      if (!patterns.length) return 'boxes:0';
+
+      function deepestMatch(needle){
+        needle = needle.toLowerCase();
+        var nodes = document.body ? document.body.querySelectorAll('*') : [];
+        var match = null;
+        for (var i=0;i<nodes.length;i++){
+          var el = nodes[i];
+          if ((el.textContent||'').toLowerCase().indexOf(needle) !== -1){
+            var r = el.getBoundingClientRect();
+            if (r.width>0 && r.height>0) match = el; /* keep deepest in tree order */
+          }
+        }
+        return match;
+      }
+      function locate(p){
+        if (p.sel){ try { var el=document.querySelector(p.sel); if(el) return el; } catch(e){} }
+        if (p.text && p.text.length>=4) return deepestMatch(p.text);
+        return null;
+      }
+
+      // Scroll the most severe locatable pattern into view so it is captured.
+      for (var s=0;s<patterns.length;s++){
+        var firstEl=locate(patterns[s]);
+        if (firstEl){ try{ firstEl.scrollIntoView({block:'center',inline:'nearest'}); }catch(e){} break; }
+      }
+
+      var vh = window.innerHeight || 800;
+      var drawn=0;
+      patterns.forEach(function(p){
+        if (drawn>=6) return;
+        var el=locate(p);
+        if(!el) return;
+        var r=el.getBoundingClientRect();
+        if(r.width<2||r.height<2) return;
+        if(r.bottom<0 || r.top>vh) return; /* off-screen → no visible box */
+        var color=SEV[p.sev]||'#e0651b';
+        var box=document.createElement('div');
+        box.setAttribute('data-trusten-box','1');
+        box.style.cssText='position:fixed;z-index:2147483646;pointer-events:none;border:2.5px solid '+color+';border-radius:5px;box-shadow:0 0 0 2px rgba(255,255,255,.7);left:'+(r.left-3)+'px;top:'+(r.top-3)+'px;width:'+(r.width+6)+'px;height:'+(r.height+6)+'px;';
+        document.documentElement.appendChild(box);
+        var lt=r.top-22; if(lt<2) lt=r.top+4;
+        var label=document.createElement('div');
+        label.setAttribute('data-trusten-box','1');
+        label.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;left:'+(r.left-3)+'px;top:'+lt+'px;background:'+color+';color:#fff;font:700 11px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:2px 8px;border-radius:5px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);';
+        label.textContent=p.cat;
+        document.documentElement.appendChild(label);
+        drawn++;
+      });
+      return 'boxes:'+drawn;
+    } catch(e){ return 'error:'+String(e); }
   })()`
 }
 
-/** Returns a JS expression that removes the annotation overlay. */
+/** Returns a JS expression that removes the bounding boxes + labels. */
 export function buildCleanupScript(): string {
   return `(function(){
-    var el = document.getElementById('__trusten_overlay__');
-    if (el) el.remove();
+    document.querySelectorAll('[data-trusten-box]').forEach(function(e){ e.remove(); });
     return true;
   })()`
 }
