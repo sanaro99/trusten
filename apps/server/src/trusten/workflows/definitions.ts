@@ -41,6 +41,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     {
       id: 'select-product',
       expectsNavigation: true,
+      clickFirst: true,
       instruction:
         'Select the first or cheapest product/flight/hotel from the results page and open its detail page.',
       aiGoal:
@@ -494,6 +495,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'select-product',
       expectsNavigation: true,
+      clickFirst: true,
       instruction:
         'Select the first or cheapest result and open its detail page.',
       aiGoal:

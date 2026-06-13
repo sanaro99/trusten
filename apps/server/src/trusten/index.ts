@@ -210,16 +210,18 @@ export class TrustenEngine {
         modalsDismissed,
       })
 
-      // Decide the navigation strategy once up front. LLM-primary: when a real
-      // LLM is configured we use the AI navigator; otherwise we fall back to
-      // deterministic actions, and where neither can act we report honestly
-      // rather than analyzing the homepage and pretending it was a journey.
+      // Navigation strategy: deterministic Puppeteer actions first (fast); the
+      // LLM navigator is only a fallback when a step does not advance. Where
+      // neither can act we report honestly rather than re-analyzing the homepage.
       const llmReady = getTrustenLLM().isConfigured()
       const journeyLog: string[] = []
+      // URLs already analyzed this scan — the LLM-backed visual pass runs at most
+      // once per distinct page (deterministic analyzers still run on repeats).
+      const analyzedUrls = new Set<string>()
       let funnelBroken = false
       logger.info('Trusten deep scan navigation mode', {
         llmReady,
-        mode: llmReady ? 'ai-primary' : 'deterministic-fallback',
+        mode: 'deterministic-first',
       })
 
       for (let i = 0; i < workflow.steps.length; i++) {
@@ -229,7 +231,8 @@ export class TrustenEngine {
         const hasDeterministic = !!(
           stepDef.clickText?.length ||
           stepDef.fillSearch ||
-          stepDef.navigate
+          stepDef.navigate ||
+          stepDef.clickFirst
         )
 
         logger.info(
@@ -262,43 +265,71 @@ export class TrustenEngine {
           logger.info(`Trusten step ${stepNumber} skipped`, {
             reason: navReason,
           })
-        } else if (llmReady && stepDef.aiGoal) {
-          // ── AI-driven navigation (primary) ────────────────────────────
-          const resolvedGoal = resolveGoalTemplate(stepDef.aiGoal, fakeProfile)
-          const navResult = await navigateWithAI(
-            this.browser,
-            pid,
-            resolvedGoal,
-            Math.min(Math.floor(stepDef.timeout / 4), 10),
-            journeyLog,
-          )
-          navAdvanced = navResult.advanced
-          navReason = navResult.reason
-          journeyLog.push(
-            `Step ${stepNumber} (${stepDef.id}): ${navResult.reason.slice(0, 100)}`,
-          )
-          logger.info(`Trusten step ${stepNumber} navigation result`, {
-            success: navResult.success,
-            advanced: navResult.advanced,
-            steps: navResult.stepsExecuted,
-            url: navResult.finalUrl,
-            reason: navResult.reason.slice(0, 80),
-          })
-        } else if (hasDeterministic) {
-          // ── Deterministic fallback (no LLM, or aiGoal-less step) ──────
-          await this.executeStepNavigation(pid, stepDef, url)
-          navReason = llmReady
-            ? 'Deterministic navigation'
-            : 'Deterministic navigation (no LLM configured)'
+        } else if (!expectsNav) {
+          // Observation step (e.g. inspect a cookie banner or a form) — analyze
+          // the current page in place; no navigation needed (and no LLM spent).
+          status = 'observed'
+          navReason = 'Observed the current page (no navigation expected)'
         } else {
-          // No LLM and no deterministic actions: cannot attempt this step.
-          status = 'no-navigation'
-          navReason =
-            'No LLM configured and no deterministic fallback for this step'
-          if (expectsNav) funnelBroken = true
-          logger.warn(`Trusten step ${stepNumber} has no way to navigate`, {
-            llmReady,
-          })
+          // Funnel step: try the FAST deterministic path first; only fall back
+          // to the LLM navigator if the deterministic action did not advance.
+          let advancedNow = false
+          if (hasDeterministic) {
+            await this.executeStepNavigation(pid, stepDef, url)
+            if (this.browser.waitForIdle) {
+              await this.browser
+                .waitForIdle(pid, { timeout: 5000 })
+                .catch(() => undefined)
+            }
+            await new Promise((r) => setTimeout(r, 400))
+            const midUrl =
+              (await this.browser.listPages()).find((p) => p.pageId === pid)
+                ?.url ?? beforeUrl
+            advancedNow = normalizeUrlKey(midUrl) !== normalizeUrlKey(beforeUrl)
+            navReason = advancedNow
+              ? 'Deterministic navigation'
+              : 'Deterministic action did not advance'
+          }
+
+          if (!advancedNow && llmReady && stepDef.aiGoal) {
+            // Deterministic path stalled — let the LLM navigator take over.
+            const resolvedGoal = resolveGoalTemplate(
+              stepDef.aiGoal,
+              fakeProfile,
+            )
+            const navResult = await navigateWithAI(
+              this.browser,
+              pid,
+              resolvedGoal,
+              Math.min(Math.floor(stepDef.timeout / 6), 6),
+              journeyLog,
+            )
+            navAdvanced = navResult.advanced
+            navReason = `LLM fallback: ${navResult.reason}`
+            journeyLog.push(
+              `Step ${stepNumber} (${stepDef.id}): ${navResult.reason.slice(0, 100)}`,
+            )
+            logger.info(`Trusten step ${stepNumber} LLM fallback result`, {
+              success: navResult.success,
+              advanced: navResult.advanced,
+              steps: navResult.stepsExecuted,
+              url: navResult.finalUrl,
+            })
+          } else if (advancedNow) {
+            navAdvanced = true
+            journeyLog.push(
+              `Step ${stepNumber} (${stepDef.id}): deterministic navigation`,
+            )
+          } else if (!hasDeterministic && !(llmReady && stepDef.aiGoal)) {
+            // Nothing available to navigate with.
+            status = 'no-navigation'
+            navReason =
+              'No LLM configured and no deterministic fallback for this step'
+            funnelBroken = true
+            logger.warn(`Trusten step ${stepNumber} has no way to navigate`, {
+              llmReady,
+            })
+          }
         }
 
         // Allow SPA route changes / XHR to settle after navigation.
@@ -332,8 +363,17 @@ export class TrustenEngine {
         // already-covered page and inflate duplicate findings.
         let stepPatterns: DetectedPattern[] = []
         if (status !== 'skipped' && status !== 'no-navigation') {
+          const urlKey = normalizeUrlKey(currentUrl)
+          const isNewPage = !analyzedUrls.has(urlKey)
+          analyzedUrls.add(urlKey)
+
           const context = await this.captureContext(pid)
-          const targetAnalyzers = stepDef.analyzersToRun
+          // Run the costly LLM-backed visual pass only the first time we see a
+          // page; on repeats, deterministic analyzers only.
+          const names = isNewPage
+            ? stepDef.analyzersToRun
+            : stepDef.analyzersToRun.filter((n) => n !== 'VisualAnalyzer')
+          const targetAnalyzers = names
             .map((name) => ANALYZER_BY_NAME.get(name))
             .filter((a): a is BaseAnalyzer => a !== undefined)
           stepPatterns = await this.runAnalyzers(targetAnalyzers, context)
@@ -960,9 +1000,54 @@ export class TrustenEngine {
       }
     }
 
+    // 2b. Click the first prominent content result/product link (no fixed text).
+    if (stepDef.clickFirst) {
+      const clickFirstScript = `(function(){
+        function inChrome(el){ return !!el.closest('header,nav,footer,[role="navigation"],[role="banner"],[role="contentinfo"]'); }
+        var root = document.querySelector('main,[role="main"],#content,.content,.products,.product_pod') || document.body;
+        var links = Array.prototype.slice.call(root.querySelectorAll('a[href]')).filter(function(a){
+          var r=a.getBoundingClientRect();
+          if(r.width<8||r.height<8) return false;
+          var href=a.getAttribute('href')||'';
+          if(!href||href.charAt(0)==='#'||href.indexOf('javascript')===0||href.indexOf('mailto')===0) return false;
+          return !inChrome(a);
+        });
+        var scored = links.map(function(a){
+          var s=0;
+          if(a.querySelector('img')) s+=2;
+          if(a.querySelector('h1,h2,h3,h4')) s+=2;
+          if(a.closest('[class*="product"],[class*="result"],[class*="item"],[class*="card"],li')) s+=1;
+          if((a.textContent||'').trim().length>3) s+=1;
+          return {a:a,s:s,top:a.getBoundingClientRect().top};
+        });
+        scored.sort(function(x,y){ return (y.s-x.s)||(x.top-y.top); });
+        var pick = scored[0];
+        if(pick && pick.a){ pick.a.click(); return (pick.a.textContent||'').trim().slice(0,60) || (pick.a.getAttribute('href')||true); }
+        return false;
+      })()`
+      try {
+        const result = await this.browser.evaluate(pageId, clickFirstScript)
+        if (result.value !== false && result.value !== null) {
+          logger.info('Trusten: clicked first result', {
+            matched: result.value,
+          })
+          await this.waitForPageLoad(pageId)
+        } else {
+          logger.warn('Trusten: clickFirst found no content link')
+        }
+      } catch (err) {
+        logger.warn('Trusten: clickFirst failed', { error: String(err) })
+      }
+    }
+
     // 3. Click by text — try each candidate in order, stop on first hit
     const candidates = stepDef.clickText ?? []
-    if (candidates.length === 0 && !stepDef.fillSearch && !stepDef.navigate)
+    if (
+      candidates.length === 0 &&
+      !stepDef.fillSearch &&
+      !stepDef.navigate &&
+      !stepDef.clickFirst
+    )
       return
     if (candidates.length === 0) return
 

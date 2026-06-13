@@ -190,6 +190,12 @@ export interface WorkflowStepDefinition {
    * Fallback: type this text into the site's main search box.
    */
   fillSearch?: string
+  /**
+   * Deterministic: click the first prominent content link/result on the page
+   * (excludes header/nav/footer). Used for "open the first product/result"
+   * steps that have no fixed clickText.
+   */
+  clickFirst?: boolean
   successCriteria?: string
   /**
    * Whether this step is expected to advance the journey (move to a new

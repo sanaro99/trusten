@@ -125,7 +125,7 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
         description: `Urgency language detected: "${m.match}". Manufactured time pressure is a dark pattern that exploits loss aversion to rush purchasing decisions.`,
         url: context.url,
         pageTitle: context.pageTitle,
-        element: { text: m.context, html: '', selector: '' },
+        element: { text: m.match, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
         regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
       }),
@@ -136,46 +136,52 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
     html: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
-    const patterns: DetectedPattern[] = []
-
-    // Look for timer-like class/id attributes
+    // A timer-like class/id is the strong, specific signal.
     const timerPattern = new RegExp(
       `<[^>]+(?:class|id)="[^"]*(?:${TIMER_SELECTORS.join('|')})[^"]*"[^>]*>[^<]*</[^>]+>`,
       'gi',
     )
     const timerElements = this.findElements(html, timerPattern)
 
-    // Also look for raw HH:MM:SS / MM:SS patterns in text
-    const clockPattern = /\b\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b/g
-    const clockMatches = [...html.matchAll(clockPattern)]
+    // A bare HH:MM:SS / MM:SS in the markup is NOT enough — it matches scripts,
+    // SVG, data-attributes, prices, etc. (that produced false positives). Only
+    // count a clock in the *visible* text when urgency language corroborates it.
+    const visibleText = context.visibleText || this.extractVisibleText(html)
+    const clockMatch = visibleText.match(
+      /\b\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b/,
+    )
+    const urgencyNearby = URGENCY_PATTERNS.some((p) => p.test(visibleText))
+    const corroboratedClock = clockMatch !== null && urgencyNearby
 
-    if (timerElements.length > 0 || clockMatches.length > 0) {
-      patterns.push(
-        this.buildPattern({
-          category: DarkPatternCategory.FAKE_URGENCY,
-          severity: 'critical',
-          confidence: 0.9,
-          description:
-            'Countdown timer detected on page. Timers create artificial urgency. If this timer resets on page reload, it constitutes fake urgency — a deceptive design practice.',
-          url: context.url,
-          pageTitle: context.pageTitle,
-          element: timerElements[0]
-            ? {
-                text: timerElements[0].text,
-                html: timerElements[0].html,
-                selector: '[class*=timer],[id*=timer],[class*=countdown]',
-              }
-            : undefined,
-          evidence: {
-            domSnapshot: timerElements[0]?.html ?? clockMatches[0]?.[0],
-          },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
-        }),
-      )
-    }
+    if (timerElements.length === 0 && !corroboratedClock) return []
 
-    return patterns
+    const hasElement = timerElements.length > 0
+    return [
+      this.buildPattern({
+        category: DarkPatternCategory.FAKE_URGENCY,
+        severity: hasElement ? 'critical' : 'high',
+        confidence: hasElement ? 0.85 : 0.7,
+        description: hasElement
+          ? 'Countdown timer element detected (its class/id marks it as a timer). Timers create artificial urgency; if it resets on page reload it constitutes fake urgency.'
+          : 'A countdown-style clock appears in the visible page text alongside urgency language, suggesting manufactured time pressure.',
+        url: context.url,
+        pageTitle: context.pageTitle,
+        element: hasElement
+          ? {
+              text: timerElements[0].text,
+              html: timerElements[0].html,
+              selector:
+                '[class*=timer],[id*=timer],[class*=countdown],[id*=countdown]',
+            }
+          : { text: clockMatch?.[0] ?? '', html: '', selector: '' },
+        evidence: {
+          domSnapshot: hasElement
+            ? timerElements[0].html
+            : (clockMatch?.[0] ?? ''),
+        },
+        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
+      }),
+    ]
   }
 
   private detectScarcity(
@@ -193,7 +199,7 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
         description: `Scarcity claim detected: "${m.match}". Artificial scarcity exploits FOMO (fear of missing out) to pressure users into immediate purchases.`,
         url: context.url,
         pageTitle: context.pageTitle,
-        element: { text: m.context, html: '', selector: '' },
+        element: { text: m.match, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
         regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_SCARCITY],
       }),
@@ -215,7 +221,7 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
         description: `Suspicious social proof counter detected: "${m.match}". Real-time counters like "X people viewing" are often randomized or fabricated to create false social pressure.`,
         url: context.url,
         pageTitle: context.pageTitle,
-        element: { text: m.context, html: '', selector: '' },
+        element: { text: m.match, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
         regulatoryViolations:
           REGULATORY_MAP[DarkPatternCategory.FAKE_SOCIAL_PROOF],
