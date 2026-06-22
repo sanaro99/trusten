@@ -7,7 +7,6 @@
  * GAMIFICATION_PRESSURE: Streaks, FOMO mechanics, daily rewards
  */
 
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -89,8 +88,6 @@ export class ForcedActionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.FORCED_REGISTRATION],
       }),
     )
   }
@@ -112,8 +109,6 @@ export class ForcedActionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.FORCED_SHARING],
       }),
     )
   }
@@ -135,8 +130,6 @@ export class ForcedActionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.GAMIFICATION_PRESSURE],
       }),
     )
   }

@@ -10,8 +10,6 @@
  * and auto-renewal language. Counts click-depth proxy signals from page content.
  */
 
-import { getTrustenLLM } from '../llm/client'
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -92,7 +90,19 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
       patterns.length < 2 &&
       this.hasAmbiguousCancelTerms(text)
     ) {
-      const llmPatterns = await this.runLLMAnalysis(text, context)
+      const llmPatterns = await this.runLLMAnalysis({
+        analysisType:
+          'roach_motel, forced_continuity, hard_to_cancel — look for hidden auto-renewal, obscured cancellation process, phone-only cancel, cancellation fees',
+        context,
+        text,
+        categoryMap: {
+          roach_motel: DarkPatternCategory.ROACH_MOTEL,
+          forced_continuity: DarkPatternCategory.FORCED_CONTINUITY,
+          hard_to_cancel: DarkPatternCategory.HARD_TO_CANCEL,
+        },
+        defaultCategory: DarkPatternCategory.ROACH_MOTEL,
+        defaultSeverity: 'high',
+      })
       patterns.push(...llmPatterns)
     }
 
@@ -132,8 +142,6 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.FORCED_CONTINUITY],
       }),
     )
   }
@@ -164,8 +172,6 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.HARD_TO_CANCEL],
       }),
     )
   }
@@ -194,7 +200,6 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
           url: context.url,
           pageTitle: context.pageTitle,
           evidence: { domSnapshot: text.slice(0, 300) },
-          regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.ROACH_MOTEL],
         }),
       ]
     }
@@ -210,68 +215,5 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
       /\bpolicy\b/i.test(text) ||
       /\bno\s+(?:commitment|contract)\b/i.test(text)
     )
-  }
-
-  private async runLLMAnalysis(
-    text: string,
-    context: AnalyzerContext,
-  ): Promise<DetectedPattern[]> {
-    try {
-      const llm = getTrustenLLM()
-      const raw = await llm.analyzeForPatterns({
-        analysisType:
-          'roach_motel, forced_continuity, hard_to_cancel — look for hidden auto-renewal, obscured cancellation process, phone-only cancel, cancellation fees',
-        context: text.slice(0, 3000),
-      })
-
-      return this.parseLLMResponse(raw, context)
-    } catch {
-      return []
-    }
-  }
-
-  private parseLLMResponse(
-    raw: string,
-    context: AnalyzerContext,
-  ): DetectedPattern[] {
-    try {
-      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
-        patterns?: Array<{
-          category: string
-          severity: string
-          confidence: number
-          description: string
-          evidence_text: string
-        }>
-      }
-
-      if (!json.patterns) return []
-
-      const categoryMap: Record<string, DarkPatternCategory> = {
-        roach_motel: DarkPatternCategory.ROACH_MOTEL,
-        forced_continuity: DarkPatternCategory.FORCED_CONTINUITY,
-        hard_to_cancel: DarkPatternCategory.HARD_TO_CANCEL,
-      }
-
-      return json.patterns
-        .filter((p) => p.confidence >= 0.7)
-        .map((p) => {
-          const category =
-            categoryMap[p.category] ?? DarkPatternCategory.ROACH_MOTEL
-          return this.buildPattern({
-            category,
-            severity:
-              (p.severity as 'critical' | 'high' | 'medium' | 'low') ?? 'high',
-            confidence: p.confidence,
-            description: p.description,
-            url: context.url,
-            pageTitle: context.pageTitle,
-            element: { text: p.evidence_text, html: '', selector: '' },
-            regulatoryViolations: REGULATORY_MAP[category],
-          })
-        })
-    } catch {
-      return []
-    }
   }
 }

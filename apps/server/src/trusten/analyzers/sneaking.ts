@@ -9,8 +9,6 @@
  * Strategy: DOM inspection for cart items, fee patterns, price comparisons.
  */
 
-import { getTrustenLLM } from '../llm/client'
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -75,7 +73,18 @@ export class SneakingAnalyzer extends BaseAnalyzer {
       /\b(?:cart|basket|checkout|order\s+summary|payment)\b/i.test(text)
 
     if (hasCheckoutContext && patterns.length < 2) {
-      const llmPatterns = await this.runLLMAnalysis(text, context)
+      const llmPatterns = await this.runLLMAnalysis({
+        analysisType:
+          'basket_sneaking (pre-added items), drip_pricing (hidden fees), bait_and_switch (price discrepancy) — look in cart/checkout context',
+        context,
+        text,
+        categoryMap: {
+          basket_sneaking: DarkPatternCategory.BASKET_SNEAKING,
+          drip_pricing: DarkPatternCategory.DRIP_PRICING,
+          bait_and_switch: DarkPatternCategory.BAIT_AND_SWITCH,
+        },
+        defaultCategory: DarkPatternCategory.DRIP_PRICING,
+      })
       patterns.push(...llmPatterns)
     }
 
@@ -145,8 +154,6 @@ export class SneakingAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: best.text.slice(0, 200), html: '', selector: '' },
         evidence: { domSnapshot: best.text },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.BASKET_SNEAKING],
       }),
     ]
   }
@@ -168,7 +175,6 @@ export class SneakingAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.DRIP_PRICING],
       }),
     )
   }
@@ -190,75 +196,9 @@ export class SneakingAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.BAIT_AND_SWITCH],
       }),
     )
   }
 
   // ─── LLM Fallback ───
-
-  private async runLLMAnalysis(
-    text: string,
-    context: AnalyzerContext,
-  ): Promise<DetectedPattern[]> {
-    try {
-      const llm = getTrustenLLM()
-      const raw = await llm.analyzeForPatterns({
-        analysisType:
-          'basket_sneaking (pre-added items), drip_pricing (hidden fees), bait_and_switch (price discrepancy) — look in cart/checkout context',
-        context: text.slice(0, 3000),
-      })
-
-      return this.parseLLMResponse(raw, context)
-    } catch {
-      return []
-    }
-  }
-
-  private parseLLMResponse(
-    raw: string,
-    context: AnalyzerContext,
-  ): DetectedPattern[] {
-    try {
-      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
-        patterns?: Array<{
-          category: string
-          severity: string
-          confidence: number
-          description: string
-          evidence_text: string
-        }>
-      }
-
-      if (!json.patterns) return []
-
-      const categoryMap: Record<string, DarkPatternCategory> = {
-        basket_sneaking: DarkPatternCategory.BASKET_SNEAKING,
-        drip_pricing: DarkPatternCategory.DRIP_PRICING,
-        bait_and_switch: DarkPatternCategory.BAIT_AND_SWITCH,
-      }
-
-      return json.patterns
-        .filter((p) => p.confidence >= 0.7)
-        .map((p) => {
-          const category =
-            categoryMap[p.category] ?? DarkPatternCategory.DRIP_PRICING
-          return this.buildPattern({
-            category,
-            severity:
-              (p.severity as 'critical' | 'high' | 'medium' | 'low') ??
-              'medium',
-            confidence: p.confidence,
-            description: p.description,
-            url: context.url,
-            pageTitle: context.pageTitle,
-            element: { text: p.evidence_text, html: '', selector: '' },
-            regulatoryViolations: REGULATORY_MAP[category],
-          })
-        })
-    } catch {
-      return []
-    }
-  }
 }

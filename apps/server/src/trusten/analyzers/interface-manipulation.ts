@@ -7,8 +7,6 @@
  *                 visually subordinate.
  */
 
-import { getTrustenLLM } from '../llm/client'
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -50,7 +48,13 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
 
     // LLM for visual context we cannot fully assess from HTML alone
     if (patterns.length === 0 && this.hasPricingContext(text)) {
-      const llmPatterns = await this.runLLMAnalysis(text, context)
+      const llmPatterns = await this.runLLMAnalysis({
+        analysisType:
+          'fake_hierarchy — look for visual design manipulation: one option given more visual prominence to steer users, biased labels (Most Popular, Recommended) without objective basis, asymmetric button styling',
+        context,
+        text,
+        defaultCategory: DarkPatternCategory.FAKE_HIERARCHY,
+      })
       patterns.push(...llmPatterns)
     }
 
@@ -79,8 +83,6 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
           pageTitle: context.pageTitle,
           element: { text: m.context, html: '', selector: '' },
           evidence: { domSnapshot: m.context },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.FAKE_HIERARCHY],
         }),
       )
     }
@@ -107,8 +109,6 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
             selector: '[class*=pricing],[class*=plan]',
           },
           evidence: { domSnapshot: el.html.slice(0, 500) },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.FAKE_HIERARCHY],
         }),
       )
     }
@@ -144,8 +144,6 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
               selector: 'button.primary,[class*=cta]',
             },
             evidence: { domSnapshot: el.html.slice(0, 400) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.FAKE_HIERARCHY],
           }),
         )
       }
@@ -214,8 +212,6 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
             '[class*=plan][class*=popular],[class*=plan][class*=recommend],[class*=recommended],[class*=highlighted]',
         },
         evidence: { domSnapshot: badgedCard.html },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.FAKE_HIERARCHY],
       }),
     ]
   }
@@ -271,8 +267,6 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
                 '[class*=cookie],[class*=consent],[class*=gdpr],[class*=notice]',
             },
             evidence: { domSnapshot: banner[0].slice(0, 500) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.FAKE_HIERARCHY],
           }),
         ]
       }
@@ -287,62 +281,5 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
       /\b(?:plan|tier|pricing|subscription)\b/i.test(text) &&
       /\b(?:month|year|annual|free|pro|premium)\b/i.test(text)
     )
-  }
-
-  private async runLLMAnalysis(
-    text: string,
-    context: AnalyzerContext,
-  ): Promise<DetectedPattern[]> {
-    try {
-      const llm = getTrustenLLM()
-      const raw = await llm.analyzeForPatterns({
-        analysisType:
-          'fake_hierarchy — look for visual design manipulation: one option given more visual prominence to steer users, biased labels (Most Popular, Recommended) without objective basis, asymmetric button styling',
-        context: text.slice(0, 3000),
-      })
-
-      return this.parseLLMResponse(raw, context)
-    } catch {
-      return []
-    }
-  }
-
-  private parseLLMResponse(
-    raw: string,
-    context: AnalyzerContext,
-  ): DetectedPattern[] {
-    try {
-      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
-        patterns?: Array<{
-          category: string
-          severity: string
-          confidence: number
-          description: string
-          evidence_text: string
-        }>
-      }
-
-      if (!json.patterns) return []
-
-      return json.patterns
-        .filter((p) => p.confidence >= 0.7)
-        .map((p) =>
-          this.buildPattern({
-            category: DarkPatternCategory.FAKE_HIERARCHY,
-            severity:
-              (p.severity as 'critical' | 'high' | 'medium' | 'low') ??
-              'medium',
-            confidence: p.confidence,
-            description: p.description,
-            url: context.url,
-            pageTitle: context.pageTitle,
-            element: { text: p.evidence_text, html: '', selector: '' },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.FAKE_HIERARCHY],
-          }),
-        )
-    } catch {
-      return []
-    }
   }
 }

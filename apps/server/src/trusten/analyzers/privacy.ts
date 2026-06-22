@@ -7,7 +7,6 @@
  * DARK_CONSENT:      Making reject harder than accept in consent flows
  */
 
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -102,7 +101,6 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
           url: context.url,
           pageTitle: context.pageTitle,
           evidence: { domSnapshot: text.slice(0, 300) },
-          regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.COOKIE_WALL],
         }),
       ]
     }
@@ -135,8 +133,6 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
           url: context.url,
           pageTitle: context.pageTitle,
           evidence: { domSnapshot: text.slice(0, 400) },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.DARK_CONSENT],
         }),
       )
     }
@@ -177,8 +173,6 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
               selector: '[class*=cookie],[class*=consent],[class*=cmp]',
             },
             evidence: { domSnapshot: bannerHtml.slice(0, 600) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.DARK_CONSENT],
           }),
         )
       }
@@ -204,8 +198,6 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.PRIVACY_ZUCKERING],
       }),
     )
   }

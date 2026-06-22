@@ -6,7 +6,6 @@
  * DISGUISED_ADS:    Ads that look like content, navigation, or system messages
  */
 
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -91,8 +90,6 @@ export class NaggingAnalyzer extends BaseAnalyzer {
           pageTitle: context.pageTitle,
           element: { text: m.context, html: '', selector: '' },
           evidence: { domSnapshot: m.context },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.REPEATED_PROMPTS],
         }),
       )
     }
@@ -115,8 +112,6 @@ export class NaggingAnalyzer extends BaseAnalyzer {
             selector: '[class*=popup],[class*=modal],[class*=overlay]',
           },
           evidence: { domSnapshot: popupElements[0].html.slice(0, 500) },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.REPEATED_PROMPTS],
         }),
       )
     }
@@ -163,8 +158,6 @@ export class NaggingAnalyzer extends BaseAnalyzer {
               selector: '[class*=sponsor],[class*=promoted],[class*=ad-label]',
             },
             evidence: { domSnapshot: m[0].slice(0, 300) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.DISGUISED_ADS],
           }),
         ]
       }
@@ -192,8 +185,6 @@ export class NaggingAnalyzer extends BaseAnalyzer {
                 '[class*=sponsored-tag],[class*=ad-label],[class*=ad-badge],[class*=promo-tag]',
             },
             evidence: { domSnapshot: m[0].slice(0, 300) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.DISGUISED_ADS],
           }),
         ]
       }
@@ -235,8 +226,6 @@ export class NaggingAnalyzer extends BaseAnalyzer {
                 selector: '[class*=ad],[class*=ads],[class*=sponsored]',
               },
               evidence: { domSnapshot: container.html.slice(0, 500) },
-              regulatoryViolations:
-                REGULATORY_MAP[DarkPatternCategory.DISGUISED_ADS],
             }),
           )
         }
@@ -257,8 +246,6 @@ export class NaggingAnalyzer extends BaseAnalyzer {
           pageTitle: context.pageTitle,
           element: { text: adLabelMatches[0].context, html: '', selector: '' },
           evidence: { domSnapshot: adLabelMatches[0].context },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.DISGUISED_ADS],
         }),
       )
     }

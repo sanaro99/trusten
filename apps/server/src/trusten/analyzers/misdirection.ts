@@ -10,8 +10,6 @@
  * LLM for semantic analysis of subtle shame/trick wording.
  */
 
-import { getTrustenLLM } from '../llm/client'
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -68,7 +66,18 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
 
     // LLM for semantic analysis of edge cases — confirmshaming is language-dependent
     if (patterns.length === 0 || this.hasAmbiguousDeclineLanguage(text)) {
-      const llmPatterns = await this.runLLMAnalysis(text, context)
+      const llmPatterns = await this.runLLMAnalysis({
+        analysisType:
+          'confirmshaming, trick_wording, visual_interference — look for decline buttons phrased to make users feel guilty, double-negative opt-out language, and unequal visual treatment of accept vs decline choices',
+        context,
+        text,
+        categoryMap: {
+          confirmshaming: DarkPatternCategory.CONFIRMSHAMING,
+          trick_wording: DarkPatternCategory.TRICK_WORDING,
+          visual_interference: DarkPatternCategory.VISUAL_INTERFERENCE,
+        },
+        defaultCategory: DarkPatternCategory.CONFIRMSHAMING,
+      })
       patterns.push(...llmPatterns)
     }
 
@@ -96,8 +105,6 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.CONFIRMSHAMING],
       }),
     )
   }
@@ -119,7 +126,6 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.TRICK_WORDING],
       }),
     )
   }
@@ -157,8 +163,6 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
               pageTitle: context.pageTitle,
               element: { text: el.text, html: el.html, selector: '' },
               evidence: { domSnapshot: el.html.slice(0, 500) },
-              regulatoryViolations:
-                REGULATORY_MAP[DarkPatternCategory.VISUAL_INTERFERENCE],
             }),
           )
         }
@@ -177,69 +181,5 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
       /\bi(?:'ll)?\s+(?:stay|keep|remain)\b/i.test(text) ||
       /\bi\s+(?:already\s+)?(?:get|have|know)\b/i.test(text)
     )
-  }
-
-  private async runLLMAnalysis(
-    text: string,
-    context: AnalyzerContext,
-  ): Promise<DetectedPattern[]> {
-    try {
-      const llm = getTrustenLLM()
-      const raw = await llm.analyzeForPatterns({
-        analysisType:
-          'confirmshaming, trick_wording, visual_interference — look for decline buttons phrased to make users feel guilty, double-negative opt-out language, and unequal visual treatment of accept vs decline choices',
-        context: text.slice(0, 3000),
-      })
-
-      return this.parseLLMResponse(raw, context)
-    } catch {
-      return []
-    }
-  }
-
-  private parseLLMResponse(
-    raw: string,
-    context: AnalyzerContext,
-  ): DetectedPattern[] {
-    try {
-      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
-        patterns?: Array<{
-          category: string
-          severity: string
-          confidence: number
-          description: string
-          evidence_text: string
-        }>
-      }
-
-      if (!json.patterns) return []
-
-      const categoryMap: Record<string, DarkPatternCategory> = {
-        confirmshaming: DarkPatternCategory.CONFIRMSHAMING,
-        trick_wording: DarkPatternCategory.TRICK_WORDING,
-        visual_interference: DarkPatternCategory.VISUAL_INTERFERENCE,
-      }
-
-      return json.patterns
-        .filter((p) => p.confidence >= 0.7)
-        .map((p) => {
-          const category =
-            categoryMap[p.category] ?? DarkPatternCategory.CONFIRMSHAMING
-          return this.buildPattern({
-            category,
-            severity:
-              (p.severity as 'critical' | 'high' | 'medium' | 'low') ??
-              'medium',
-            confidence: p.confidence,
-            description: p.description,
-            url: context.url,
-            pageTitle: context.pageTitle,
-            element: { text: p.evidence_text, html: '', selector: '' },
-            regulatoryViolations: REGULATORY_MAP[category],
-          })
-        })
-    } catch {
-      return []
-    }
   }
 }

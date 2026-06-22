@@ -8,6 +8,8 @@
  * - Confidence-gated pattern filtering
  */
 
+import { getTrustenLLM } from '../llm/client'
+import { REGULATORY_MAP } from '../regulatory/mapping'
 import type {
   AnalyzerContext,
   AnalyzerResult,
@@ -153,7 +155,8 @@ export abstract class BaseAnalyzer {
         domSnapshot: params.evidence?.domSnapshot,
         networkEvidence: params.evidence?.networkEvidence,
       },
-      regulatoryViolations: params.regulatoryViolations ?? [],
+      regulatoryViolations:
+        params.regulatoryViolations ?? REGULATORY_MAP[params.category] ?? [],
       detectedAt: new Date().toISOString(),
       url: params.url,
       pageTitle: params.pageTitle,
@@ -206,5 +209,71 @@ export abstract class BaseAnalyzer {
    */
   protected escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  /**
+   * Run a text-based LLM pattern scan and turn the JSON response into
+   * DetectedPatterns. Shared by the text analyzers, which all send the same
+   * `{ patterns: [...] }` shape and differ only in the prompt, the category
+   * mapping, and the fallback category/severity.
+   *
+   * Returns [] on any LLM/parse failure so detection degrades gracefully.
+   */
+  protected async runLLMAnalysis(params: {
+    analysisType: string
+    context: AnalyzerContext
+    text: string
+    /** Maps LLM category strings to enum values; omit for single-category analyzers. */
+    categoryMap?: Record<string, DarkPatternCategory>
+    defaultCategory: DarkPatternCategory
+    defaultSeverity?: Severity
+    minConfidence?: number
+    maxChars?: number
+  }): Promise<DetectedPattern[]> {
+    const {
+      analysisType,
+      context,
+      text,
+      categoryMap,
+      defaultCategory,
+      defaultSeverity = 'medium',
+      minConfidence = 0.7,
+      maxChars = 3000,
+    } = params
+
+    try {
+      const raw = await getTrustenLLM().analyzeForPatterns({
+        analysisType,
+        context: text.slice(0, maxChars),
+      })
+
+      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
+        patterns?: Array<{
+          category: string
+          severity: string
+          confidence: number
+          description: string
+          evidence_text: string
+        }>
+      }
+
+      if (!json.patterns) return []
+
+      return json.patterns
+        .filter((p) => p.confidence >= minConfidence)
+        .map((p) =>
+          this.buildPattern({
+            category: categoryMap?.[p.category] ?? defaultCategory,
+            severity: (p.severity as Severity) ?? defaultSeverity,
+            confidence: p.confidence,
+            description: p.description,
+            url: context.url,
+            pageTitle: context.pageTitle,
+            element: { text: p.evidence_text, html: '', selector: '' },
+          }),
+        )
+    } catch {
+      return []
+    }
   }
 }

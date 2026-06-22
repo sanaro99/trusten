@@ -17,7 +17,6 @@
  */
 
 import { getTrustenLLM } from '../llm/client'
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -110,7 +109,6 @@ export class VisualAnalyzer extends BaseAnalyzer {
                 ? '[screenshot analyzed]'
                 : undefined,
             },
-            regulatoryViolations: REGULATORY_MAP[category] ?? [],
           })
         })
     } catch {

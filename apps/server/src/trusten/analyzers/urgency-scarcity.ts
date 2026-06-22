@@ -10,8 +10,6 @@
  * LLM only when urgency language is embedded in marketing copy.
  */
 
-import { getTrustenLLM } from '../llm/client'
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -99,7 +97,17 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
       patterns.length === 0 && this.hasWeakUrgencySignal(text)
 
     if (hasWeakSignal) {
-      const llmPatterns = await this.runLLMAnalysis(text, context)
+      const llmPatterns = await this.runLLMAnalysis({
+        analysisType: 'urgency_scarcity_fake_social_proof',
+        context,
+        text,
+        categoryMap: {
+          fake_urgency: DarkPatternCategory.FAKE_URGENCY,
+          fake_scarcity: DarkPatternCategory.FAKE_SCARCITY,
+          fake_social_proof: DarkPatternCategory.FAKE_SOCIAL_PROOF,
+        },
+        defaultCategory: DarkPatternCategory.FAKE_URGENCY,
+      })
       patterns.push(...llmPatterns)
     }
 
@@ -127,7 +135,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.match, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
       }),
     )
   }
@@ -179,7 +186,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
             ? timerElements[0].html
             : (clockMatch?.[0] ?? ''),
         },
-        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
       }),
     ]
   }
@@ -201,7 +207,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.match, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_SCARCITY],
       }),
     )
   }
@@ -223,8 +228,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.match, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.FAKE_SOCIAL_PROOF],
       }),
     )
   }
@@ -268,8 +271,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
                 '[class*=timer],[class*=countdown],[id*=timer],[id*=countdown]',
             },
             evidence: { domSnapshot: scriptContent.slice(0, 300) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
           }),
         ]
       }
@@ -320,7 +321,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
             .map((m) => m[0])
             .join(' | '),
         },
-        regulatoryViolations: REGULATORY_MAP[DarkPatternCategory.FAKE_URGENCY],
       }),
     ]
   }
@@ -335,67 +335,5 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
       /\bexclusive\s+(?:deal|offer|discount)\b/i,
     ]
     return this.hasKeywords(text, []) || weakSignals.some((p) => p.test(text))
-  }
-
-  private async runLLMAnalysis(
-    text: string,
-    context: AnalyzerContext,
-  ): Promise<DetectedPattern[]> {
-    try {
-      const llm = getTrustenLLM()
-      const raw = await llm.analyzeForPatterns({
-        analysisType: 'urgency_scarcity_fake_social_proof',
-        context: text.slice(0, 3000),
-      })
-
-      return this.parseLLMResponse(raw, context)
-    } catch {
-      return []
-    }
-  }
-
-  private parseLLMResponse(
-    raw: string,
-    context: AnalyzerContext,
-  ): DetectedPattern[] {
-    try {
-      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
-        patterns?: Array<{
-          category: string
-          severity: string
-          confidence: number
-          description: string
-          evidence_text: string
-        }>
-      }
-
-      if (!json.patterns) return []
-
-      return json.patterns
-        .filter((p) => p.confidence >= 0.7)
-        .map((p) => {
-          const category =
-            p.category === 'fake_scarcity'
-              ? DarkPatternCategory.FAKE_SCARCITY
-              : p.category === 'fake_social_proof'
-                ? DarkPatternCategory.FAKE_SOCIAL_PROOF
-                : DarkPatternCategory.FAKE_URGENCY
-
-          return this.buildPattern({
-            category,
-            severity:
-              (p.severity as 'critical' | 'high' | 'medium' | 'low') ??
-              'medium',
-            confidence: p.confidence,
-            description: p.description,
-            url: context.url,
-            pageTitle: context.pageTitle,
-            element: { text: p.evidence_text, html: '', selector: '' },
-            regulatoryViolations: REGULATORY_MAP[category],
-          })
-        })
-    } catch {
-      return []
-    }
   }
 }

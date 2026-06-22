@@ -7,7 +7,6 @@
  * INFORMATION_HIDING:    Key terms buried in fine print, collapsed sections
  */
 
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -88,8 +87,6 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.COMPARISON_PREVENTION],
       }),
     )
   }
@@ -117,8 +114,6 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
           pageTitle: context.pageTitle,
           element: { text: m.context, html: '', selector: '' },
           evidence: { domSnapshot: m.context },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.INFORMATION_HIDING],
         }),
       )
     }
@@ -140,8 +135,6 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
             selector: 'details,summary,[class*=accordion],[class*=collapse]',
           },
           evidence: { domSnapshot: collapsedSections[0].html.slice(0, 500) },
-          regulatoryViolations:
-            REGULATORY_MAP[DarkPatternCategory.INFORMATION_HIDING],
         }),
       )
     }
@@ -165,8 +158,6 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
                 selector: 'small,[class*=fine-print],[class*=disclaimer]',
               },
               evidence: { domSnapshot: fp.html.slice(0, 500) },
-              regulatoryViolations:
-                REGULATORY_MAP[DarkPatternCategory.INFORMATION_HIDING],
             }),
           )
         }

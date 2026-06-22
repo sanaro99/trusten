@@ -6,7 +6,6 @@
  * HIDDEN_DEFAULTS:     Defaults set against user interest (opt-in by default)
  */
 
-import { REGULATORY_MAP } from '../regulatory/mapping'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -26,10 +25,6 @@ const CONSENT_CHECKBOX_TEXT_PATTERNS = [
   /\bthird[\s-]party\b/i,
   /\bpartner\s+(?:offers?|communications?)\b/i,
 ]
-
-// Select/radio elements with non-user-friendly defaults
-const _SELECT_DEFAULT_PATTERN =
-  /<select[^>]*>[\s\S]*?<option[^>]*selected[^>]*>([^<]+)<\/option>[\s\S]*?<\/select>/gi
 
 const HIDDEN_DEFAULT_SIGNALS = [
   /\bby\s+default[,\s]+you(?:'re|\s+are)\s+(?:opted|subscribed|enrolled)\b/i,
@@ -106,8 +101,6 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
               selector: 'input[type="checkbox"][checked]',
             },
             evidence: { domSnapshot: surroundingHtml.slice(0, 500) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.PRESELECTED_OPTIONS],
           }),
         )
       } else if (checkedBoxes.length > 0) {
@@ -126,8 +119,6 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
               selector: 'input[type="checkbox"][checked]',
             },
             evidence: { domSnapshot: surroundingHtml.slice(0, 500) },
-            regulatoryViolations:
-              REGULATORY_MAP[DarkPatternCategory.PRESELECTED_OPTIONS],
           }),
         )
       }
@@ -153,8 +144,6 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
         pageTitle: context.pageTitle,
         element: { text: m.context, html: '', selector: '' },
         evidence: { domSnapshot: m.context },
-        regulatoryViolations:
-          REGULATORY_MAP[DarkPatternCategory.HIDDEN_DEFAULTS],
       }),
     )
   }
