@@ -12,17 +12,7 @@
 import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
-import { ComparisonPreventionAnalyzer } from './analyzers/comparison-prevention'
-import { ForcedActionAnalyzer } from './analyzers/forced-action'
-import { InterfaceManipulationAnalyzer } from './analyzers/interface-manipulation'
-import { MisdirectionAnalyzer } from './analyzers/misdirection'
-import { NaggingAnalyzer } from './analyzers/nagging'
-import { ObstructionAnalyzer } from './analyzers/obstruction'
-import { PreselectionAnalyzer } from './analyzers/preselection'
-import { PrivacyAnalyzer } from './analyzers/privacy'
-import { SneakingAnalyzer } from './analyzers/sneaking'
-import { UrgencyScarcityAnalyzer } from './analyzers/urgency-scarcity'
-import { VisualAnalyzer } from './analyzers/visual'
+import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
 import { cachePageFindings, getCachedPageFindings } from './db'
 import { publish } from './live/hub'
@@ -39,27 +29,6 @@ import type {
 } from './types'
 import { sleep } from './utils/delay'
 import { normalizeUrlKey } from './utils/url'
-
-// ─── All analyzers ───
-
-const ALL_ANALYZERS: BaseAnalyzer[] = [
-  new UrgencyScarcityAnalyzer(),
-  new MisdirectionAnalyzer(),
-  new SneakingAnalyzer(),
-  new ObstructionAnalyzer(),
-  new ForcedActionAnalyzer(),
-  new PreselectionAnalyzer(),
-  new NaggingAnalyzer(),
-  new ComparisonPreventionAnalyzer(),
-  new PrivacyAnalyzer(),
-  new InterfaceManipulationAnalyzer(),
-  new VisualAnalyzer(),
-]
-
-// Map of analyzer name → instance, for workflow-targeted execution
-const ANALYZER_BY_NAME = new Map<string, BaseAnalyzer>(
-  ALL_ANALYZERS.map((a) => [a.name, a]),
-)
 
 /**
  * Collapse patterns that are effectively the same finding seen on the same page
@@ -373,9 +342,7 @@ export class TrustenEngine {
           const names = isNewPage
             ? stepDef.analyzersToRun
             : stepDef.analyzersToRun.filter((n) => n !== 'VisualAnalyzer')
-          const targetAnalyzers = names
-            .map((name) => ANALYZER_BY_NAME.get(name))
-            .filter((a): a is BaseAnalyzer => a !== undefined)
+          const targetAnalyzers = getAnalyzers(names)
           stepPatterns = await this.runAnalyzers(targetAnalyzers, context)
           allPatterns.push(...stepPatterns)
         }

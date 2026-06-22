@@ -11,6 +11,7 @@
  */
 
 import { logger } from '../../lib/logger'
+import { ANALYZER_NAMES } from '../analyzers/registry'
 import type { BrowserDriver } from '../browser/driver'
 import { getTrustenLLM } from '../llm/client'
 import type { ScanWorkflow, WorkflowStepDefinition } from '../types'
@@ -21,19 +22,6 @@ import {
 } from '../utils/pre-scan'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
 
-const ANALYZER_NAMES = [
-  'UrgencyScarcityAnalyzer',
-  'MisdirectionAnalyzer',
-  'SneakingAnalyzer',
-  'ObstructionAnalyzer',
-  'ForcedActionAnalyzer',
-  'PreselectionAnalyzer',
-  'NaggingAnalyzer',
-  'ComparisonPreventionAnalyzer',
-  'PrivacyAnalyzer',
-  'InterfaceManipulationAnalyzer',
-  'VisualAnalyzer',
-]
 const DEFAULT_ANALYZERS = [
   'UrgencyScarcityAnalyzer',
   'MisdirectionAnalyzer',
