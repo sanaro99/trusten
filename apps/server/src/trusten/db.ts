@@ -291,73 +291,20 @@ export function getGlobalStats(): GlobalStats {
   }
 }
 
-export function getDomainSummaries(limit = 50): DomainSummary[] {
-  ensureTrustenSchema()
-  const db = getDb()
+// Columns shared by both domain-summary queries (per-domain aggregates).
+const DOMAIN_SUMMARY_AGGREGATE = `
+  domain,
+  COUNT(*) as scan_count,
+  MAX(created_at) as latest_scan_at,
+  AVG(score_numeric) as avg_score,
+  SUM(pattern_count) as total_patterns,
+  SUM(critical_count) as critical_count,
+  SUM(high_count) as high_count`
 
-  const rows = db
-    .prepare(
-      `SELECT
-         domain,
-         COUNT(*) as scan_count,
-         MAX(created_at) as latest_scan_at,
-         AVG(score_numeric) as avg_score,
-         SUM(pattern_count) as total_patterns,
-         SUM(critical_count) as critical_count,
-         SUM(high_count) as high_count
-       FROM trusten_scans
-       GROUP BY domain
-       ORDER BY latest_scan_at DESC
-       LIMIT ?`,
-    )
-    .all(limit) as Array<Record<string, unknown>>
-
-  return rows.map((r) => {
-    // Get the most recent scan's grade/score
-    const latest = db
-      .prepare(
-        `SELECT score_grade, score_numeric FROM trusten_scans
-         WHERE domain = ? ORDER BY created_at DESC LIMIT 1`,
-      )
-      .get(r.domain as string) as Record<string, unknown> | undefined
-
-    return {
-      domain: r.domain as string,
-      scanCount: r.scan_count as number,
-      latestGrade: (latest?.score_grade as string) ?? 'F',
-      latestScore: Math.round((latest?.score_numeric as number) ?? 0),
-      latestScanAt: r.latest_scan_at as string,
-      avgScore: Math.round(((r.avg_score as number) ?? 0) * 10) / 10,
-      totalPatterns: (r.total_patterns as number) ?? 0,
-      criticalCount: (r.critical_count as number) ?? 0,
-      highCount: (r.high_count as number) ?? 0,
-    }
-  })
-}
-
-export function getDomainSummary(domain: string): DomainSummary | null {
-  ensureTrustenSchema()
-  const db = getDb()
-
-  const row = db
-    .prepare(
-      `SELECT
-         domain,
-         COUNT(*) as scan_count,
-         MAX(created_at) as latest_scan_at,
-         AVG(score_numeric) as avg_score,
-         SUM(pattern_count) as total_patterns,
-         SUM(critical_count) as critical_count,
-         SUM(high_count) as high_count
-       FROM trusten_scans
-       WHERE domain = ?
-       GROUP BY domain`,
-    )
-    .get(domain) as Record<string, unknown> | undefined
-
-  if (!row) return null
-
-  const latest = db
+/** Map an aggregate row + the domain's most recent grade/score into a DomainSummary. */
+function buildDomainSummary(row: Record<string, unknown>): DomainSummary {
+  const domain = row.domain as string
+  const latest = getDb()
     .prepare(
       `SELECT score_grade, score_numeric FROM trusten_scans
        WHERE domain = ? ORDER BY created_at DESC LIMIT 1`,
@@ -365,7 +312,7 @@ export function getDomainSummary(domain: string): DomainSummary | null {
     .get(domain) as Record<string, unknown> | undefined
 
   return {
-    domain: row.domain as string,
+    domain,
     scanCount: row.scan_count as number,
     latestGrade: (latest?.score_grade as string) ?? 'F',
     latestScore: Math.round((latest?.score_numeric as number) ?? 0),
@@ -375,6 +322,35 @@ export function getDomainSummary(domain: string): DomainSummary | null {
     criticalCount: (row.critical_count as number) ?? 0,
     highCount: (row.high_count as number) ?? 0,
   }
+}
+
+export function getDomainSummaries(limit = 50): DomainSummary[] {
+  ensureTrustenSchema()
+  const rows = getDb()
+    .prepare(
+      `SELECT ${DOMAIN_SUMMARY_AGGREGATE}
+       FROM trusten_scans
+       GROUP BY domain
+       ORDER BY latest_scan_at DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<Record<string, unknown>>
+
+  return rows.map((r) => buildDomainSummary(r))
+}
+
+export function getDomainSummary(domain: string): DomainSummary | null {
+  ensureTrustenSchema()
+  const row = getDb()
+    .prepare(
+      `SELECT ${DOMAIN_SUMMARY_AGGREGATE}
+       FROM trusten_scans
+       WHERE domain = ?
+       GROUP BY domain`,
+    )
+    .get(domain) as Record<string, unknown> | undefined
+
+  return row ? buildDomainSummary(row) : null
 }
 
 // ─── Audit jobs ───

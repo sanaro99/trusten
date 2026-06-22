@@ -318,6 +318,72 @@ export class TrustenLLMClient {
   }
 
   /**
+   * Build the OpenAI-compatible request for `provider`. Only the primary
+   * provider honors explicit config overrides (baseUrl/model/apiKey); fallback
+   * providers always use their defaults.
+   */
+  private buildRequest(
+    provider: TrustenLLMProvider,
+    options: LLMCompletionOptions,
+    useOverrides: boolean,
+  ): {
+    url: string
+    headers: Record<string, string>
+    body: unknown
+    model: string
+  } {
+    const defaults = PROVIDER_DEFAULTS[provider]
+    const baseUrl =
+      (useOverrides ? this.config.baseUrl : undefined) ?? defaults.baseUrl
+    const model =
+      (useOverrides ? this.config.model : undefined) ?? defaults.defaultModel
+    const apiKey =
+      (useOverrides ? this.config.apiKey : undefined) ?? getApiKey(provider)
+
+    return {
+      url: `${baseUrl.replace(/\/$/, '')}/chat/completions`,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(defaults.extraHeaders ?? {}),
+        ...(apiKey ? defaults.authHeader(apiKey) : {}),
+      },
+      body: {
+        model,
+        messages: options.messages,
+        temperature: options.temperature ?? 0.1,
+        max_tokens: options.maxTokens ?? 1024,
+      },
+      model,
+    }
+  }
+
+  /** POST a prepared request and return the assistant content, or throw. */
+  private async sendRequest(
+    url: string,
+    headers: Record<string, string>,
+    body: unknown,
+    timeoutMs: number,
+  ): Promise<string> {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error')
+      throw new Error(`LLM request failed (${response.status}): ${errorText}`)
+    }
+
+    const data = (await response.json()) as ChatCompletionResponse
+    if (!data.choices?.[0]?.message?.content) {
+      throw new Error('LLM response missing content')
+    }
+    return data.choices[0].message.content
+  }
+
+  /**
    * Send a chat completion request.
    * Returns the assistant's response text.
    */
@@ -330,46 +396,21 @@ export class TrustenLLMClient {
       throw new Error(`Trusten LLM: ${provider} unreachable`)
     }
 
-    const defaults = PROVIDER_DEFAULTS[provider]
-    const baseUrl = this.config.baseUrl ?? defaults.baseUrl
-    const model = this.config.model ?? defaults.defaultModel
-    const apiKey = this.config.apiKey ?? getApiKey(provider)
-
-    const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
-    const body = {
-      model,
-      messages: options.messages,
-      temperature: options.temperature ?? 0.1,
-      max_tokens: options.maxTokens ?? 1024,
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(defaults.extraHeaders ?? {}),
-      ...(apiKey ? defaults.authHeader(apiKey) : {}),
-    }
+    const { url, headers, body, model } = this.buildRequest(
+      provider,
+      options,
+      true,
+    )
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
+      const content = await this.sendRequest(
+        url,
         headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(options.timeoutMs ?? LLM_TIMEOUT_MS),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error')
-        throw new Error(`LLM request failed (${response.status}): ${errorText}`)
-      }
-
-      const data = (await response.json()) as ChatCompletionResponse
-
-      if (!data.choices?.[0]?.message?.content) {
-        throw new Error('LLM response missing content')
-      }
-
+        body,
+        options.timeoutMs ?? LLM_TIMEOUT_MS,
+      )
       markReachable(provider)
-      return data.choices[0].message.content
+      return content
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       // The model can't accept images → cache that, drop the screenshot, and
@@ -502,52 +543,29 @@ Analyze the above content and return your findings as JSON.`
       throw new Error('Trusten LLM: all providers unreachable')
     }
 
-    const defaults = PROVIDER_DEFAULTS[fallbackProvider]
-    const apiKey = getApiKey(fallbackProvider)
-    const url = `${defaults.baseUrl}/chat/completions`
-    const body = {
-      model: defaults.defaultModel,
-      messages: options.messages,
-      temperature: options.temperature ?? 0.1,
-      max_tokens: options.maxTokens ?? 1024,
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(defaults.extraHeaders ?? {}),
-      ...(apiKey ? defaults.authHeader(apiKey) : {}),
-    }
+    const { url, headers, body, model } = this.buildRequest(
+      fallbackProvider,
+      options,
+      false,
+    )
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
+      const content = await this.sendRequest(
+        url,
         headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(options.timeoutMs ?? LLM_TIMEOUT_MS),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error')
-        throw new Error(
-          `LLM fallback failed (${response.status}): ${errorText}`,
-        )
-      }
-
-      const data = (await response.json()) as ChatCompletionResponse
-      if (!data.choices?.[0]?.message?.content) {
-        throw new Error('Fallback LLM response missing content')
-      }
-
+        body,
+        options.timeoutMs ?? LLM_TIMEOUT_MS,
+      )
       markReachable(fallbackProvider)
-      return data.choices[0].message.content
+      return content
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       // Fallback model can't accept images → cache + retry text-only once.
       if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
-        textOnlyModels.add(defaults.defaultModel.toLowerCase())
+        textOnlyModels.add(model.toLowerCase())
         logger.warn(
           'Trusten LLM: fallback model rejected image input, retrying text-only',
-          { provider: fallbackProvider, model: defaults.defaultModel },
+          { provider: fallbackProvider, model },
         )
         return this.tryFallback(
           { ...options, messages: stripImages(options.messages) },

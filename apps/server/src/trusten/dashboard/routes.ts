@@ -46,6 +46,15 @@ const runningJobs = new Map<
 >()
 
 /** robots.txt + per-domain rate-limit gate. Returns an error to send, or null. */
+/** Parse a URL's hostname, or null if the URL is invalid. */
+function parseHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return null
+  }
+}
+
 async function preScanGuard(
   url: string,
   domain: string,
@@ -217,12 +226,7 @@ export function createTrustenDashboardRoutes(config: Config) {
 
     if (!url) return c.json({ error: 'url is required' }, 400)
     if (!html) return c.json({ error: 'html is required' }, 400)
-
-    try {
-      new URL(url)
-    } catch {
-      return c.json({ error: 'Invalid URL' }, 400)
-    }
+    if (!parseHostname(url)) return c.json({ error: 'Invalid URL' }, 400)
 
     try {
       const engine = new TrustenEngine(config.browser, config.executionDir)
@@ -261,12 +265,8 @@ export function createTrustenDashboardRoutes(config: Config) {
 
     if (!url) return c.json({ error: 'url is required' }, 400)
 
-    let qsDomain: string
-    try {
-      qsDomain = new URL(url).hostname
-    } catch {
-      return c.json({ error: 'Invalid URL' }, 400)
-    }
+    const qsDomain = parseHostname(url)
+    if (!qsDomain) return c.json({ error: 'Invalid URL' }, 400)
 
     const qsGuard = await preScanGuard(url, qsDomain)
     if (qsGuard) return c.json({ error: qsGuard.error }, qsGuard.status)
@@ -311,12 +311,8 @@ export function createTrustenDashboardRoutes(config: Config) {
 
     if (!url) return c.json({ error: 'url is required' }, 400)
 
-    let domain: string
-    try {
-      domain = new URL(url).hostname
-    } catch {
-      return c.json({ error: 'Invalid URL' }, 400)
-    }
+    const domain = parseHostname(url)
+    if (!domain) return c.json({ error: 'Invalid URL' }, 400)
 
     // In discover mode the workflows are generated at run time, so skip the
     // fixed-workflow validation.
