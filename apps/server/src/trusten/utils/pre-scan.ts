@@ -9,6 +9,7 @@
 
 import { logger } from '../../lib/logger'
 import type { BrowserDriver } from '../browser/driver'
+import { sleep } from './delay'
 
 export interface FakeProfile {
   firstName: string
@@ -185,7 +186,7 @@ export async function dismissInterferingModals(
 ): Promise<number> {
   try {
     await browser.pressKey(pageId, 'Escape')
-    await new Promise<void>((r) => setTimeout(r, 400))
+    await sleep(400)
   } catch {}
 
   const script = `(function() {

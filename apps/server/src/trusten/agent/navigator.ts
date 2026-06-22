@@ -15,6 +15,7 @@
 import { logger } from '../../lib/logger'
 import type { BrowserDriver } from '../browser/driver'
 import { getTrustenLLM } from '../llm/client'
+import { sleep } from '../utils/delay'
 
 export interface NavigationAction {
   reasoning: string
@@ -444,8 +445,4 @@ function truncateSnapshot(snapshot: string, maxChars: number): string {
   }
 
   return output.slice(0, maxChars)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
 }

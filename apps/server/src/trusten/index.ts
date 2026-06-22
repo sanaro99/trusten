@@ -37,6 +37,7 @@ import type {
   WorkflowStep,
   WorkflowStepStatus,
 } from './types'
+import { sleep } from './utils/delay'
 import { normalizeUrlKey } from './utils/url'
 
 // ─── All analyzers ───
@@ -201,10 +202,9 @@ export class TrustenEngine {
       // ── Pre-flight: dismiss cookie banners and interfering modals ──────
       const fakeProfile = generateFakeProfile()
       const cookieStatus = await dismissCookieBanners(this.browser, pid)
-      if (cookieStatus !== 'no-banner')
-        await new Promise((r) => setTimeout(r, 600))
+      if (cookieStatus !== 'no-banner') await sleep(600)
       const modalsDismissed = await dismissInterferingModals(this.browser, pid)
-      if (modalsDismissed > 0) await new Promise((r) => setTimeout(r, 600))
+      if (modalsDismissed > 0) await sleep(600)
       logger.info('Trusten pre-flight complete', {
         cookieStatus,
         modalsDismissed,
@@ -281,7 +281,7 @@ export class TrustenEngine {
                 .waitForIdle(pid, { timeout: 5000 })
                 .catch(() => undefined)
             }
-            await new Promise((r) => setTimeout(r, 400))
+            await sleep(400)
             const midUrl =
               (await this.browser.listPages()).find((p) => p.pageId === pid)
                 ?.url ?? beforeUrl
@@ -338,7 +338,7 @@ export class TrustenEngine {
             .waitForIdle(pid, { timeout: 6000 })
             .catch(() => undefined)
         }
-        await new Promise((r) => setTimeout(r, 800))
+        await sleep(800)
 
         const pages = await this.browser.listPages()
         const currentUrl = pages.find((p) => p.pageId === pid)?.url ?? beforeUrl
@@ -418,7 +418,7 @@ export class TrustenEngine {
               stepPatterns,
             ),
           )
-          await new Promise((r) => setTimeout(r, 300))
+          await sleep(300)
           const { data } = await this.browser.screenshot(pid, {
             format: 'jpeg',
             quality: 82,
@@ -858,7 +858,7 @@ export class TrustenEngine {
     try {
       const fileUrl = `file:///${htmlPath.replace(/\\/g, '/')}`
       pdfPageId = await this.browser.newPage(fileUrl, { background: true })
-      await new Promise((r) => setTimeout(r, 1500)) // Let the page render
+      await sleep(1500) // Let the page render
 
       const pdfResult = await this.browser.printToPDF(pdfPageId, {
         landscape: false,
@@ -945,7 +945,7 @@ export class TrustenEngine {
       } catch {
         /* ignore */
       }
-      await new Promise((r) => setTimeout(r, 400))
+      await sleep(400)
 
       // Step 2: fill the input
       const fillScript = `(function() {
@@ -1084,7 +1084,7 @@ export class TrustenEngine {
   private async waitForPageLoad(pageId: number): Promise<void> {
     // Poll readyState via evaluate; browser.goto already handles this for navigation
     // but newPage may arrive before the page fully loads
-    await new Promise((r) => setTimeout(r, 1500))
+    await sleep(1500)
 
     try {
       await this.browser.waitFor(pageId, {

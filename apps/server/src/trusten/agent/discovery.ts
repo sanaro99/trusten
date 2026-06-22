@@ -14,6 +14,7 @@ import { logger } from '../../lib/logger'
 import type { BrowserDriver } from '../browser/driver'
 import { getTrustenLLM } from '../llm/client'
 import type { ScanWorkflow, WorkflowStepDefinition } from '../types'
+import { sleep } from '../utils/delay'
 import {
   dismissCookieBanners,
   dismissInterferingModals,
@@ -41,8 +42,6 @@ const DEFAULT_ANALYZERS = [
   'PrivacyAnalyzer',
   'VisualAnalyzer',
 ]
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 interface SiteMap {
   title: string
