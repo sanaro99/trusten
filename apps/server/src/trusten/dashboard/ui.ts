@@ -423,7 +423,7 @@ export function homePage(
                     (r) => `
                 <tr>
                   <td><a class="t-domain" href="/trusten/site/${esc(r.domain)}">${esc(r.domain)}</a></td>
-                  <td><div class="flex items-center gap-8"><span class="grade" style="background:${GRADE_COLOR[r.scoreGrade] ?? '#6c6577'}">${esc(r.scoreGrade)}</span> <span class="text-sm text-muted">${r.scoreNumeric}</span></div></td>
+                  <td>${gradePill(r.scoreGrade, r.scoreNumeric)}</td>
                   <td>${patternCountBadge(r.patternCount)}</td>
                   <td><span class="text-sm text-muted">${esc(r.scanType)}${r.workflowId ? ` · ${esc(r.workflowId)}` : ''}</span></td>
                   <td class="text-sm text-muted">${relTime(r.createdAt)}</td>
@@ -586,7 +586,7 @@ export function domainPage(
                 (s) => `
             <tr>
               <td class="text-sm">${s.createdAt.slice(0, 16).replace('T', ' ')}</td>
-              <td><div class="flex items-center gap-8"><span class="grade" style="background:${GRADE_COLOR[s.scoreGrade] ?? '#6c6577'}">${esc(s.scoreGrade)}</span> <span class="text-sm text-muted">${s.scoreNumeric}</span></div></td>
+              <td>${gradePill(s.scoreGrade, s.scoreNumeric)}</td>
               <td>${patternCountBadge(s.patternCount)}</td>
               <td>${s.criticalCount > 0 ? `<span style="color:#d23b34;font-weight:700">${s.criticalCount}</span>` : '<span class="text-muted">0</span>'}</td>
               <td class="text-sm text-muted">${esc(s.scanType)}${s.workflowId ? ` · ${esc(s.workflowId)}` : ''}</td>
@@ -1021,7 +1021,7 @@ export function historyPage(scans: ScanHistoryRow[]): string {
             <tr>
               <td><a class="t-domain" href="/trusten/site/${esc(s.domain)}">${esc(s.domain)}</a></td>
               <td class="text-sm text-muted font-mono" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.url)}</td>
-              <td><div class="flex items-center gap-8"><span class="grade" style="background:${GRADE_COLOR[s.scoreGrade] ?? '#6c6577'}">${esc(s.scoreGrade)}</span> <span class="text-sm text-muted">${s.scoreNumeric}</span></div></td>
+              <td>${gradePill(s.scoreGrade, s.scoreNumeric)}</td>
               <td>${patternCountBadge(s.patternCount)}</td>
               <td class="text-sm text-muted">${esc(s.scanType)}${s.workflowId ? ` · ${esc(s.workflowId)}` : ''}</td>
               <td class="text-sm text-muted">${s.createdAt.slice(0, 16).replace('T', ' ')}</td>
@@ -1272,6 +1272,11 @@ function patternCountBadge(count: number): string {
   if (count >= 5)
     return `<span style="color:#d23b34;font-weight:700">${count}</span>`
   return `<span style="color:#e0651b;font-weight:700">${count}</span>`
+}
+
+/** Grade letter chip + numeric score, as used in scan-history table rows. */
+function gradePill(grade: string, numeric: number): string {
+  return `<div class="flex items-center gap-8"><span class="grade" style="background:${GRADE_COLOR[grade] ?? '#6c6577'}">${esc(grade)}</span> <span class="text-sm text-muted">${numeric}</span></div>`
 }
 
 // ─── Inline icons ───

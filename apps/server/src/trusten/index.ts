@@ -141,23 +141,17 @@ export class TrustenEngine {
     const workflowSteps: WorkflowStep[] = []
 
     try {
-      const [
-        { buildAnnotationScript, buildCleanupScript },
-        {
-          dismissCookieBanners,
-          dismissInterferingModals,
-          generateFakeProfile,
-          resolveGoalTemplate,
-        },
-      ] = await Promise.all([import('./report'), import('./utils/pre-scan')])
+      const {
+        dismissCookieBanners,
+        dismissInterferingModals,
+        generateFakeProfile,
+        resolveGoalTemplate,
+      } = await import('./utils/pre-scan')
 
       // Create the per-scan directory up front so it can also hold the session
       // video that Playwright records for the lifetime of the page/context.
       const screenshotDir = `${this.reportsDir}/screenshots/${scanId}`
-      const [fs, path] = await Promise.all([
-        import('node:fs'),
-        import('node:path'),
-      ])
+      const fs = await import('node:fs')
       fs.mkdirSync(screenshotDir, { recursive: true })
 
       pageId = await this.browser.newPage(url, {
@@ -372,58 +366,16 @@ export class TrustenEngine {
           })
         }
 
-        // ── Screenshot: annotate then save to file ───────────────────────
-        let screenshotB64 = ''
-        let screenshotPath = ''
-        try {
-          await this.browser.evaluate(
+        // ── Screenshot: annotate, capture, save ──────────────────────────
+        const { screenshotB64, screenshotPath } =
+          await this.captureStepScreenshot(
             pid,
-            buildAnnotationScript(
-              stepNumber,
-              workflow.steps.length,
-              stepDef.instruction,
-              stepPatterns,
-            ),
-          )
-          await sleep(300)
-          const { data } = await this.browser.screenshot(pid, {
-            format: 'jpeg',
-            quality: 82,
-            fullPage: false,
-          })
-          screenshotB64 = data
-          // Save screenshot to file so the dashboard can serve it
-          const screenshotFile = path.join(
             screenshotDir,
-            `step-${stepNumber}.jpg`,
+            stepNumber,
+            workflow.steps.length,
+            stepDef.instruction,
+            stepPatterns,
           )
-          fs.writeFileSync(screenshotFile, Buffer.from(screenshotB64, 'base64'))
-          screenshotPath = screenshotFile
-        } catch {
-          try {
-            const { data } = await this.browser.screenshot(pid, {
-              format: 'jpeg',
-              quality: 82,
-              fullPage: false,
-            })
-            screenshotB64 = data
-            const screenshotFile = path.join(
-              screenshotDir,
-              `step-${stepNumber}.jpg`,
-            )
-            fs.writeFileSync(
-              screenshotFile,
-              Buffer.from(screenshotB64, 'base64'),
-            )
-            screenshotPath = screenshotFile
-          } catch {
-            /* non-fatal */
-          }
-        } finally {
-          await this.browser
-            .evaluate(pid, buildCleanupScript())
-            .catch(() => undefined)
-        }
 
         workflowSteps.push({
           stepNumber,
@@ -864,6 +816,56 @@ export class TrustenEngine {
       logger.warn('Trusten: failed to persist scan', {
         error: err instanceof Error ? err.message : String(err),
       })
+    }
+  }
+
+  /**
+   * Annotate the page with bounding boxes, screenshot it, and save the JPEG.
+   * Annotation and the capture itself are both best-effort: a failure yields an
+   * empty screenshot rather than aborting the scan. The overlay is always
+   * cleaned up afterwards.
+   */
+  private async captureStepScreenshot(
+    pageId: number,
+    screenshotDir: string,
+    stepNumber: number,
+    totalSteps: number,
+    instruction: string,
+    patterns: DetectedPattern[],
+  ): Promise<{ screenshotB64: string; screenshotPath: string }> {
+    const { buildAnnotationScript, buildCleanupScript } = await import(
+      './report'
+    )
+    const [fs, path] = await Promise.all([
+      import('node:fs'),
+      import('node:path'),
+    ])
+
+    try {
+      await this.browser.evaluate(
+        pageId,
+        buildAnnotationScript(stepNumber, totalSteps, instruction, patterns),
+      )
+      await sleep(300)
+    } catch {
+      /* annotation is best-effort — still capture the raw page */
+    }
+
+    try {
+      const { data } = await this.browser.screenshot(pageId, {
+        format: 'jpeg',
+        quality: 82,
+        fullPage: false,
+      })
+      const screenshotFile = path.join(screenshotDir, `step-${stepNumber}.jpg`)
+      fs.writeFileSync(screenshotFile, Buffer.from(data, 'base64'))
+      return { screenshotB64: data, screenshotPath: screenshotFile }
+    } catch {
+      return { screenshotB64: '', screenshotPath: '' }
+    } finally {
+      await this.browser
+        .evaluate(pageId, buildCleanupScript())
+        .catch(() => undefined)
     }
   }
 
