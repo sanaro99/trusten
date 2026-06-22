@@ -14,10 +14,10 @@ import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
 import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
-import { cachePageFindings, getCachedPageFindings } from './db'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
 import { calculateScore } from './scoring/engine'
+import { type ScanStore, sqliteScanStore } from './store'
 import type {
   AnalyzerContext,
   AnalyzerResult,
@@ -54,9 +54,15 @@ function dedupePatterns(patterns: DetectedPattern[]): DetectedPattern[] {
 export class TrustenEngine {
   private browser: BrowserDriver
   private reportsDir: string
+  private store: ScanStore
 
-  constructor(browser: BrowserDriver, executionDir?: string) {
+  constructor(
+    browser: BrowserDriver,
+    executionDir?: string,
+    store: ScanStore = sqliteScanStore,
+  ) {
     this.browser = browser
+    this.store = store
     // Save reports to Desktop so they're always easily findable,
     // regardless of which directory the binary happens to be running from.
     const home =
@@ -345,7 +351,7 @@ export class TrustenEngine {
         // surface them instantly.
         if (stepPatterns.length > 0) {
           try {
-            cachePageFindings(
+            this.store.cachePageFindings(
               normalizeUrlKey(currentUrl),
               currentUrl,
               stepPatterns,
@@ -698,7 +704,7 @@ export class TrustenEngine {
     live: DetectedPattern[],
   ): DetectedPattern[] {
     try {
-      const cached = getCachedPageFindings(normalizeUrlKey(url))
+      const cached = this.store.getCachedPageFindings(normalizeUrlKey(url))
       if (!cached || cached.patterns.length === 0) return live
       const key = (p: DetectedPattern) =>
         `${p.category}|${p.element?.selector ?? ''}|${p.description}`
@@ -805,8 +811,7 @@ export class TrustenEngine {
     workflowId?: string,
   ): Promise<void> {
     try {
-      const { saveTrustenScan } = await import('./db')
-      saveTrustenScan(result, {
+      this.store.saveScan(result, {
         workflowId,
         pdfPath: result.pdfPath,
         htmlPath: result.htmlPath,
