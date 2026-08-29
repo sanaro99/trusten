@@ -13,6 +13,7 @@
     "dev": "bun run --filter @trusten/server dev",
     "dev:web": "bun run --filter @trusten/web dev",
     "build:web": "bun run --filter @trusten/web build",
+    "test": "bun test --path-ignore-patterns '**/*.svelte.test.ts' --path-ignore-patterns '**/e2e/**'",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "bunx biome check",
     "lint:fix": "bunx biome check --write --unsafe",

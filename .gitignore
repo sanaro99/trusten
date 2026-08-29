@@ -19,6 +19,8 @@
 
 # TypeScript / build artifacts
 **/*.tsbuildinfo
+**/playwright-report/
+**/test-results/
 
 # Logs
 **/*.log

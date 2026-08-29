@@ -13,3 +13,9 @@ input,
 select {
   min-height: var(--trusten-target-min);
 }
+
+/* Inline boxes ignore min-height; flex keeps link targets measurable. */
+a {
+  display: inline-flex;
+  align-items: center;
+}
