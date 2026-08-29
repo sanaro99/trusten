@@ -6,7 +6,11 @@
  * generateReportHtml()     — Full HTML report with annotated screenshots
  */
 
-import { CATEGORY_LABELS, GRADE_COLOR, SEVERITY_COLOR } from './dashboard/theme'
+import {
+  CATEGORY_LABELS,
+  GRADE_COLOR,
+  SEVERITY_COLOR,
+} from '@trusten/ui/content'
 import type { DetectedPattern, ScanResult, WorkflowStep } from './types'
 
 // ─── Screenshot annotation ───

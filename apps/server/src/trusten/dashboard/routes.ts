@@ -17,7 +17,6 @@ import type { BrowserDriver } from '../browser/driver'
 import {
   createAuditJob,
   getAuditJob,
-  getDomainSummaries,
   getDomainSummary,
   getGlobalStats,
   getTrustenScanById,
@@ -30,14 +29,6 @@ import { closeChannel, publish } from '../live/hub'
 import type { ScanWorkflow } from '../types'
 import { checkRateLimit, isAllowedByRobots } from '../utils/guardrails'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
-import {
-  auditPage,
-  domainPage,
-  historyPage,
-  homePage,
-  leaderboardPage,
-  scanPage,
-} from './ui'
 import { parseBody } from './validate'
 
 interface Config {
@@ -85,43 +76,6 @@ async function preScanGuard(
 
 export function createTrustenDashboardRoutes(config: Config) {
   const app = new Hono()
-
-  // ─── HTML Pages ───
-
-  app.get('/', (c) => {
-    const stats = getGlobalStats()
-    const recent = getTrustenScanHistory(20)
-    const domains = getDomainSummaries(20)
-    return c.html(homePage(stats, recent, domains))
-  })
-
-  app.get('/audit', (c) => {
-    const prefill = c.req.query('url') ?? ''
-    return c.html(auditPage(prefill))
-  })
-
-  app.get('/history', (c) => {
-    const scans = getTrustenScanHistory(100)
-    return c.html(historyPage(scans))
-  })
-
-  app.get('/leaderboard', (c) => {
-    const domains = getDomainSummaries(100)
-    return c.html(leaderboardPage(domains))
-  })
-
-  app.get('/site/:domain', (c) => {
-    const domain = c.req.param('domain')
-    const summary = getDomainSummary(domain)
-    const scans = getTrustenScansByDomain(domain, 50)
-    return c.html(domainPage(domain, summary, scans))
-  })
-
-  app.get('/scan/:id', (c) => {
-    const id = c.req.param('id')
-    const scan = getTrustenScanById(id)
-    return c.html(scanPage(scan, id))
-  })
 
   // Step screenshot — served directly from the saved file
   app.get('/report/:id/screenshot/:step', async (c) => {

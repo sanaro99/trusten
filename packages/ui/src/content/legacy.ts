@@ -1,34 +1,30 @@
 /**
- * Trusten — Shared display tokens
- *
- * Single source of truth for the purple-theme colors and human-readable
- * category labels used by the server-rendered dashboard (ui.ts) and the
- * standalone HTML/PDF report (report.ts). Keeping these here prevents the two
- * renderers from drifting apart.
+ * Legacy display maps, kept for report.ts until project 2 rebuilds it on
+ * components. New code should use PATTERN_CONTENT and the CSS tokens.
  */
-
 export const GRADE_COLOR: Record<string, string> = {
-  A: '#15a05a',
-  B: '#7d9b1f',
-  C: '#cf8a00',
-  D: '#e0651b',
-  F: '#d23b34',
+  A: '#15803d',
+  B: '#4d7c0f',
+  C: '#a16207',
+  D: '#c2410c',
+  F: '#b91c1c',
 }
 
 export const SEVERITY_COLOR: Record<string, string> = {
-  critical: '#d23b34',
-  high: '#e0651b',
-  medium: '#cf8a00',
-  low: '#15a05a',
+  critical: '#b91c1c',
+  high: '#c2410c',
+  medium: '#a16207',
+  low: '#15803d',
 }
 
-export const SEVERITY_BG: Record<string, string> = {
-  critical: '#fbeceb',
-  high: '#fbefe6',
-  medium: '#fbf3e0',
-  low: '#e9f6ef',
-}
-
+/**
+ * The report's original category labels, carried over unchanged.
+ *
+ * Deliberately NOT derived from PATTERN_CONTENT: spec 7.6 leaves report.ts
+ * untouched this project, and deriving these would silently re-voice the PDF.
+ * Project 2 decides the report's voice when it splits the consumer and
+ * professional reports.
+ */
 export const CATEGORY_LABELS: Record<string, string> = {
   fake_urgency: 'Fake Urgency',
   fake_scarcity: 'Fake Scarcity',
