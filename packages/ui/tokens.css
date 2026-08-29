@@ -1,0 +1,68 @@
+/**
+ * Trusten design tokens.
+ *
+ * Single source of truth for colour, type and spacing across the dashboard,
+ * the PDF report and the extension. Replaces the 135 literal hex values that
+ * used to live in dashboard/ui.ts.
+ */
+:root {
+  /* Brand */
+  --trusten-purple: #6d28d9;
+  --trusten-purple-strong: #5b21b6;
+
+  /* Grade — carried over from dashboard/theme.ts */
+  --trusten-grade-a: #15803d;
+  --trusten-grade-b: #4d7c0f;
+  --trusten-grade-c: #a16207;
+  --trusten-grade-d: #c2410c;
+  --trusten-grade-f: #b91c1c;
+
+  /* Shown levels (see src/content/severity.ts) */
+  --trusten-level-serious: #b91c1c;
+  --trusten-level-worth-knowing: #a16207;
+  --trusten-level-minor: #15803d;
+
+  /* Surfaces and text */
+  --trusten-bg: #ffffff;
+  --trusten-surface: #f8f7fb;
+  --trusten-border: #e4e1ec;
+  --trusten-text: #1c1a22;
+  --trusten-text-muted: #55505f;
+
+  /* Type — 18px base is a requirement for this audience, not a preference */
+  --trusten-text-base: 1.125rem;
+  --trusten-line-height: 1.7;
+  --trusten-measure: 68ch;
+
+  /* Minimum interactive target */
+  --trusten-target-min: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --trusten-bg: #131118;
+    --trusten-surface: #1c1a22;
+    --trusten-border: #322d3d;
+    --trusten-text: #f4f2f8;
+    --trusten-text-muted: #b3aec0;
+
+    --trusten-grade-a: #4ade80;
+    --trusten-grade-b: #a3e635;
+    --trusten-grade-c: #fbbf24;
+    --trusten-grade-d: #fb923c;
+    --trusten-grade-f: #f87171;
+
+    --trusten-level-serious: #f87171;
+    --trusten-level-worth-knowing: #fbbf24;
+    --trusten-level-minor: #4ade80;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
