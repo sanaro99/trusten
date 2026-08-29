@@ -110,7 +110,8 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
     name: 'Extra costs added at the last step',
     what: 'The price went up with fees that were not shown at the start.',
     why: 'By the time the real price appears you have already spent time and are more likely to accept it.',
-    watchFor: 'A total at checkout higher than the price you first saw.',
+    watchFor:
+      'Fees with vague names like "service fee" or "processing fee" that only appear on the very last screen.',
     lawPlain:
       'The EU and the US require the full price, including unavoidable fees, to be shown up front.',
   },
@@ -130,14 +131,15 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
     why: 'Making the exit hard to find keeps you paying for longer than you meant to.',
     watchFor: 'No "cancel" link anywhere in your account settings.',
     lawPlain:
-      'US and EU rules say cancelling must be as easy as signing up was.',
+      'EU law says cancelling must be as easy as signing up was. US regulators want the same rule, but it is still being fought over in court.',
+    contested: true,
   },
 
   [DarkPatternCategory.FORCED_CONTINUITY]: {
     name: 'A free trial that quietly starts charging',
     what: 'This site takes your card for a free trial and starts charging when the trial ends.',
     why: 'No reminder is sent. Often the first sign is a payment on your bank statement.',
-    watchFor: 'Being asked for card details for something described as free.',
+    watchFor: 'A trial that never states a clear end date when you sign up.',
     lawPlain:
       'In the EU and the US, a site has to tell you clearly when a free trial turns into a paid one.',
   },
@@ -148,7 +150,8 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
     why: 'Every extra step is there hoping you give up and keep paying.',
     watchFor: 'Being told to ring a number when you signed up in one click.',
     lawPlain:
-      'US rules require a simple way to cancel anything you signed up for online.',
+      'US regulators have tried to require a simple way to cancel anything you signed up for online, but the rule keeps getting challenged in court.',
+    contested: true,
   },
 
   [DarkPatternCategory.FORCED_REGISTRATION]: {
