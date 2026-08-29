@@ -22,7 +22,8 @@ USER bun
 RUN bun install --frozen-lockfile
 
 USER root
-RUN bunx puppeteer browsers install chrome --install-deps
+RUN bun apps/server/node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js \
+    browsers install chrome --install-deps
 
 COPY --chown=bun:bun . .
 USER bun
