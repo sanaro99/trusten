@@ -54,7 +54,7 @@ Every task's requirements implicitly include this section.
 - `tokens.css` — CSS custom properties (grade, severity, surface, text, border).
 - `tailwind-preset.js` — exposes tokens as Tailwind utilities.
 - `src/content/severity.ts` — internal 4-level severity → 3 shown levels.
-- `src/content/patterns.ts` — 24 plain-language entries. The crown jewels.
+- `src/content/patterns.ts` — 25 plain-language entries. The crown jewels.
 - `src/content/grade.ts` — grade → plain headline sentence.
 - `src/content/confidence.ts` — confidence band → wording and placement.
 - `src/domain/*.svelte` — `SeverityTag`, `GradeBadge`, `EvidenceShot`, `FindingCard`, `JourneyTimeline`, `Disclosure`.
@@ -87,7 +87,7 @@ Both `packages/ui`'s content layer and `packages/shared`'s API schemas need `Dar
 
 - [ ] **Step 1: Read the current source of truth**
 
-Read `apps/server/src/trusten/types/patterns.ts` in full. It defines `DarkPatternCategory` (24 members), `Severity`, `Regulation`, `RegulatoryViolation`, `ElementEvidence`, `PatternEvidence`, `DetectedPattern`. Copy the enum members **verbatim** — the string values are persisted in SQLite `patterns_json` and must not change.
+Read `apps/server/src/trusten/types/patterns.ts` in full. It defines `DarkPatternCategory` (25 members — the file's own comment says 24 and is wrong), `Severity`, `Regulation`, `RegulatoryViolation`, `ElementEvidence`, `PatternEvidence`, `DetectedPattern`. Copy the enum members **verbatim** — the string values are persisted in SQLite `patterns_json` and must not change.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -156,8 +156,10 @@ describe('SeveritySchema', () => {
 })
 
 describe('DarkPatternCategory', () => {
-  test('has 24 members', () => {
-    expect(Object.keys(DarkPatternCategory)).toHaveLength(24)
+  test('has 25 members', () => {
+    // Verified against the source enum. Note the original file's comment
+    // said "24 total" and was wrong -- trust the count, not the comment.
+    expect(Object.keys(DarkPatternCategory)).toHaveLength(25)
   })
 })
 ```
@@ -181,7 +183,7 @@ Create `packages/shared/src/domain/patterns.ts`. Copy the enums verbatim from th
 import { z } from 'zod'
 
 export enum DarkPatternCategory {
-  // ... all 24 members, copied verbatim from
+  // ... all 25 members, copied verbatim from
   // apps/server/src/trusten/types/patterns.ts
 }
 
@@ -559,7 +561,7 @@ git commit -m "feat(ui): add @trusten/ui package with severity content layer"
 
 ---
 
-## Task 3: Plain-language pattern content — all 24 categories
+## Task 3: Plain-language pattern content — all 25 categories
 
 The highest-value deliverable in this project. Reviewed as content, not code (spec §10, step 2).
 
@@ -667,7 +669,7 @@ Expected: FAIL — `Cannot find module './patterns'`.
 
 - [ ] **Step 3: Write the content**
 
-Create `packages/ui/src/content/patterns.ts`. Write **all 24** entries — the ones below are the specimens from spec §5.2 plus the pattern to follow; complete the remainder in the same voice, checking each against the Global Constraints.
+Create `packages/ui/src/content/patterns.ts`. Write **all 25** entries — 8 are given below as specimens, and the remaining 17 are named beneath them. Complete every one in the same voice, checking each against the Global Constraints. (The enum has 25 members; the source file's own comment claiming 24 is wrong.)
 
 ```ts
 /**
@@ -768,7 +770,7 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
       'EU privacy law requires sites to tell you clearly who gets your information and why.',
   },
 
-  // ... complete the remaining 16 entries in the same voice:
+  // ... complete the remaining 17 entries in the same voice:
   //   FAKE_SOCIAL_PROOF, TRICK_WORDING, VISUAL_INTERFERENCE, BASKET_SNEAKING,
   //   BAIT_AND_SWITCH, FORCED_CONTINUITY, FORCED_REGISTRATION, FORCED_SHARING,
   //   GAMIFICATION_PRESSURE, HIDDEN_DEFAULTS, REPEATED_PROMPTS, DISGUISED_ADS,
@@ -824,7 +826,7 @@ Not a mechanical step, and the reason this task exists. Read every `what` and `w
 ```bash
 bunx biome check --write packages/ui
 git add packages/ui/src/content
-git commit -m "feat(ui): add plain-language content for all 24 pattern categories"
+git commit -m "feat(ui): add plain-language content for all 25 pattern categories"
 ```
 
 ---
@@ -2958,7 +2960,7 @@ export const DomainDetailSchema = z.object({
 export type DomainDetail = z.infer<typeof DomainDetailSchema>
 ```
 
-Replace `getDomain` in `apps/web/src/lib/api.ts` with:
+Replace `getDomain` in `apps/web/src/lib/api.ts` with the following — and **delete the now-orphaned `DomainSummarySchema` import**, adding `DomainDetailSchema` in its place. This repo sets biome's `noUnusedImports` to `error`, so an orphaned import fails lint:
 
 ```ts
 getDomainDetail: (domain: string, f: Fetcher = fetch) =>
@@ -3429,14 +3431,21 @@ export const SEVERITY_COLOR: Record<string, string> = {
 }
 ```
 
-For `CATEGORY_LABELS`, derive it from the new content so the two cannot drift:
+For `CATEGORY_LABELS`, copy the **original** map from `dashboard/theme.ts` verbatim:
 
 ```ts
-import { PATTERN_CONTENT } from './patterns'
-
-export const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(PATTERN_CONTENT).map(([key, value]) => [key, value.name]),
-)
+/**
+ * The report's original category labels, carried over unchanged.
+ *
+ * Deliberately NOT derived from PATTERN_CONTENT: spec 7.6 leaves report.ts
+ * untouched this project, and deriving these would silently re-voice the PDF.
+ * Project 2 decides the report's voice when it splits the consumer and
+ * professional reports.
+ */
+export const CATEGORY_LABELS: Record<string, string> = {
+  // Copy all 25 entries verbatim from apps/server/src/trusten/dashboard/theme.ts
+  // before deleting that file in step 4.
+}
 ```
 
 - [ ] **Step 2: Re-point `report.ts` and add the dependency**
@@ -3635,7 +3644,7 @@ gh pr create --title "feat(web): rebuild dashboard on SvelteKit in plain languag
 Before marking the plan complete, confirm each against the spec:
 
 - [ ] No confidence figure, no `/100` score, no deduction arithmetic on any reader-facing surface (§2.2).
-- [ ] All 24 categories have plain-language content and the completeness test passes (§5.1–5.2).
+- [ ] All 25 categories have plain-language content and the completeness test passes (§5.1–5.2).
 - [ ] Analyzer text and formal citations are present but demoted behind labelled disclosures — not deleted, because project 2's professional report needs them primary (§5.3, §7.2.1).
 - [ ] Findings below 0.7 confidence appear in a collapsed group, not the main list (§5.4).
 - [ ] Four internal severity levels render as three, each with colour **and** word **and** icon (§5.5, §2.3).

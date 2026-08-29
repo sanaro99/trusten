@@ -132,7 +132,7 @@ frontend-only change.
 
 Per-finding descriptions are generated strings with interpolated evidence — they cannot be
 mechanically rewritten. But every finding carries a `category`, and `DarkPatternCategory`
-is a **closed enum of 24 values**. So a hand-written plain-language explanation per
+is a **closed enum of 25 values**. So a hand-written plain-language explanation per
 category is finite, reviewable, and high quality in a way generated text never is.
 
 The interpolated part — the site's actual words, e.g. `"Only 2 left!"` — is the most
@@ -159,7 +159,7 @@ Four fields, each with a job: **name** (what to call it), **what** (what the sit
 this is the part that leaves the user better off than when they arrived), and **lawPlain**
 (the legal position in one sentence, no citation).
 
-Illustrative renamings — the full set of 24 is written during implementation and reviewed
+Illustrative renamings — the full set of 25 is written during implementation and reviewed
 as content, not code:
 
 | Enum | Today shows | Becomes |
@@ -380,7 +380,7 @@ packages/ui/
   tailwind-preset.js      Tailwind preset exposing tokens as utilities
   src/
     content/
-      patterns.ts         24 plain-language entries (§5.2)   <- the crown jewels
+      patterns.ts         25 plain-language entries (§5.2)   <- the crown jewels
       severity.ts         internal severity -> shown level + wording
       grade.ts            grade -> plain headline sentence
     primitives/           shadcn-svelte components (Button, Dialog, Table, Badge…)
@@ -557,7 +557,7 @@ CI gains a `test` job alongside the existing `code-quality` workflow.
 
 1. `packages/ui` skeleton — tokens, Tailwind preset, shadcn-svelte init, import-boundary
    lint rule.
-2. **Plain-language content layer** (§5) — 24 category entries, severity and grade mappings,
+2. **Plain-language content layer** (§5) — 25 category entries, severity and grade mappings,
    completeness test. Reviewed as content, not code. *Deliberately early: it is the highest
    product value here and the thing most likely to need a review round.*
 3. `packages/shared/api` zod schemas; Hono validates against them. **Old UI still working.**
