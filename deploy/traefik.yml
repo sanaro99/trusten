@@ -1,0 +1,18 @@
+http:
+  routers:
+    trusten:
+      rule: "Host(`REPLACE_TRUSTEN_HOSTNAME`)"
+      entryPoints:
+        - websecure
+      service: trusten
+      tls:
+        certResolver: letsencrypt
+  services:
+    trusten:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:REPLACE_HOST_PORT"
+        healthCheck:
+          path: /health
+          interval: "30s"
+          timeout: "5s"

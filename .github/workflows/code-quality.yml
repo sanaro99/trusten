@@ -1,6 +1,9 @@
 name: Code Quality
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -44,6 +47,9 @@ jobs:
 
       - name: Run Typecheck
         run: bun run typecheck
+
+      - name: Check SvelteKit application
+        run: bun run --filter @trusten/web check
 
   test:
     name: runner / Tests

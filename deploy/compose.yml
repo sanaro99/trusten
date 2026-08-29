@@ -1,0 +1,55 @@
+services:
+  proxy:
+    image: ghcr.io/REPLACE_GITHUB_OWNER/trusten:proxy-latest
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    ports:
+      - "REPLACE_HOST_PORT:8080"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  web:
+    image: ghcr.io/REPLACE_GITHUB_OWNER/trusten:latest
+    command: ["bun", "apps/web/build/index.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      ORIGIN: https://REPLACE_TRUSTEN_HOSTNAME
+      TRUSTEN_INTERNAL_API_ORIGIN: http://api:9200
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  api:
+    image: ghcr.io/REPLACE_GITHUB_OWNER/trusten:latest
+    command: ["bun", "run", "start"]
+    restart: unless-stopped
+    env_file:
+      - path: /mnt/REPLACE_APPS_POOL/appconfig/trusten.env
+        required: false
+    environment:
+      NODE_ENV: production
+      HOME: /data
+      TRUSTEN_PORT: 9200
+    volumes:
+      - /mnt/REPLACE_APPS_POOL/trusten:/data
+    shm_size: "2gb"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9200/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"

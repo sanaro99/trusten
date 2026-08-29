@@ -1,0 +1,10 @@
+:8080 {
+	encode zstd gzip
+
+	# Keep browser API calls, report downloads, and live-scan WebSockets on the
+	# public origin while routing them to the scanner service internally.
+	@scanner path /health /trusten/api/* /trusten/report/*
+	reverse_proxy @scanner api:9200
+
+	reverse_proxy web:3000
+}

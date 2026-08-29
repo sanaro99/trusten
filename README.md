@@ -76,6 +76,7 @@ mode → Load unpacked) to Quick Scan the page you're viewing.
 - [API](docs/api.md) — HTTP + WebSocket endpoints
 - [Browser extension](docs/extension.md)
 - [Development](docs/development.md) — setup, configuration, scripts, conventions
+- [Deployment](docs/deployment.md) — CI/CD and private TrueNAS rollout
 
 The full product spec lives in `Trusten_PRD.docx`.
 
