@@ -29,6 +29,8 @@ This is one of three projects, specified and implemented separately:
    plain-language content layer, shared API contract, the dashboard surfaces redesigned.
 2. **Report renderer** — `report.ts` rebuilt on shared components with a `css: 'injected'`
    compile target, preserving the `file:///` → PDF path and the portable `.html` artifact.
+   **Produces two reports** (decided 2026-08-28, see §7.2.1): a consumer report in the
+   voice of §2, and a professional report for regulators, lawyers, and compliance staff.
 3. **Extension popup** — the 578-line vanilla popup rebuilt as a Svelte MV3 popup.
 
 Projects 2 and 3 depend on `packages/ui` and on the plain-language layer from this
@@ -396,6 +398,59 @@ exist. Enforced by an import-boundary lint rule, not by good intentions.
 accepts a `static` mode that renders a pre-cropped image without interactivity — the mode
 project 2 uses for the PDF.
 
+### 7.2.1 Two audiences, two registers — without bimodal components
+
+**Decision (2026-08-28):** Trusten produces two reports. The consumer report, in the voice
+of §2, is the main one. The professional report serves regulators, lawyers, and compliance
+staff, who read citations fluently and for whom demoting the legal detail actively destroys
+the document's value.
+
+Project 2 builds both, but the structure that makes that possible has to exist here, or
+`packages/ui` will need reworking to accommodate it.
+
+**The wrong way** is a `register: 'plain' | 'professional'` prop threaded through every
+component. That makes each one bimodal, spreads conditionals through the whole library, and
+doubles the state space of everything — precisely the debt this project exists to avoid.
+
+**The structure instead:** divergence lives in *composition and copy*, never in the shared
+pieces.
+
+```
+shared, single-register:
+  tokens.css        primitives/        content/patterns.ts     EvidenceShot
+                    SeverityTag        (carries BOTH plain and    GradeBadge
+                    Disclosure          technical fields)
+
+composed separately:
+  consumer/FindingCard        professional/FindingEntry
+    plain name, big picture,    formal category name, full citation with article,
+    "what this means",          analyzer name, selector, confidence as a figure,
+    law in one sentence,        network evidence, all four severity levels
+    detail behind disclosures   nothing hidden behind disclosures
+```
+
+Two compositions over one set of primitives. No component has to know which audience it is
+serving; the composition already decided.
+
+**This is why §5.3 preserves the analyzer's generated text and the formal citations rather
+than deleting them.** For the consumer they are demoted behind "How we worked this out" and
+"Is this allowed?". For the professional they are the primary content. The same data serves
+both because nothing was thrown away.
+
+**Note for project 2, recorded here so it is not discovered late:** the professional report
+is a document that may be submitted as evidence, which raises requirements the consumer
+report does not have — scan timestamp, engine version, which findings were deterministic
+versus LLM-assisted, and **which LLM provider produced them**. Trusten's provider fallback
+chain (DeepSeek → Nvidia NIM → Gemini → OpenRouter → Ollama) means the same page can yield
+different findings on different runs. A consumer never needs to know that. A regulator
+does, and a report that cannot say which engine produced a finding is weak evidence.
+Capturing provider and model per scan may require a small server change, which is why it is
+flagged now rather than in project 2.
+
+**Out of scope here:** the dashboard itself stays consumer-voiced. The professional
+artifact is the report, not a mode toggle in the UI. Revisit only if professionals turn out
+to want a live surface.
+
 ### 7.3 API contract: zod schemas in `packages/shared`
 
 The server currently does `await c.req.json<{url: string, html: string}>()` — a
@@ -532,16 +587,13 @@ only cutover, once the replacement is complete.
 
 ## 12. Open questions
 
-**One genuine question, not blocking.** Trusten currently carries 14 regulatory frameworks,
-formal citations, and PDF report generation — apparatus that points at a *professional*
-user (compliance officer, regulator, consumer-rights advocate), while §2 defines the
-primary user as a non-technical consumer. These are not incompatible: the design serves the
-consumer by default and keeps professional detail behind disclosures and in the PDF. But it
-is worth deciding explicitly whether the professional is a real second audience — if so,
-project 2's PDF should be designed *for them* rather than as a print of the consumer view,
-which would change that project meaningfully.
+**Resolved 2026-08-28 — the professional audience is real.** Trusten will produce two
+reports: a consumer report (the main one, in the voice of §2) and a professional report for
+regulators, lawyers, and compliance staff. Project 2 builds both; §7.2.1 records the
+structure in `packages/ui` that this project must establish so project 2 does not have to
+rework it, and the evidentiary requirements the professional report raises.
 
-Two smaller ones to settle during implementation:
+Two smaller questions to settle during implementation:
 
 - Whether `/explore` needs server-side pagination. Start client-side, revisit past ~2,000 rows.
 - Whether the `/site/:domain` sparkline justifies a charting library. One chart does not;
