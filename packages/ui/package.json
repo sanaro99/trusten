@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test --path-ignore-patterns 'src/domain/**'",
+    "test": "bun test --path-ignore-patterns '**/*.svelte.test.ts'",
     "test:components": "vitest run"
   },
   "dependencies": {
