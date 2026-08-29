@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "@trusten/shared": "workspace:*",
+    "@trusten/ui": "workspace:*",
     "ffmpeg-static": "^5.3.0",
     "hono": "^4.12.3",
     "pino": "^9.6.0",
     "puppeteer": "24.23.0",
     "puppeteer-core": "24.23.0",
-    "puppeteer-screen-recorder": "^3.0.6"
+    "puppeteer-screen-recorder": "^3.0.6",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/bun": "1.3.5",

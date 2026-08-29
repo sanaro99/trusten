@@ -5,6 +5,11 @@
  * Provides JSON APIs for scan submission and status polling.
  */
 
+import {
+  AnalyzePageRequestSchema,
+  AuditRequestSchema,
+  QuickScanRequestSchema,
+} from '@trusten/shared/api'
 import { Hono } from 'hono'
 import { logger } from '../../lib/logger'
 import { discoverWorkflows } from '../agent/discovery'
@@ -12,7 +17,6 @@ import type { BrowserDriver } from '../browser/driver'
 import {
   createAuditJob,
   getAuditJob,
-  getDomainSummaries,
   getDomainSummary,
   getGlobalStats,
   getTrustenScanById,
@@ -25,14 +29,7 @@ import { closeChannel, publish } from '../live/hub'
 import type { ScanWorkflow } from '../types'
 import { checkRateLimit, isAllowedByRobots } from '../utils/guardrails'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
-import {
-  auditPage,
-  domainPage,
-  historyPage,
-  homePage,
-  leaderboardPage,
-  scanPage,
-} from './ui'
+import { parseBody } from './validate'
 
 interface Config {
   browser: BrowserDriver
@@ -79,43 +76,6 @@ async function preScanGuard(
 
 export function createTrustenDashboardRoutes(config: Config) {
   const app = new Hono()
-
-  // ─── HTML Pages ───
-
-  app.get('/', (c) => {
-    const stats = getGlobalStats()
-    const recent = getTrustenScanHistory(20)
-    const domains = getDomainSummaries(20)
-    return c.html(homePage(stats, recent, domains))
-  })
-
-  app.get('/audit', (c) => {
-    const prefill = c.req.query('url') ?? ''
-    return c.html(auditPage(prefill))
-  })
-
-  app.get('/history', (c) => {
-    const scans = getTrustenScanHistory(100)
-    return c.html(historyPage(scans))
-  })
-
-  app.get('/leaderboard', (c) => {
-    const domains = getDomainSummaries(100)
-    return c.html(leaderboardPage(domains))
-  })
-
-  app.get('/site/:domain', (c) => {
-    const domain = c.req.param('domain')
-    const summary = getDomainSummary(domain)
-    const scans = getTrustenScansByDomain(domain, 50)
-    return c.html(domainPage(domain, summary, scans))
-  })
-
-  app.get('/scan/:id', (c) => {
-    const id = c.req.param('id')
-    const scan = getTrustenScanById(id)
-    return c.html(scanPage(scan, id))
-  })
 
   // Step screenshot — served directly from the saved file
   app.get('/report/:id/screenshot/:step', async (c) => {
@@ -208,24 +168,10 @@ export function createTrustenDashboardRoutes(config: Config) {
   // Analyze pre-captured content — accepts HTML/text from a browser extension or any client.
   // Does not navigate to the URL; runs analyzers on the supplied content directly.
   app.post('/api/analyze-page', async (c) => {
-    let url: string, html: string, text: string, pageTitle: string
-    try {
-      const body = await c.req.json<{
-        url: string
-        html: string
-        text?: string
-        pageTitle?: string
-      }>()
-      url = body.url?.trim()
-      html = body.html ?? ''
-      text = body.text ?? ''
-      pageTitle = body.pageTitle ?? ''
-    } catch {
-      return c.json({ error: 'Invalid JSON body' }, 400)
-    }
+    const parsed = await parseBody(c, AnalyzePageRequestSchema)
+    if (!parsed.ok) return c.json(parsed.body, 400)
+    const { url, html, text, pageTitle } = parsed.data
 
-    if (!url) return c.json({ error: 'url is required' }, 400)
-    if (!html) return c.json({ error: 'html is required' }, 400)
     if (!parseHostname(url)) return c.json({ error: 'Invalid URL' }, 400)
 
     try {
@@ -255,15 +201,9 @@ export function createTrustenDashboardRoutes(config: Config) {
 
   // Quick scan — runs immediately, returns scan ID
   app.post('/api/quick-scan', async (c) => {
-    let url: string
-    try {
-      const body = await c.req.json<{ url: string }>()
-      url = body.url?.trim()
-    } catch {
-      return c.json({ error: 'Invalid JSON body' }, 400)
-    }
-
-    if (!url) return c.json({ error: 'url is required' }, 400)
+    const parsed = await parseBody(c, QuickScanRequestSchema)
+    if (!parsed.ok) return c.json(parsed.body, 400)
+    const { url } = parsed.data
 
     const qsDomain = parseHostname(url)
     if (!qsDomain) return c.json({ error: 'Invalid URL' }, 400)
@@ -290,26 +230,10 @@ export function createTrustenDashboardRoutes(config: Config) {
 
   // Start a full multi-workflow audit (async)
   app.post('/api/audit', async (c) => {
-    let url: string
-    let workflows: string[]
-    let watch = false
-    let mode: 'fixed' | 'discover' = 'fixed'
-    try {
-      const body = await c.req.json<{
-        url: string
-        workflows?: string[]
-        watch?: boolean
-        mode?: 'fixed' | 'discover'
-      }>()
-      url = body.url?.trim()
-      workflows = body.workflows ?? Object.keys(WORKFLOW_REGISTRY)
-      watch = body.watch === true
-      mode = body.mode === 'discover' ? 'discover' : 'fixed'
-    } catch {
-      return c.json({ error: 'Invalid JSON body' }, 400)
-    }
-
-    if (!url) return c.json({ error: 'url is required' }, 400)
+    const parsed = await parseBody(c, AuditRequestSchema)
+    if (!parsed.ok) return c.json(parsed.body, 400)
+    const { url, watch, mode } = parsed.data
+    const workflows = parsed.data.workflows ?? Object.keys(WORKFLOW_REGISTRY)
 
     const domain = parseHostname(url)
     if (!domain) return c.json({ error: 'Invalid URL' }, 400)

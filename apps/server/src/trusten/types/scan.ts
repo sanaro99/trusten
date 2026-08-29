@@ -16,10 +16,17 @@ export interface ScanResult {
   patterns: DetectedPattern[]
   score: DarkPatternScore
   workflowSteps?: WorkflowStep[]
-  /** Absolute path to the saved PDF report (deep scans only) */
-  pdfPath?: string
-  /** Absolute path to the saved HTML report (deep scans only) */
-  htmlPath?: string
-  /** Absolute path to the recorded session video (.webm, deep scans only) */
-  videoPath?: string
+  /**
+   * Absolute path to the saved PDF report (deep scans only). Absent
+   * (undefined) on a freshly built result that never set it; `null` when
+   * read back from a DB row whose column was never populated.
+   */
+  pdfPath?: string | null
+  /** Absolute path to the saved HTML report (deep scans only). See pdfPath. */
+  htmlPath?: string | null
+  /**
+   * Absolute path to the recorded session video (.webm, deep scans only).
+   * See pdfPath.
+   */
+  videoPath?: string | null
 }

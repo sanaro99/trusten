@@ -53,6 +53,11 @@
       "semicolons": "asNeeded"
     }
   },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
   "assist": {
     "enabled": true,
     "actions": {
@@ -60,5 +65,39 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedImports": "off",
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/packages/ui/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "$app/navigation": "packages/ui must not import SvelteKit — the report renderer and the extension render these components outside it.",
+                  "$app/stores": "packages/ui must not import SvelteKit — the report renderer and the extension render these components outside it.",
+                  "$app/state": "packages/ui must not import SvelteKit — the report renderer and the extension render these components outside it.",
+                  "$app/environment": "packages/ui must not import SvelteKit — the report renderer and the extension render these components outside it.",
+                  "$env/static/public": "packages/ui must not import SvelteKit — the report renderer and the extension render these components outside it."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }
