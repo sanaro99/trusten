@@ -11,6 +11,8 @@
   "scripts": {
     "start": "bun run --filter @trusten/server start",
     "dev": "bun run --filter @trusten/server dev",
+    "dev:web": "bun run --filter @trusten/web dev",
+    "build:web": "bun run --filter @trusten/web build",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "bunx biome check",
     "lint:fix": "bunx biome check --write --unsafe",

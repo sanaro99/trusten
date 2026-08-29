@@ -1,0 +1,15 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+body {
+  font-size: var(--trusten-text-base);
+  line-height: var(--trusten-line-height);
+}
+
+/* Every interactive element meets the 44px minimum target (spec 2.3). */
+a,
+button,
+input,
+select {
+  min-height: var(--trusten-target-min);
+}
