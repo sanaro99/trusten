@@ -1,7 +1,7 @@
 # Trusten Dashboard on SvelteKit — Design
 
 **Date:** 2026-08-28
-**Status:** Proposed — awaiting review
+**Status:** Proposed — awaiting review (revised after audience feedback)
 **Project:** 1 of 3 (Foundation + Dashboard)
 
 ---
@@ -16,207 +16,344 @@ blocks that build DOM by string concatenation. It is the largest file in the rep
 `theme.ts` exists solely to stop `ui.ts` and `report.ts` — two independent renderers of
 the same data — from drifting apart. That is a symptom, not a solution.
 
-This project replaces the dashboard with a SvelteKit application and establishes the
-shared component foundation that the report renderer (project 2) and the browser
-extension (project 3) will later consume.
+This project replaces the dashboard with a SvelteKit application, establishes the shared
+component foundation that the report renderer (project 2) and the browser extension
+(project 3) will consume, and — the change that drives everything else — **re-voices the
+product for the people it is actually for.**
 
 ### Decomposition
 
-This is one of three projects. They are specified and implemented separately:
+This is one of three projects, specified and implemented separately:
 
-1. **Foundation + Dashboard** (this document) — SvelteKit app, `packages/ui`, shared API
-   contract, the six dashboard surfaces redesigned.
+1. **Foundation + Dashboard** (this document) — SvelteKit app, `packages/ui`, the
+   plain-language content layer, shared API contract, the dashboard surfaces redesigned.
 2. **Report renderer** — `report.ts` rebuilt on shared components with a `css: 'injected'`
    compile target, preserving the `file:///` → PDF path and the portable `.html` artifact.
 3. **Extension popup** — the 578-line vanilla popup rebuilt as a Svelte MV3 popup.
 
-Projects 2 and 3 both depend on `packages/ui` from this project. They are independent of
-each other.
+Projects 2 and 3 depend on `packages/ui` and on the plain-language layer from this
+project. They are independent of each other.
 
-## 2. Goals
+## 2. Audience — the constraint everything else answers to
+
+**Trusten's users are not technical.** They are frequently older, frequently not
+confident with software, and often have no formal education in how any of this works.
+Critically: **they cannot identify dark patterns themselves — that is precisely why they
+need Trusten.** A user who could read "manufactured scarcity exploits loss aversion" and
+act on it would not need the product.
+
+Everything below follows from that. Where this document and the audience disagree, the
+audience wins.
+
+### 2.1 What the product currently says to that user
+
+The scan report today renders text generated inside the analyzers and
+`regulatory/mapping.ts`:
+
+> "Urgency language detected: *'Only 2 left'*. Manufactured time pressure is a dark
+> pattern that exploits **loss aversion** to rush purchasing decisions."
+
+> "Artificial scarcity exploits **FOMO** (fear of missing out)…"
+> "…**reference price manipulation**…"
+> "**Privacy zuckering** detected…"
+> "UCPD **blacklists** falsely stating that a product will only be available for a very
+> limited time…"
+
+And the category names it shows: **Roach Motel**, **Basket Sneaking**, **Confirmshaming**,
+**Privacy Zuckering**, **Drip Pricing**, **Bait and Switch**. These come from the
+Brignull / Mathur dark-pattern research taxonomy. They are correct, and they are useless
+to the intended reader.
+
+**This is not a frontend problem.** The finding text is generated in the analyzers, the
+legal text lives in `regulatory/mapping.ts`, and the labels live in `theme.ts`. A new UI
+rendering the same strings would be exactly as opaque. Fixing it is in scope for this
+project (§5).
+
+### 2.2 Voice principles
+
+These are binding on every surface, and on projects 2 and 3.
+
+1. **Never show a number the user has to interpret.** No `0.55` confidence. No `73/100`.
+   No `−15`. Numbers that describe *the site's behaviour* are fine and concrete ("added
+   £4.99 at the last step", "asked you 3 times"). Numbers that describe *our own
+   internal certainty or arithmetic* are never shown.
+2. **Say what happened, then why it is unfair.** Concrete first, principle second.
+3. **Show the actual thing.** The site's own words, quoted, and a picture of it, always
+   beat a description of it.
+4. **Blame the site, never the user.** "This shop made the 'no' button hard to find" —
+   not "you may have been tricked". Nobody should finish a report feeling foolish.
+5. **Plain words.** Target roughly a 6th–8th grade reading level. Short sentences. Active
+   voice. No jargon, including our own: no "dark pattern", "analyzer", "heuristic",
+   "confidence", "severity", "deduction" in primary copy.
+6. **Answer the question they came with.** "Is this site trying to trick me, and how?"
+   Everything else is secondary.
+
+### 2.3 Accessibility is a functional requirement, not a checklist
+
+For an older audience this is core product, not compliance:
+
+- Base body text **18px** (the current dashboard uses 14–16px), generous line height,
+  comfortable measure.
+- **WCAG AA minimum throughout; AAA for body text.**
+- Touch/click targets **at least 44x44px**.
+- **Nothing hover-only.** Every action reachable by click, tap, and keyboard.
+- Severity and grade never carried by colour alone — always colour *plus* a word or icon.
+- Respect `prefers-reduced-motion`; no animation carries meaning.
+- The page must remain usable at 200% browser zoom.
+
+## 3. Goals
 
 - Replace template-string rendering with a real component model.
-- Redesign the dashboard's information architecture and visual language — this is a
-  redesign, not a port.
-- Establish `packages/ui` as the shared component and token layer for all three renderers.
+- Re-voice the product for a non-technical audience, including a plain-language content
+  layer that projects 2 and 3 inherit.
+- Redesign the information architecture and visual language.
+- Establish `packages/ui` as the shared component, token, and content layer.
 - Introduce a typed, runtime-validated API contract between server and client.
-- Leave no renderer-drift problem behind: `theme.ts` dissolves into design tokens.
+- Leave no renderer-drift problem behind: `theme.ts` dissolves into tokens and content.
 
-## 3. Non-goals
+## 4. Non-goals
 
 - Rebuilding `report.ts` or the extension (projects 2 and 3).
 - Authentication, multi-user, or hosted multi-tenancy.
-- Changing detection logic, analyzers, scoring, or the scan engine.
+- Changing detection logic, analyzers, scoring, or the scan engine. The plain-language
+  layer sits *over* analyzer output; it does not rewrite the analyzers.
 - Fixing the scoring issues identified separately (confidence weighting, severity-cap
-  saturation). The UI is designed to *surface* confidence, which creates the pressure to
-  fix it, but the scoring change is its own piece of work.
-- A Dockerfile. Deployment is real work and belongs in its own project.
+  saturation).
+- A Dockerfile.
 
-## 4. Decisions
+## 5. The plain-language layer
 
-| Decision | Choice | Rationale |
+The single most valuable thing this project produces, and the reason it cannot be a
+frontend-only change.
+
+### 5.1 Why a category-keyed layer works
+
+Per-finding descriptions are generated strings with interpolated evidence — they cannot be
+mechanically rewritten. But every finding carries a `category`, and `DarkPatternCategory`
+is a **closed enum of 24 values**. So a hand-written plain-language explanation per
+category is finite, reviewable, and high quality in a way generated text never is.
+
+The interpolated part — the site's actual words, e.g. `"Only 2 left!"` — is the most
+concrete and understandable element we have, and it gets promoted to the foreground.
+
+### 5.2 Structure
+
+Lives in `packages/ui/src/content/patterns.ts`, one entry per category:
+
+```ts
+{
+  name:        "A fake deadline",              // replaces "Fake Urgency"
+  what:        "This shop used a countdown or a 'hurry' message to rush you.",
+  why:         "The deadline often isn't real. It's there to stop you comparing
+                prices or thinking it over.",
+  watchFor:    "Timers that restart when you reload the page.",
+  lawPlain:    "In the EU and the US, inventing a fake deadline to hurry a
+                shopper is against the law.",
+}
+```
+
+Four fields, each with a job: **name** (what to call it), **what** (what the site did),
+**why** (why that is unfair to you), **watchFor** (how to spot it yourself next time —
+this is the part that leaves the user better off than when they arrived), and **lawPlain**
+(the legal position in one sentence, no citation).
+
+Illustrative renamings — the full set of 24 is written during implementation and reviewed
+as content, not code:
+
+| Enum | Today shows | Becomes |
 |---|---|---|
-| Framework | SvelteKit | Compiles away, no shipped runtime; `svelte/server` `render()` with `css: 'injected'` gives project 2 a self-contained HTML string, which React would need a separate CSS-inlining step to match. |
-| Adapter | `@sveltejs/adapter-node`, run under Bun | Official adapter. Avoids the community `svelte-adapter-bun`; Bun runs the Node-targeted output. |
-| Topology | Two processes (A) | SvelteKit serves UI; Hono keeps API, WebSocket, and the Puppeteer engine on 9200. Every piece officially supported; the WebSocket stays where it already works. |
-| Components | shadcn-svelte + Tailwind | Copy-in components we own and can edit, on Bits UI primitives. Accessible by default, themeable via CSS variables, no runtime dependency to version-lock. |
-| Scope of redesign | Full redesign | Approved explicitly. Purple identity is a starting point, not a constraint. |
+| `fake_urgency` | Fake Urgency | A fake deadline |
+| `fake_scarcity` | Fake Scarcity | Pretending it's nearly sold out |
+| `confirmshaming` | Confirmshaming | Guilt-tripping you for saying no |
+| `roach_motel` | Roach Motel | Easy to join, hard to leave |
+| `hard_to_cancel` | Hard to Cancel | Making it hard to cancel |
+| `drip_pricing` | Drip Pricing | Extra costs added at the last step |
+| `basket_sneaking` | Basket Sneaking | Something added to your basket you didn't pick |
+| `privacy_zuckering` | Privacy Zuckering | Sharing your details without telling you clearly |
+| `preselected_options` | Preselected Options | Boxes already ticked for you |
+| `forced_continuity` | Forced Continuity | A free trial that quietly starts charging |
+| `cookie_wall` | Cookie Wall | You can't use the site unless you accept tracking |
+| `disguised_ads` | Disguised Ads | Adverts made to look like normal content |
+| `fake_hierarchy` | Fake Hierarchy | The 'yes' button made obvious, the 'no' button hidden |
+| `fake_social_proof` | Fake Social Proof | Made-up numbers of other shoppers |
 
-### Rejected
+### 5.3 The analyzer's own text does not disappear
 
-- **SvelteKit absorbs the API** (`+server.ts` routes, Hono dissolved). `adapter-node` has
-  no native WebSocket server, so the live-scan view — working code — would be re-homed for
-  no gain.
-- **Hono mounts SvelteKit's `handler.js`** (single process). Genuinely nicer to deploy, but
-  bridging a Node `(req, res)` middleware into Hono's Fetch-API model is unverified, and
-  its advantage is a saving on a Dockerfile that does not yet exist. Recorded as a possible
-  later optimization, not a commitment.
+The generated description keeps its value for a technical reader and is the closest thing
+to a source of truth about *why this specific finding fired*. It is demoted, not deleted:
+it appears under a **"How we worked this out"** disclosure on each finding, alongside the
+matched selector and the analyzer name.
 
-## 5. UX design
+Same for the law: `RegulatoryViolation` keeps `regulation`, `article`, and its formal
+`description`, shown under **"Is this allowed?"**. The plain sentence is what the user
+reads; the citation is there for anyone who needs it — and for the PDF, which is the
+artifact most likely to reach a regulator or a lawyer.
 
-### 5.1 Thesis
+**Drift risk and its mitigation:** a hand-written layer keyed by enum can go stale if a
+category is added. A `bun test` over `DarkPatternCategory` asserting every enum member has
+a content entry makes that a build failure rather than a blank space in the UI.
 
-**Trusten does not produce a dashboard. It produces an accusation, and an accusation needs
-evidence.** Every finding asserts four things: what the site did, where it did it, how bad
-it is, and which law it implicates. The current UI scatters these across pattern cards,
-separate screenshot tabs, and a regulation list at the bottom of the page. The redesign's
-organizing principle is that **a finding and its proof are one object and are never
-separated.**
+### 5.4 Confidence, without a number
 
-Three consequences follow, and they drive everything below.
+The scanner's `confidence` (0–1) never reaches the screen as a figure. It becomes
+placement and wording:
 
-### 5.2 Information architecture: six pages become three surfaces
+| Confidence | Treatment |
+|---|---|
+| ≥ 0.8 | Stated plainly: **"We found…"**. Listed in the main findings. |
+| 0.7 – 0.8 | Hedged: **"This looks like…"**. Listed in the main findings. |
+| < 0.7 | Not in the main list. Collected under **"A few other things worth a look"**, collapsed by default. |
+
+Nothing is hidden — a curious or professional user can open the third group — but the
+default reading experience is not diluted by our own uncertainty.
+
+### 5.5 Severity, without a scale
+
+`critical / high / medium / low` is an internal scale. Displayed, it becomes three levels
+framed by consequence, each with colour **and** a word **and** an icon:
+
+- **Serious** — could cost you money or give away your personal information.
+- **Worth knowing** — unfair, but unlikely to cost you directly.
+- **Minor** — annoying rather than harmful.
+
+`critical` and `high` both map to **Serious**; `medium` → **Worth knowing**; `low` →
+**Minor**. Four internal levels collapse to three shown, because a four-point abstract
+scale is one distinction more than this audience needs.
+
+### 5.6 The grade
+
+The A–F letter is kept — school grades are one of the few scales this audience reads
+fluently — but it stops being the headline. The headline is a plain sentence:
+
+> ### This shop uses several unfair tricks
+> **Grade D.** We found 4 things you should know about.
+
+The `73/100` trust score is not shown on primary surfaces. The **"−15 fake urgency,
+−8 drip pricing"** deduction breakdown proposed in the first draft of this spec is
+**withdrawn** — it is analyst arithmetic and fails principle 1 in §2.2.
+
+## 6. UX design
+
+### 6.1 Information architecture
 
 Today: `home`, `audit`, `scan`, `site/:domain`, `history`, `leaderboard` — six sibling
-pages in a flat nav.
+pages. `history` and `leaderboard` are the same data under different sorts; keeping them
+apart forces the user to work out which page answers their question. They merge.
 
-`history` and `leaderboard` are the same data under different sorts. Keeping them apart
-forces users to learn which page answers their question. They merge.
-
-| Surface | Absorbs | Purpose |
+| Route | Absorbs | Purpose |
 |---|---|---|
-| **Scan** (`/scan/:id`) | `scan` | The case file. The product's hero object. |
-| **Site** (`/site/:domain`) | `site`, per-domain slice of `history` | One domain over time: trend, regressions, scan list. |
-| **Explore** (`/explore`) | `history`, `leaderboard` | One filterable, sortable table over all scans and domains. |
+| `/` | `home` | Check a site. One field, one button. |
+| `/scan/:id` | `scan` | The result. The product's hero surface. |
+| `/site/:domain` | `site` + domain slice of `history` | One site over time. |
+| `/explore` | `history`, `leaderboard` | Sites we've checked. |
+| `/audit` | `audit` | Deep check, live. |
 
-`home` (`/`) becomes a scan-entry surface with recent activity — not a nav hub.
-`audit` (`/audit`) remains, but is redesigned as the live-scan surface (§5.4).
+Six pages to five routes, one fewer concept.
 
-Net: six pages to five routes, with one fewer concept to learn.
+### 6.2 The result page: a single-column narrative
 
-### 5.3 The scan report: a two-pane evidence viewer
+**This replaces the two-pane evidence viewer proposed in the first draft.** A
+findings-list-drives-an-evidence-pane layout is a developer-tools pattern: it assumes the
+reader knows the two panes are linked. For this audience that assumption is unsafe, and a
+missed link means a reader who sees a list and never discovers the evidence.
 
-This is the centrepiece and the largest single improvement.
-
-**Today:** a stats header, then patterns grouped by category as cards, then workflow steps
-with screenshots behind a tab switcher, then a regulation list. The screenshot has coloured
-boxes *burned into the image* at capture time by `buildAnnotationScript()`.
-
-**Problem:** the burned-in boxes are the tell. Because annotation happens at capture time,
-boxes cannot be toggled, cannot be filtered, and cannot be linked to the finding you are
-reading. The image and the finding list are two static artifacts that happen to describe
-the same thing.
-
-**Design:** `ElementEvidence` already carries `boundingBox: {x, y, width, height}`, and the
-UI has never used it. The report becomes two panes:
+The result page is **one column, read top to bottom**:
 
 ```
-┌────────────────────────┬──────────────────────────────────┐
-│ FINDINGS               │ EVIDENCE                         │
-│ ─────────────────────  │                                  │
-│ [filter: severity ▾]   │   ┌────────────────────────┐     │
-│ [filter: category ▾]   │   │                        │     │
-│                        │   │   clean screenshot     │     │
-│ ▸ Fake urgency    CRIT │   │   + SVG box overlay    │     │
-│ ▸ Drip pricing    HIGH │   │   for selected finding │     │
-│ ▪ Preselected opt HIGH │   │                        │     │
-│ ▪ Cookie wall      MED │   └────────────────────────┘     │
-│                        │                                  │
-│                        │   "Only 2 left!" — no stock       │
-│                        │   data backs this claim.          │
-│                        │   confidence 0.87                 │
-│                        │                                  │
-│                        │   ⚖ EU UCPD Annex I ¶7            │
-│                        │   ⚖ FTC Act §5                    │
-└────────────────────────┴──────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│  This shop uses several unfair tricks    │
+│  Grade D · we checked example.com today  │
+│                                          │
+│  [ What we found ]  [ Check another site]│
+├──────────────────────────────────────────┤
+│  1. A fake deadline              SERIOUS │
+│                                          │
+│     The shop said:                       │
+│     ┌────────────────────────────────┐   │
+│     │  "Only 2 left — order in 5:00" │   │  <- screenshot cropped
+│     │   [highlighted in the picture] │   │     to THIS element
+│     └────────────────────────────────┘   │
+│                                          │
+│     What this means                      │
+│     This shop used a countdown to rush   │
+│     you. The deadline often isn't real.  │
+│                                          │
+│     How to spot it yourself              │
+│     Timers that restart when you reload. │
+│                                          │
+│     ▸ Is this allowed?                   │
+│     ▸ How we worked this out             │
+├──────────────────────────────────────────┤
+│  2. Boxes already ticked for you  SERIOUS│
+│     …                                    │
+└──────────────────────────────────────────┘
 ```
 
-Selecting a finding drives the evidence pane: the clean screenshot renders with an SVG
-overlay positioned from `boundingBox`, scrolled and zoomed to the element, with the
-description, confidence, and regulatory citations beneath it. Deselecting shows all boxes
-at low opacity.
+Each finding is a self-contained card in a numbered sequence. No panes to coordinate, no
+mode switching, no tabs. Everything primary is visible; only the two secondary layers
+("Is this allowed?", "How we worked this out") are behind disclosures, and both are
+labelled as questions rather than as jargon.
 
-This uses data the scanner already produces. It is not new capture work.
+**The `boundingBox` insight survives and improves.** `ElementEvidence.boundingBox` is
+already produced by the scanner and has never been used by the UI — today's boxes are
+*burned into* the screenshot at capture time by `buildAnnotationScript()`, which is why
+they cannot be toggled or linked to anything. Here, each card renders the screenshot
+**cropped and zoomed to its own element** with a single highlight drawn as an SVG overlay.
+One finding, one picture, one box. That is clearer for this audience than a wide screenshot
+carrying eight boxes, and it costs no new capture work.
 
-**Consequence for project 2:** the PDF report is a static artifact and cannot be
-interactive, so `buildAnnotationScript()`'s burn-in path stays for the PDF. The dashboard
-stops using it. Both read the same `boundingBox` data, so they cannot disagree.
+**Ordering** is by severity then by confidence, so the most serious, most certain finding
+is the first thing read.
 
-**Confidence becomes visible.** Every finding shows its confidence. Findings below 0.7 are
-visually de-emphasised and labelled "low confidence". This is deliberate: the scoring
-engine currently ignores `confidence` entirely, weighting a 0.55 guess identically to a 0.9
-certainty. Surfacing it in the UI makes that discrepancy visible to anyone reading a report
-and is the forcing function for fixing the scoring.
+**When nothing is found**, the page says so warmly and without hedging — a clean result is
+a real result, and this audience needs the reassurance stated plainly.
 
-**No tabs.** The current `switchTab()` hides content and loses state on navigation. The
-report is one scrollable document with a sticky section rail (Findings · Journey ·
-Regulations · Recording). Everything is present, linkable, and Ctrl-F-able.
+### 6.3 Checking a site: one field, one button
 
-### 5.4 Live scan: a timeline that becomes the report
+The current audit surface asks the user to pick workflows from checkboxes (`checkout`,
+`signup`, `cookie consent`, `cancellation`), choose between fixed and discover mode, and
+opt into watching live. That is a configuration screen for someone who knows what those
+words mean.
 
-**Today:** submit the form, a status line updates every 3 seconds via a polling loop, a
-`<img>` swaps base64 JPEG frames from the WebSocket, and on completion the page redirects
-to the domain page after a 1.8-second `setTimeout`. The thing you watched is discarded and
-replaced by a different page.
+The home surface becomes: **a URL field and a "Check this site" button.** Sensible
+defaults are chosen for the user. Deep-check options move behind a plain-worded
+**"More options"** disclosure on `/audit`, and the options are re-labelled in the same
+voice ("Also try signing up", "Also try cancelling").
 
-**Design:** the audit surface is a **step timeline** that builds as the scan runs. Each
-workflow step appears as a row the moment it starts, showing its action and status; the
-live screencast is pinned beside it. As steps complete, their captured screenshot replaces
-the placeholder and any findings attach to the row.
+### 6.4 The live check: a timeline that becomes the result
 
-When the scan finishes, **the timeline does not redirect. It becomes the report's Journey
-section**, in place, with the findings pane populating alongside it. What you watched is
-what you now read. No redirect, no `setTimeout`, no discontinuity.
+Today: a status line updated by a 3-second poll, a `<img>` swapping base64 JPEG frames,
+then a `setTimeout` redirect that discards what you watched and sends you elsewhere.
 
-This is the "seamless" requirement taken literally: the live view and the report are the
-same component in two states, not two pages joined by a timer.
+Instead, `/audit` shows a **plain-worded step timeline** that builds as the check runs —
+"Looking at the home page", "Adding an item to the basket", "Trying to cancel" — with the
+live picture beside it. When the check finishes, **the timeline does not redirect. It
+becomes the result page's journey section, in place**, with findings appearing beneath it.
+What you watched is what you now read.
 
-**Transport:** the 3-second poll disappears. The WebSocket already carries `progress`,
-`frame`, `done`, and `error` events — the poll exists only because the page had no state
-model to receive them into. Svelte's `$state` is that model. Polling remains as a
-reconnect fallback only.
+Beyond removing a jarring redirect, this matters for trust with a non-technical audience:
+seeing the work happen is what makes the verdict credible.
 
-### 5.5 Grade with a reason attached
+The 3-second poll disappears; the WebSocket already carries `progress`, `frame`, `done`,
+and `error`, and the page previously had no state model to receive them into. Svelte's
+`$state` is that model. Polling remains a reconnect fallback only.
 
-A grade shown alone is a number. Everywhere a grade appears at size — scan header, site
-header — it is paired with the top three deductions that produced it ("−15 fake urgency,
-−8 drip pricing, −8 preselected options"). The score ring stays; it gains a caption.
+### 6.5 Visual language
 
-On the Site surface, the grade becomes a sparkline over time, so a regression is visible
-without opening two scans.
-
-### 5.6 Visual language
-
-The purple identity is retained as a starting point but is re-expressed as a token system
-rather than 135 literal hex values.
+The purple identity is retained but re-expressed as tokens rather than 135 literal hex
+values.
 
 - **Tokens** are CSS custom properties in `packages/ui/tokens.css`, consumed by the
-  Tailwind config. Grade colours (A–F), severity colours, and surface/text/border scales
-  all become tokens. `theme.ts` dissolves into this file; `CATEGORY_LABELS` moves to
-  `packages/ui` as data.
-- **Type scale and spacing** come from Tailwind's scale rather than ad-hoc `px` values.
-- **Dark mode** is designed in from the start via token redefinition, not retrofitted.
-  The current dashboard is light-only.
-- **Density**: the report is a reading surface and gets generous line length and spacing;
-  the Explore table is a scanning surface and gets compact rows.
+  Tailwind preset. Grade, severity, surface, text, and border scales all become tokens.
+  `theme.ts` dissolves into this file.
+- **Type scale** starts at 18px body, with a restrained scale — this is a reading surface.
+- **Dark mode** designed in from the start via token redefinition, not retrofitted.
+- **Density**: the result page is a reading surface with generous spacing; `/explore` is a
+  scanning surface with compact rows.
 
-Severity colour is never the sole carrier of meaning — every severity indicator pairs
-colour with a label or icon, so the report survives greyscale printing and colour-blind
-readers.
+## 7. Technical architecture
 
-## 6. Technical architecture
-
-### 6.1 Workspace layout
+### 7.1 Workspace layout
 
 ```
 apps/
@@ -227,74 +364,68 @@ apps/
   trusten-ext/     unchanged this project (project 3)
 packages/
   shared/          existing; gains api/ contract schemas
-  ui/              NEW — Svelte components + design tokens
+  ui/              NEW — components, design tokens, plain-language content
 ```
 
-### 6.2 `packages/ui` — the boundary that makes projects 2 and 3 cheap
+### 7.2 `packages/ui` — the boundary that makes projects 2 and 3 cheap
 
-Built in this project, consumed by all three. This is the single most important structural
-decision here: if these components are built inside `apps/web/src/lib/components`, projects
-2 and 3 each pay for a painful extraction.
+Built here, consumed by all three. If these live in `apps/web/src/lib/components`,
+projects 2 and 3 each pay for a painful extraction.
 
 ```
 packages/ui/
-  tokens.css              CSS custom properties (grade, severity, surface, type)
-  tailwind-preset.js      Tailwind preset exposing the tokens as utilities
+  tokens.css              CSS custom properties
+  tailwind-preset.js      Tailwind preset exposing tokens as utilities
   src/
+    content/
+      patterns.ts         24 plain-language entries (§5.2)   <- the crown jewels
+      severity.ts         internal severity -> shown level + wording
+      grade.ts            grade -> plain headline sentence
     primitives/           shadcn-svelte components (Button, Dialog, Table, Badge…)
-    domain/               Trusten-specific, render-only:
-                            GradeRing, GradePill, SeverityBadge, ConfidenceMeter,
-                            FindingCard, RegulationCite, EvidenceViewer, ScoreSparkline
-    data/                 CATEGORY_LABELS, grade/severity ordering helpers
+    domain/               GradeBadge, SeverityTag, FindingCard, EvidenceShot,
+                          RegulationDisclosure, JourneyTimeline, ScoreSparkline
 ```
 
 **Constraint that keeps this reusable:** `domain/` components take plain props and emit
 events. No `fetch`, no stores, no SvelteKit imports (`$app/*`), no browser-only APIs at
 module scope. This is what lets project 2 render them through `svelte/server` `render()`
-into a static file, and project 3 render them inside an MV3 popup where SvelteKit does not
+into a static file, and project 3 render them in an MV3 popup where SvelteKit does not
 exist. Enforced by an import-boundary lint rule, not by good intentions.
 
-`EvidenceViewer` is the exception worth noting: it needs measurement for the box overlay,
-so it accepts a `static` mode that renders all boxes without interactivity — the mode
-project 2 uses.
+`EvidenceShot` is the exception worth noting: it measures for the crop-and-highlight, so it
+accepts a `static` mode that renders a pre-cropped image without interactivity — the mode
+project 2 uses for the PDF.
 
-### 6.3 API contract: zod schemas in `packages/shared`
+### 7.3 API contract: zod schemas in `packages/shared`
 
-Currently the server does `await c.req.json<{url: string, html: string}>()` — a
+The server currently does `await c.req.json<{url: string, html: string}>()` — a
 compile-time cast with no runtime validation — and returns ad-hoc object literals per
 route. A separate frontend needs a real contract.
 
-`packages/shared` already declares **zod as a dependency that nothing imports.** This
-project puts it to work:
-
-```
-packages/shared/src/api/
-  scan.ts        QuickScanRequest/Response, ScanDetail
-  audit.ts       AuditRequest/Response, AuditStatus, AuditPlanItem
-  domain.ts      DomainSummary, GlobalStats
-  history.ts     HistoryQuery, HistoryResponse
-```
-
-Each is a zod schema plus its inferred type. The server validates requests against them at
-the boundary; the SvelteKit app imports the inferred types for its API client. One
-definition, both sides, no drift, no new dependency, and the dead zod dep becomes load-bearing.
+`packages/shared` already declares **zod as a dependency nothing imports.** This project
+puts it to work: `packages/shared/src/api/{scan,audit,domain,history}.ts`, each a zod
+schema plus its inferred type. The server validates requests at the boundary; the SvelteKit
+app imports the inferred types for its API client. One definition, both sides, no drift, no
+new dependency, and a dead dependency becomes load-bearing.
 
 This also closes the validation hole found during review: today a malformed body degrades
 to a misleading 400 or an opaque 500 rather than a typed validation error.
 
-### 6.4 Rendering strategy
+### 7.4 Rendering strategy
 
 | Route | Strategy | Why |
 |---|---|---|
-| `/` | SSR | Fast first paint; recent-activity list is server data. |
-| `/scan/:id` | SSR + hydrate | Reports must be linkable and shareable; the evidence pane then hydrates for interactivity. |
-| `/site/:domain` | SSR | Server data, little interactivity beyond the sparkline. |
-| `/explore` | SSR shell + client filter/sort | Server renders the first page; filtering is client-side over a fetched set. |
-| `/audit` | CSR | Inherently live and stateful; nothing to server-render. |
+| `/` | SSR | Fast first paint. |
+| `/scan/:id` | SSR + hydrate | Results must be linkable and shareable; disclosures then hydrate. |
+| `/site/:domain` | SSR | Server data, little interactivity. |
+| `/explore` | SSR shell + client filter/sort | Server renders first page; filtering client-side. |
+| `/audit` | CSR | Inherently live and stateful. |
 
-SSR is the default; CSR is the exception with a stated reason.
+SSR is the default; CSR is the exception with a stated reason. SSR also means the result
+page works before JavaScript loads — which matters on the older, slower devices this
+audience is more likely to be using.
 
-### 6.5 Data flow
+### 7.5 Data flow
 
 ```
 browser ──HTTP──► SvelteKit (:3000)  ──load()──► Hono API (:9200) ──► SQLite
@@ -304,94 +435,114 @@ browser ──HTTP──► SvelteKit (:3000)  ──load()──► Hono API (:
 browser ──WebSocket──────────────────────────────► Hono (:9200) /trusten/api/jobs/:id/live
 ```
 
-SvelteKit `load()` functions call the Hono API server-side, so the browser never needs CORS
-for data. The WebSocket connects to Hono directly from the browser — its origin comes from
-a `PUBLIC_TRUSTEN_API_ORIGIN` environment variable, which also removes the hardcoded
-`localhost:9200` assumption that project 3 has to fix in the extension.
+SvelteKit `load()` calls the Hono API server-side, so the browser never needs CORS for
+data. The WebSocket connects to Hono directly; its origin comes from
+`PUBLIC_TRUSTEN_API_ORIGIN`, which also removes the hardcoded `localhost:9200` assumption
+project 3 must fix in the extension.
 
 **Dev:** Vite `server.proxy` forwards `/trusten/api` → `:9200`, so dev and prod use
 identical relative URLs and HMR works normally.
 
-### 6.6 What happens to `apps/server`
+### 7.6 What happens to `apps/server`
 
 - `dashboard/ui.ts` — **deleted** (1,317 lines).
 - `dashboard/theme.ts` — **deleted**; contents move to `packages/ui`.
 - `dashboard/routes.ts` — HTML page routes removed; keeps `/api/*` and the report asset
-  routes (`/report/:id/screenshot/:step`, `/video`, `/pdf`). Drops from 519 lines to
-  roughly 300.
-- `report.ts` — **untouched this project.** It keeps importing display tokens; to avoid a
-  half-migrated state, it temporarily imports them from `packages/ui/data` instead of
-  `theme.ts`. Project 2 rebuilds it properly.
+  routes. Drops from 519 lines to roughly 300.
+- `report.ts` — **untouched this project**, but temporarily imports display tokens from
+  `packages/ui` instead of `theme.ts` to avoid a half-migrated state. Project 2 rebuilds it
+  on the plain-language layer.
 - Engine, analyzers, scoring, db, browser driver — **untouched.**
 
-## 7. Error handling
+## 8. Error handling
 
-- **API unreachable from `load()`** — SvelteKit error boundary renders a page-level "cannot
-  reach scan service" state with a retry, not a stack trace.
+Error copy follows §2.2 as strictly as the rest of the product.
+
+- **API unreachable from `load()`** — "We couldn't reach the checking service. Try again in
+  a moment." with a retry button. Never a stack trace or an error code.
 - **Scan not found** — a real 404 through `error(404)`, replacing today's soft "not found"
-  card rendered with a 200.
-- **WebSocket drop mid-scan** — exponential-backoff reconnect; if reconnect fails, fall
-  back to polling `/api/audit/:jobId` and show a degraded-but-working banner. The scan
-  continues server-side regardless; this is a display concern only.
-- **Audit job failure** — the failed step is marked in the timeline in place, with the
-  error text attached to that step rather than a toast that disappears.
-- **Validation failure** — zod errors return `400` with a field-level body; forms render
-  them inline.
+  card served with a 200.
+- **WebSocket drop mid-check** — exponential-backoff reconnect, falling back to polling
+  `/api/audit/:jobId`. The user sees "Still checking…", not a transport error; the scan
+  continues server-side regardless.
+- **Check fails** — the failed step is marked in the timeline in place, in plain words
+  ("We couldn't open the basket page"), with detail behind a disclosure. Never a toast that
+  vanishes before it can be read — a fixed constraint for this audience.
+- **Validation failure** — zod errors return `400` with a field-level body, rendered inline
+  next to the field in plain wording.
 
-## 8. Testing
+## 9. Testing
 
-This project introduces the repo's first tests, so it also establishes the pattern.
+This project introduces the repo's first tests and establishes the pattern.
 
-- **`bun test`** for `packages/shared` API schemas — round-trip parse/reject cases per
-  schema. Pure functions, no browser.
-- **Vitest + `@testing-library/svelte`** for `packages/ui` domain components. The valuable
-  cases are the ones with real logic: `EvidenceViewer` box positioning from `boundingBox`,
-  `GradeRing` arc maths, severity ordering, `ConfidenceMeter` thresholds.
-- **Playwright** for two end-to-end journeys against a seeded SQLite fixture: quick scan →
-  report, and audit → live timeline → report continuity.
+- **`bun test`** for `packages/shared` API schemas — round-trip parse/reject per schema.
+- **`bun test`** for content completeness — every `DarkPatternCategory` member has a
+  `packages/ui/content/patterns.ts` entry. Guards §5.3's drift risk.
+- **Vitest + `@testing-library/svelte`** for `packages/ui` domain components, targeting the
+  ones with real logic: `EvidenceShot` crop maths from `boundingBox`, severity collapsing
+  (4 internal → 3 shown), confidence banding (§5.4), grade → headline mapping.
+- **Playwright** for two end-to-end journeys against a seeded SQLite fixture: quick check →
+  result, and audit → live timeline → result continuity.
 
   **Caveat, stated precisely:** the README records that Playwright cannot launch under Bun
   — its pipe transport needs inherited file descriptors Bun does not provide, which is why
-  the scanner uses Puppeteer. That constraint applies to the *test runner process too*. So
-  the Playwright suite runs under **Node** (`npx playwright test`), driving the app over
-  HTTP as an external client. It never imports application code, so the runtime split costs
-  nothing. This must be verified in step 8 before the suite is built out; if it fails, the
-  fallback is Puppeteer-driven end-to-end tests under `bun test`, which is a worse authoring
-  experience but a proven one in this repo.
+  the scanner uses Puppeteer. That applies to the *test runner process too*. The Playwright
+  suite therefore runs under **Node** (`npx playwright test`), driving the app over HTTP as
+  an external client; it never imports application code, so the runtime split costs nothing.
+  Verify in step 8 before building the suite out. Fallback: Puppeteer-driven end-to-end
+  tests under `bun test` — worse to author, proven in this repo.
+
+- **Accessibility**: `axe-core` assertions in the Playwright journeys, plus a manual 200%
+  zoom and keyboard-only pass before the cutover. §2.3 is a requirement, so it is tested.
 - **No tests** for pure-presentational components. Testing markup shape is churn.
 
 CI gains a `test` job alongside the existing `code-quality` workflow.
 
-## 9. Sequencing
+## 10. Sequencing
 
-1. `packages/ui` skeleton — tokens, Tailwind preset, shadcn-svelte init, import-boundary lint rule.
-2. `packages/shared/api` zod schemas; Hono validates against them. **Server and old UI still working.**
-3. `apps/web` SvelteKit skeleton, adapter-node, Vite proxy, API client, one route (`/explore`) end to end.
-4. Domain components in `packages/ui` with their tests.
-5. Routes `/`, `/site/:domain`, `/scan/:id` — the evidence viewer is the biggest piece.
-6. `/audit` — timeline, WebSocket state model, continuity into the report.
-7. Delete `ui.ts` and `theme.ts`; trim `routes.ts`; point `report.ts` at `packages/ui/data`.
-8. Playwright journeys; CI test job.
+1. `packages/ui` skeleton — tokens, Tailwind preset, shadcn-svelte init, import-boundary
+   lint rule.
+2. **Plain-language content layer** (§5) — 24 category entries, severity and grade mappings,
+   completeness test. Reviewed as content, not code. *Deliberately early: it is the highest
+   product value here and the thing most likely to need a review round.*
+3. `packages/shared/api` zod schemas; Hono validates against them. **Old UI still working.**
+4. `apps/web` SvelteKit skeleton, adapter-node, Vite proxy, API client, `/explore` end to end.
+5. Domain components in `packages/ui` with their tests.
+6. Routes `/`, `/site/:domain`, `/scan/:id` — the finding card and `EvidenceShot` are the
+   biggest pieces.
+7. `/audit` — timeline, WebSocket state model, continuity into the result.
+8. Delete `ui.ts` and `theme.ts`; trim `routes.ts`; point `report.ts` at `packages/ui`.
+9. Playwright journeys, axe assertions, CI test job.
 
-Steps 1–6 are additive — the existing dashboard keeps working throughout. Step 7 is the
-only cutover, and it happens once the replacement is complete rather than incrementally.
+Steps 1–7 are additive — the existing dashboard keeps working throughout. Step 8 is the
+only cutover, once the replacement is complete.
 
-## 10. Risks
+## 11. Risks
 
 | Risk | Mitigation |
 |---|---|
-| `adapter-node` output misbehaves under Bun | Verified as step 3, before any UI work. Fallback: run the SvelteKit process under Node while the API stays on Bun — they are separate processes, so this is tolerable. |
-| Two processes complicate the (absent) deploy story | Accepted. Recorded for the deployment project; the single-process option (Hono mounting `handler.js`) stays available. |
-| `packages/ui` components accidentally depend on SvelteKit | Import-boundary lint rule in step 1, before components exist. |
-| Redesign scope expands indefinitely | Five routes, enumerated in §5.2. New surfaces are out of scope for this project. |
-| shadcn-svelte's ecosystem gaps | Components are copied in and owned, so a gap is a component we write, not a blocker. |
-| Playwright cannot run under Bun (§8) | Suite runs under Node as an external HTTP client, verified in step 8. Fallback: Puppeteer-driven E2E under `bun test`. |
+| Plain-language rewriting loses accuracy | Analyzer text and legal citations are demoted, never deleted (§5.3). Content is reviewed as content before the UI is built (step 2). |
+| Content layer goes stale when a category is added | `bun test` over the enum makes it a build failure (§5.3). |
+| `adapter-node` output misbehaves under Bun | Verified in step 4, before UI work. Fallback: run SvelteKit under Node, API stays on Bun — separate processes, so tolerable. |
+| Two processes complicate the (absent) deploy story | Accepted; recorded for the deployment project. Single-process option (Hono mounting `handler.js`) stays available. |
+| `packages/ui` accidentally depends on SvelteKit | Import-boundary lint rule in step 1, before components exist. |
+| Redesign scope expands indefinitely | Five routes, enumerated in §6.1. |
+| Playwright cannot run under Bun | Runs under Node as an external HTTP client, verified in step 9. Fallback: Puppeteer E2E under `bun test`. |
+| Simplification patronises the user | Plain ≠ dumbed down. Nothing is removed, only demoted behind labelled disclosures; §5.2's `watchFor` field actively teaches. |
 
-## 11. Open questions
+## 12. Open questions
 
-None blocking. Two to settle during implementation:
+**One genuine question, not blocking.** Trusten currently carries 14 regulatory frameworks,
+formal citations, and PDF report generation — apparatus that points at a *professional*
+user (compliance officer, regulator, consumer-rights advocate), while §2 defines the
+primary user as a non-technical consumer. These are not incompatible: the design serves the
+consumer by default and keeps professional detail behind disclosures and in the PDF. But it
+is worth deciding explicitly whether the professional is a real second audience — if so,
+project 2's PDF should be designed *for them* rather than as a print of the consumer view,
+which would change that project meaningfully.
 
-- Whether `/explore` needs server-side pagination or can fetch a bounded set and filter
-  client-side. Depends on realistic scan volume; start client-side, revisit past ~2,000 rows.
-- Whether the sparkline on `/site/:domain` uses a charting library or hand-rolled SVG. A
-  single sparkline does not justify a dependency; revisit if more charts appear.
+Two smaller ones to settle during implementation:
+
+- Whether `/explore` needs server-side pagination. Start client-side, revisit past ~2,000 rows.
+- Whether the `/site/:domain` sparkline justifies a charting library. One chart does not;
+  revisit if more appear.
