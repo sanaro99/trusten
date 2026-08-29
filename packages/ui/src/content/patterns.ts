@@ -25,6 +25,17 @@ export interface PatternContent {
   why: string
   watchFor: string
   lawPlain: string
+  /**
+   * True when the legal position is genuinely unsettled — regulators have
+   * started to push back, but nothing yet settles it either way.
+   *
+   * Renderers (dashboard, PDF, extension popup) must introduce this entry's
+   * regulatoryViolations as rules regulators have pointed to, never as
+   * established breaches. Without that framing the citation list contradicts
+   * the lawPlain sitting directly above it, and the reader concludes we do
+   * not know what we are talking about. Absent means the law is settled.
+   */
+  contested?: boolean
 }
 
 export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
@@ -167,6 +178,7 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
     watchFor: 'A count of days in a row that the site warns you not to break.',
     lawPlain:
       'This one is a grey area. Regulators have started to challenge designs like this, but it is not clearly against the law.',
+    contested: true,
   },
 
   [DarkPatternCategory.PRESELECTED_OPTIONS]: {

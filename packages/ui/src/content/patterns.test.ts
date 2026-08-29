@@ -66,6 +66,24 @@ describe('PATTERN_CONTENT', () => {
     }
   })
 
+  test('marks any entry that disclaims illegality as contested', () => {
+    // A lawPlain that hedges must set `contested`, so renderers introduce the
+    // citation list as rules regulators have pointed to rather than as proven
+    // breaches. Without the flag the card contradicts itself: "not clearly
+    // against the law", followed by a citation saying it is prohibited.
+    let flagged = 0
+    for (const [category, content] of Object.entries(PATTERN_CONTENT)) {
+      if (!/not clearly|grey area/i.test(content.lawPlain)) continue
+      flagged++
+      expect(
+        content.contested,
+        `${category} hedges its law line without contested: true`,
+      ).toBe(true)
+    }
+    // Guard against the check passing because nothing matched any more.
+    expect(flagged).toBeGreaterThan(0)
+  })
+
   test('names do not reuse the enum key', () => {
     // "Fake Urgency" prettified from fake_urgency is not a translation.
     for (const [category, content] of Object.entries(PATTERN_CONTENT)) {
