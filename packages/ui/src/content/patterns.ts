@@ -166,7 +166,7 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
     why: 'The reward is worth nothing outside the site. It exists to make leaving feel like a loss.',
     watchFor: 'A count of days in a row that the site warns you not to break.',
     lawPlain:
-      'EU rules ban designs built to push people into using a service more than they mean to.',
+      'This one is a grey area. Regulators have started to challenge designs like this, but it is not clearly against the law.',
   },
 
   [DarkPatternCategory.PRESELECTED_OPTIONS]: {
