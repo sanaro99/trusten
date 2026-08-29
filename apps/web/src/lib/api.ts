@@ -9,7 +9,7 @@ import {
   type AuditRequest,
   AuditStartResponseSchema,
   AuditStatusSchema,
-  DomainSummarySchema,
+  DomainDetailSchema,
   GlobalStatsSchema,
   HistoryResponseSchema,
   type QuickScanRequest,
@@ -62,12 +62,8 @@ export const api = {
   getScan: (id: string, f: Fetcher = fetch) =>
     get(f, `/scan/${encodeURIComponent(id)}`, ScanDetailSchema),
 
-  getDomain: (domain: string, f: Fetcher = fetch) =>
-    get(
-      f,
-      `/domain/${encodeURIComponent(domain)}`,
-      DomainSummarySchema.nullable(),
-    ),
+  getDomainDetail: (domain: string, f: Fetcher = fetch) =>
+    get(f, `/domain/${encodeURIComponent(domain)}`, DomainDetailSchema),
 
   startAudit: (req: AuditRequest, f: Fetcher = fetch) =>
     post(f, '/audit', req, AuditStartResponseSchema),

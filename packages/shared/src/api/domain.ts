@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ScanHistoryRowSchema } from './history'
 
 export const DomainSummarySchema = z.object({
   domain: z.string(),
@@ -22,3 +23,11 @@ export const GlobalStatsSchema = z.object({
   dirtySites: z.number(),
 })
 export type GlobalStats = z.infer<typeof GlobalStatsSchema>
+
+/** The actual shape of GET /api/domain/:domain — a summary plus its scans. */
+export const DomainDetailSchema = z.object({
+  domain: z.string(),
+  summary: DomainSummarySchema.nullable(),
+  scans: z.array(ScanHistoryRowSchema),
+})
+export type DomainDetail = z.infer<typeof DomainDetailSchema>
