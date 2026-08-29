@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test --path-ignore-patterns 'src/domain/**'",
+    "test:components": "vitest run"
   },
   "dependencies": {
     "@trusten/shared": "workspace:*"
@@ -15,6 +16,19 @@
       "default": "./src/content/index.ts"
     },
     "./tokens.css": "./tokens.css",
-    "./tailwind-preset": "./tailwind-preset.js"
+    "./tailwind-preset": "./tailwind-preset.js",
+    "./domain": {
+      "types": "./src/domain/index.ts",
+      "svelte": "./src/domain/index.ts",
+      "default": "./src/domain/index.ts"
+    }
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/svelte": "^5.4.2",
+    "jsdom": "^30.0.1",
+    "svelte": "^5.57.0",
+    "vitest": "^4.1.11"
   }
 }
