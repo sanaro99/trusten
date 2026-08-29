@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { AuditRequestSchema, QuickScanRequestSchema } from './audit'
+import {
+  AuditRequestSchema,
+  QuickScanRequestSchema,
+  QuickScanResponseSchema,
+} from './audit'
 import { AnalyzePageRequestSchema } from './scan'
 
 describe('QuickScanRequestSchema', () => {
@@ -21,6 +25,34 @@ describe('QuickScanRequestSchema', () => {
     expect(
       QuickScanRequestSchema.parse({ url: '  https://example.com  ' }).url,
     ).toBe('https://example.com')
+  })
+})
+
+describe('QuickScanResponseSchema', () => {
+  test('parses the literal shape the /api/quick-scan handler returns', () => {
+    // patterns is a count here, not the DetectedPattern array ScanDetail
+    // carries — this schema mirrors the summary response, not a full scan.
+    const parsed = QuickScanResponseSchema.parse({
+      scanId: 'scan-1',
+      domain: 'example.com',
+      grade: 'B',
+      score: 82,
+      patterns: 3,
+    })
+    expect(parsed.scanId).toBe('scan-1')
+    expect(parsed.patterns).toBe(3)
+  })
+
+  test('rejects a patterns array — that would be ScanDetail, not this', () => {
+    expect(() =>
+      QuickScanResponseSchema.parse({
+        scanId: 'scan-1',
+        domain: 'example.com',
+        grade: 'B',
+        score: 82,
+        patterns: [],
+      }),
+    ).toThrow()
   })
 })
 

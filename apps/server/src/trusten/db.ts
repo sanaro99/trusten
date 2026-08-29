@@ -258,9 +258,9 @@ export function getTrustenScanById(id: string): ScanResult | null {
     workflowSteps: row.workflow_steps_json
       ? (JSON.parse(row.workflow_steps_json as string) as WorkflowStep[])
       : undefined,
-    pdfPath: row.pdf_path as string | undefined,
-    htmlPath: row.html_path as string | undefined,
-    videoPath: row.video_path as string | undefined,
+    pdfPath: row.pdf_path as string | null,
+    htmlPath: row.html_path as string | null,
+    videoPath: row.video_path as string | null,
   }
 }
 

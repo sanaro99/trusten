@@ -13,6 +13,7 @@ import {
   GlobalStatsSchema,
   HistoryResponseSchema,
   type QuickScanRequest,
+  QuickScanResponseSchema,
   ScanDetailSchema,
 } from '@trusten/shared/api'
 import type { ZodType, z } from 'zod'
@@ -75,5 +76,5 @@ export const api = {
     get(f, `/audit/${encodeURIComponent(jobId)}`, AuditStatusSchema),
 
   quickScan: (req: QuickScanRequest, f: Fetcher = fetch) =>
-    post(f, '/quick-scan', req, ScanDetailSchema.partial()),
+    post(f, '/quick-scan', req, QuickScanResponseSchema),
 }

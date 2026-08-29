@@ -63,8 +63,11 @@ export const ScanDetailSchema = z.object({
   patterns: z.array(DetectedPatternSchema),
   score: ScanScoreSchema,
   workflowSteps: z.array(WorkflowStepSchema).optional(),
-  pdfPath: z.string().optional(),
-  htmlPath: z.string().optional(),
-  videoPath: z.string().optional(),
+  // getTrustenScanById reads these straight off the SQLite row: a NULL
+  // column comes back as `null`, not `undefined`, whatever the server's own
+  // (unchecked) type cast claims.
+  pdfPath: z.string().nullable().optional(),
+  htmlPath: z.string().nullable().optional(),
+  videoPath: z.string().nullable().optional(),
 })
 export type ScanDetail = z.infer<typeof ScanDetailSchema>

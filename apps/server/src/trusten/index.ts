@@ -813,9 +813,9 @@ export class TrustenEngine {
     try {
       this.store.saveScan(result, {
         workflowId,
-        pdfPath: result.pdfPath,
-        htmlPath: result.htmlPath,
-        videoPath: result.videoPath,
+        pdfPath: result.pdfPath ?? undefined,
+        htmlPath: result.htmlPath ?? undefined,
+        videoPath: result.videoPath ?? undefined,
       })
     } catch (err) {
       logger.warn('Trusten: failed to persist scan', {

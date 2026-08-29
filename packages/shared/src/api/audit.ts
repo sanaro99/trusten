@@ -1,9 +1,24 @@
 import { z } from 'zod'
+import { GradeSchema } from '../domain'
 
 const trimmedUrl = z.string().trim().min(1, 'url is required')
 
 export const QuickScanRequestSchema = z.object({ url: trimmedUrl })
 export type QuickScanRequest = z.infer<typeof QuickScanRequestSchema>
+
+/**
+ * Mirrors the literal `c.json({...})` shape in the /api/quick-scan handler
+ * — a summary, not a ScanDetail. `patterns` here is a count, not the array;
+ * fetch the full detail from /api/scan/:id if the array is needed.
+ */
+export const QuickScanResponseSchema = z.object({
+  scanId: z.string(),
+  domain: z.string(),
+  grade: GradeSchema,
+  score: z.number(),
+  patterns: z.number(),
+})
+export type QuickScanResponse = z.infer<typeof QuickScanResponseSchema>
 
 export const AuditRequestSchema = z.object({
   url: trimmedUrl,
