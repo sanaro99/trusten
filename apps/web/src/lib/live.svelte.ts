@@ -7,6 +7,7 @@
  * is the model. Polling survives only as a reconnect fallback.
  */
 import { type LiveEvent, LiveEventSchema } from '@trusten/shared/api'
+import { api } from './api'
 
 export interface LiveStep {
   step: number
@@ -66,10 +67,11 @@ export function createLiveScan() {
 
   let socket: WebSocket | null = null
 
-  function connect(jobId: string) {
+  async function connect(jobId: string, capabilityToken: string) {
+    const { ticket } = await api.createLiveTicket(jobId, capabilityToken)
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     socket = new WebSocket(
-      `${proto}://${location.host}/trusten/api/jobs/${jobId}/live`,
+      `${proto}://${location.host}/trusten/api/jobs/${encodeURIComponent(jobId)}/live?ticket=${encodeURIComponent(ticket)}`,
     )
     socket.onmessage = (message) => {
       const parsed = LiveEventSchema.safeParse(JSON.parse(message.data))

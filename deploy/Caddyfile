@@ -4,7 +4,11 @@
 	# Keep browser API calls, report downloads, and live-scan WebSockets on the
 	# public origin while routing them to the scanner service internally.
 	@scanner path /health /trusten/api/* /trusten/report/*
-	reverse_proxy @scanner api:9200
+	reverse_proxy @scanner api:9200 {
+		# The API trusts only this proxy-owned header. The public origin must be
+		# reachable exclusively through the configured Cloudflare tunnel.
+		header_up X-Trusten-Client-IP {http.request.header.Cf-Connecting-Ip}
+	}
 
 	reverse_proxy web:3000
 }

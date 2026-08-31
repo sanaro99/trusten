@@ -1,6 +1,6 @@
 # Architecture
 
-Trusten is a standalone **TypeScript / Bun / Hono / SQLite** service that drives **headless
+Trusten is a **TypeScript / Bun / Hono / PostgreSQL** application that drives **headless
 Chromium via Puppeteer**. It began as a fork of BrowserOS (an agentic browser) on the assumption
 that scanning needed an in-browser AI agent; it doesn't, and the BrowserOS apparatus has been
 removed.
@@ -26,11 +26,11 @@ apps/
       dashboard/
         routes.ts              Hono routes + async audit runner
         ui.ts                  server-rendered HTML/CSS/JS
-      db.ts                    SQLite persistence (scans, audit jobs, page cache)
+      db.ts                    persistence (scans, audit jobs, page cache)
       report.ts                annotated screenshot overlays + HTML report
       types.ts                 core types
       main.ts                  standalone entrypoint (HTTP + WebSocket on :9200)
-    src/lib/                   SQLite store + logger only
+    src/lib/                   PostgreSQL adapter, migrations, and logger
   trusten-ext/                 Chrome MV3 extension (Quick Scan popup)
 packages/
   shared/                      shared constants/types (@trusten/shared)
@@ -47,7 +47,7 @@ scoring, and navigator are independent of the browser backend.
 
 > **Why Puppeteer, not Playwright?** Playwright's `--remote-debugging-pipe` transport relies on
 > inherited file descriptors that Bun's `child_process` does not provide, so it cannot launch
-> under Bun (the runtime this project requires for `bun:sqlite`). Puppeteer uses a WebSocket
+> under Bun. Puppeteer uses a WebSocket
 > transport that works under Bun.
 
 ## Data flow
@@ -62,7 +62,27 @@ analyzers → annotated screenshot), records a session video, generates an HTML 
 caches each page's findings, and persists. Progress and (optionally) live browser frames stream
 to the dashboard over WebSocket via `live/hub.ts`.
 
+**Public admission** — the dashboard explicitly renders Cloudflare Turnstile in
+Managed `interaction-only` mode only when a visitor submits a scan. The browser
+sends the short-lived token with the request. The API verifies the secret,
+expected hostname, and `scan-submit` action, then applies anonymous-session,
+IP, and domain quotas before admitting work. Turnstile is bot evidence, not
+identity or authorization; the public demo remains account-free.
+
+Audit creation also returns a 256-bit opaque job capability. PostgreSQL stores
+only its HMAC. Status polling uses the capability as a bearer credential, and
+the live stream exchanges it for a short-lived, single-use WebSocket ticket.
+Visitors still create no account and enter no password.
+
 ## Storage
 
-SQLite at `~/.trusten/trusten.db` (`trusten_scans`, `trusten_audit_jobs`, `trusten_page_cache`).
-Reports, per-step screenshots, and session videos are written under `~/Desktop/trusten-reports/`.
+PostgreSQL is the production system of record for scans, audit job records,
+page cache, anonymous quota state, capability hashes, and capacity leases.
+Fine-grained live progress remains process-local while a job runs. Schema changes use
+ordered, versioned migrations rather than startup-time DDL. The Compose
+topology keeps PostgreSQL private and health-gates API startup.
+
+Reports, per-step screenshots, and session videos remain filesystem evidence,
+stored separately from the PostgreSQL dataset. PostgreSQL stores their metadata
+and references, so database and evidence backups have separate retention and
+restore procedures.

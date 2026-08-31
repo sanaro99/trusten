@@ -9,6 +9,8 @@
  * disables the robots check for local testing.
  */
 
+import { authorizeTarget } from '../security/target-policy'
+
 export const TRUSTEN_UA_TOKEN = 'TrustenBot'
 
 interface RobotsEntry {
@@ -57,13 +59,25 @@ function parseRobots(text: string): RobotsEntry {
 
 async function fetchRobots(origin: string): Promise<RobotsEntry> {
   try {
-    const res = await fetch(`${origin}/robots.txt`, {
-      signal: AbortSignal.timeout(5000),
-      headers: { 'User-Agent': TRUSTEN_UA_TOKEN },
-    })
-    if (!res.ok)
-      return { disallowAll: false, disallows: [], fetchedAt: Date.now() }
-    return parseRobots(await res.text())
+    let current = `${origin}/robots.txt`
+    for (let redirects = 0; redirects <= 5; redirects++) {
+      const target = await authorizeTarget(current)
+      const res = await fetch(target.url, {
+        signal: AbortSignal.timeout(5000),
+        headers: { 'User-Agent': TRUSTEN_UA_TOKEN },
+        redirect: 'manual',
+      })
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location')
+        if (!location) break
+        current = new URL(location, target.url).href
+        continue
+      }
+      if (!res.ok)
+        return { disallowAll: false, disallows: [], fetchedAt: Date.now() }
+      return parseRobots(await res.text())
+    }
+    return { disallowAll: false, disallows: [], fetchedAt: Date.now() }
   } catch {
     // No robots.txt / network error → allow.
     return { disallowAll: false, disallows: [], fetchedAt: Date.now() }

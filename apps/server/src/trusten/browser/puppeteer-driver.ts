@@ -26,6 +26,7 @@ import puppeteer, {
 import { PuppeteerScreenRecorder } from 'puppeteer-screen-recorder'
 import { logger } from '../../lib/logger'
 import { publish } from '../live/hub'
+import type { AuthorizedTarget } from '../security/target-policy'
 import type { CookieInfo, NetworkRequest } from '../types'
 import type {
   BrowserDriver,
@@ -78,6 +79,7 @@ interface PageEntry {
   liveClient: CDPSession | null
   frameDir: string | null
   frameCount: number
+  policyViolation: Error | null
 }
 
 /** Assemble a session mp4 from saved screencast jpeg frames via ffmpeg. */
@@ -117,10 +119,14 @@ function normalizeKey(key: string): string {
     .join('+')
 }
 
+export type BrowserTargetAuthorizer = (url: string) => Promise<AuthorizedTarget>
+
 export class PuppeteerDriver implements BrowserDriver {
   private browser: Browser | null = null
   private pages = new Map<number, PageEntry>()
   private nextPageId = 1
+
+  constructor(private readonly authorizeTarget?: BrowserTargetAuthorizer) {}
 
   private async getBrowser(): Promise<Browser> {
     if (!this.browser) {
@@ -146,6 +152,12 @@ export class PuppeteerDriver implements BrowserDriver {
     await page.setViewport(DEFAULT_VIEWPORT)
     await page.setUserAgent(DEFAULT_USER_AGENT)
 
+    const trustedLocalUrl = url.startsWith('file:') ? url : null
+    let initialUrl = url
+    if (this.authorizeTarget && !trustedLocalUrl) {
+      initialUrl = (await this.authorizeTarget(url)).url
+    }
+
     const pageId = this.nextPageId++
     const entry: PageEntry = {
       context,
@@ -156,8 +168,39 @@ export class PuppeteerDriver implements BrowserDriver {
       liveClient: null,
       frameDir: null,
       frameCount: 0,
+      policyViolation: null,
     }
     this.pages.set(pageId, entry)
+
+    if (this.authorizeTarget) {
+      await page.setRequestInterception(true)
+      page.on('request', async (request) => {
+        try {
+          const requestUrl = request.url()
+          const protocol = new URL(requestUrl).protocol
+          if (protocol === 'http:' || protocol === 'https:') {
+            await this.authorizeTarget!(requestUrl)
+          } else if (
+            protocol !== 'data:' &&
+            protocol !== 'blob:' &&
+            requestUrl !== trustedLocalUrl
+          ) {
+            throw new Error('Browser request scheme is not allowed')
+          }
+          await request.continue()
+        } catch (error) {
+          if (request.isNavigationRequest()) {
+            entry.policyViolation =
+              error instanceof Error ? error : new Error(String(error))
+          }
+          logger.warn('Trusten Puppeteer: blocked browser request', {
+            url: request.url(),
+            error: String(error),
+          })
+          await request.abort('blockedbyclient').catch(() => undefined)
+        }
+      })
+    }
 
     // Capture network responses (third-party trackers, pricing/XHR calls, etc.)
     page.on('response', (res) => {
@@ -245,8 +288,12 @@ export class PuppeteerDriver implements BrowserDriver {
     }
 
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await page.goto(initialUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000,
+      })
     } catch (err) {
+      if (entry.policyViolation) throw entry.policyViolation
       logger.warn('Trusten Puppeteer: initial navigation slow/failed', {
         url,
         error: String(err),
@@ -274,10 +321,19 @@ export class PuppeteerDriver implements BrowserDriver {
   }
 
   async goto(pageId: number, url: string): Promise<void> {
-    const { page } = this.entry(pageId)
+    const entry = this.entry(pageId)
+    const { page } = entry
+    entry.policyViolation = null
+    const target = this.authorizeTarget
+      ? await this.authorizeTarget(url)
+      : { url }
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await page.goto(target.url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000,
+      })
     } catch (err) {
+      if (entry.policyViolation) throw entry.policyViolation
       logger.warn('Trusten Puppeteer: goto failed', { url, error: String(err) })
     }
   }

@@ -52,7 +52,7 @@ per-step screenshots and a downloadable PDF:
 
 ## Quick start
 
-Prereqs: [Bun](https://bun.sh) ≥ 1.3.6.
+Prereqs: [Bun](https://bun.sh) ≥ 1.4.0.
 
 ```bash
 bun install                              # from the repo root
@@ -84,7 +84,7 @@ The full product spec lives in `Trusten_PRD.docx`.
 
 ```
 apps/
-  server/          Trusten API + dashboard + headless scan engine (TS / Bun / Hono / SQLite)
+  server/          Trusten API + dashboard + headless scan engine (TS / Bun / Hono / PostgreSQL)
   trusten-ext/     Chrome MV3 extension (Quick Scan popup + on-page highlight overlay)
 packages/
   shared/          shared constants/types

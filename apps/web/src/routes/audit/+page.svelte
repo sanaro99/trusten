@@ -3,14 +3,17 @@ import type { ScanDetail } from '@trusten/shared/api'
 import { gradeHeadline } from '@trusten/ui/content'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
 import { onDestroy } from 'svelte'
-import { api } from '$lib/api'
+import { api, publicScanErrorMessage } from '$lib/api'
 import { splitFindings } from '$lib/findings'
 import { createLiveScan } from '$lib/live.svelte'
+import { getTurnstileToken } from '$lib/turnstile'
 
 let url = $state('')
 let started = $state(false)
 let problem = $state('')
 let result = $state<ScanDetail | null>(null)
+let busy = $state(false)
+let turnstileContainer = $state<HTMLDivElement>()
 
 const live = createLiveScan()
 onDestroy(() => live.destroy())
@@ -25,26 +28,37 @@ async function start(event: SubmitEvent) {
   }
 
   problem = ''
+  busy = true
   try {
-    const { jobId } = await api.startAudit({
+    if (!turnstileContainer) throw new Error('Scan form is not ready')
+    const turnstileToken = await getTurnstileToken(
+      turnstileContainer,
+      'audit_scan',
+    )
+    const { jobId, capabilityToken } = await api.startAudit({
       url,
       watch: true,
       mode: 'discover',
+      turnstileToken,
     })
     started = true
-    live.connect(jobId)
-    await waitForResult(jobId)
-  } catch {
-    problem = 'We could not reach the checking service. Try again in a moment.'
+    await live.connect(jobId, capabilityToken)
+    await waitForResult(jobId, capabilityToken)
+  } catch (error) {
+    problem = publicScanErrorMessage(error)
+  } finally {
+    busy = false
   }
 }
 
-async function waitForResult(jobId: string) {
+async function waitForResult(jobId: string, capabilityToken: string) {
   // Fallback only: the WebSocket drives the display, this just collects the
   // finished result so the timeline can become the report in place.
   while (true) {
     await new Promise((r) => setTimeout(r, 3000))
-    const status = await api.getAuditStatus(jobId).catch(() => null)
+    const status = await api
+      .getAuditStatus(jobId, capabilityToken)
+      .catch(() => null)
     if (!status) continue
     if (status.status === 'done' && status.scanIds.length > 0) {
       result = await api.getScan(status.scanIds[0])
@@ -79,11 +93,13 @@ async function waitForResult(jobId: string) {
         <p class="mt-2 font-semibold text-serious" role="alert">{problem}</p>
       {/if}
       <button
-        class="mt-4 min-h-target rounded-xl bg-purple px-8 py-3 font-bold text-lg text-white"
+        class="mt-4 min-h-target rounded-xl bg-purple px-8 py-3 font-bold text-lg text-white disabled:opacity-60"
         type="submit"
+        disabled={busy}
       >
-        Start the check
+        {busy ? 'Starting...' : 'Start the check'}
       </button>
+      <div class="mt-3" bind:this={turnstileContainer}></div>
     </form>
   {/if}
 

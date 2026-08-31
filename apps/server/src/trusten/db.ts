@@ -1,7 +1,6 @@
-/**
- * Trusten — Scan history persistence (Bun SQLite)
- */
-import { getDb } from '../lib/db'
+import { randomUUID } from 'node:crypto'
+import { getDb, migrateDb } from '../lib/db'
+import { mapAuditJobRow, mapScanHistoryRow, mapScanRow } from './db-mappers'
 import type { DetectedPattern, ScanResult, WorkflowStep } from './types'
 
 export interface ScanHistoryRow {
@@ -21,7 +20,6 @@ export interface ScanHistoryRow {
   htmlPath: string | null
   createdAt: string
 }
-
 export interface DomainSummary {
   domain: string
   scanCount: number
@@ -33,23 +31,20 @@ export interface DomainSummary {
   criticalCount: number
   highCount: number
 }
-
 export interface GlobalStats {
   totalScans: number
   totalDomains: number
   totalPatterns: number
   avgScore: number
-  cleanSites: number // grade A
-  dirtySites: number // grade D or F
+  cleanSites: number
+  dirtySites: number
 }
-
 export interface AuditPlanItem {
   id: string
   name: string
   description: string
   steps: number
 }
-
 export interface AuditJob {
   id: string
   url: string
@@ -62,80 +57,19 @@ export interface AuditJob {
   error: string | null
   plan: AuditPlanItem[]
 }
-
-// ─── Schema init ───
-
-export function ensureTrustenSchema(): void {
-  const db = getDb()
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS trusten_scans (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      domain TEXT NOT NULL,
-      scan_type TEXT NOT NULL,
-      workflow_id TEXT,
-      started_at TEXT NOT NULL,
-      completed_at TEXT NOT NULL,
-      score_numeric REAL NOT NULL,
-      score_grade TEXT NOT NULL,
-      pattern_count INTEGER NOT NULL DEFAULT 0,
-      critical_count INTEGER NOT NULL DEFAULT 0,
-      high_count INTEGER NOT NULL DEFAULT 0,
-      patterns_json TEXT NOT NULL DEFAULT '[]',
-      workflow_steps_json TEXT,
-      pdf_path TEXT,
-      html_path TEXT,
-      video_path TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_trusten_scans_domain ON trusten_scans(domain);
-    CREATE INDEX IF NOT EXISTS idx_trusten_scans_created ON trusten_scans(created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS trusten_audit_jobs (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      domain TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      workflows_json TEXT NOT NULL DEFAULT '[]',
-      scan_ids_json TEXT NOT NULL DEFAULT '[]',
-      plan_json TEXT,
-      error TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      completed_at TEXT
-    );
-
-    -- Per-page findings captured during deep scans, consulted by quick scans
-    -- of pages the user is actively browsing.
-    CREATE TABLE IF NOT EXISTS trusten_page_cache (
-      url_key TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      patterns_json TEXT NOT NULL DEFAULT '[]',
-      scan_id TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `)
-
-  // Backfill columns added after the initial schema shipped.
-  const cols = db.prepare(`PRAGMA table_info(trusten_scans)`).all() as Array<{
-    name: string
-  }>
-  if (!cols.some((c) => c.name === 'video_path')) {
-    db.exec(`ALTER TABLE trusten_scans ADD COLUMN video_path TEXT`)
-  }
-
-  const jobCols = db
-    .prepare(`PRAGMA table_info(trusten_audit_jobs)`)
-    .all() as Array<{ name: string }>
-  if (!jobCols.some((c) => c.name === 'plan_json')) {
-    db.exec(`ALTER TABLE trusten_audit_jobs ADD COLUMN plan_json TEXT`)
-  }
+export interface AuditJobUpdate {
+  status?: AuditJob['status']
+  scanIds?: string[]
+  error?: string
+  completedAt?: string
+  plan?: AuditPlanItem[]
 }
 
-// ─── Scan persistence ───
+export async function ensureTrustenSchema(): Promise<void> {
+  await migrateDb()
+}
 
-export function saveTrustenScan(
+export async function saveTrustenScan(
   result: ScanResult,
   opts: {
     workflowId?: string
@@ -143,378 +77,167 @@ export function saveTrustenScan(
     htmlPath?: string
     videoPath?: string
   } = {},
-): void {
-  ensureTrustenSchema()
-  const db = getDb()
-
-  const criticalCount = result.patterns.filter(
-    (p: DetectedPattern) => p.severity === 'critical',
+): Promise<void> {
+  const critical = result.patterns.filter(
+    (p) => p.severity === 'critical',
   ).length
-  const highCount = result.patterns.filter(
-    (p: DetectedPattern) => p.severity === 'high',
-  ).length
-
-  db.prepare(
-    `INSERT OR REPLACE INTO trusten_scans
-     (id, url, domain, scan_type, workflow_id, started_at, completed_at,
-      score_numeric, score_grade, pattern_count, critical_count, high_count,
-      patterns_json, workflow_steps_json, pdf_path, html_path, video_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    result.id,
-    result.url,
-    result.domain,
-    result.scanType,
-    opts.workflowId ?? null,
-    result.startedAt,
-    result.completedAt,
-    result.score.numeric,
-    result.score.grade,
-    result.patterns.length,
-    criticalCount,
-    highCount,
-    JSON.stringify(result.patterns),
-    result.workflowSteps
-      ? JSON.stringify(
-          (result.workflowSteps as WorkflowStep[]).map((s) => ({
-            ...s,
-            screenshot: s.screenshotPath
-              ? '[saved]'
-              : s.screenshot
-                ? '[captured]'
-                : '',
-          })),
-        )
-      : null,
-    opts.pdfPath ?? null,
-    opts.htmlPath ?? null,
-    opts.videoPath ?? null,
-  )
+  const high = result.patterns.filter((p) => p.severity === 'high').length
+  const steps = result.workflowSteps
+    ? (result.workflowSteps as WorkflowStep[]).map((s) => ({
+        ...s,
+        screenshot: s.screenshotPath
+          ? '[saved]'
+          : s.screenshot
+            ? '[captured]'
+            : '',
+      }))
+    : null
+  await getDb()`INSERT INTO trusten_scans
+    (id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,patterns,workflow_steps,pdf_path,html_path,video_path)
+    VALUES (${result.id},${result.url},${result.domain},${result.scanType},${opts.workflowId ?? null},${result.startedAt},${result.completedAt},${result.score.numeric},${result.score.grade},${result.patterns.length},${critical},${high},${JSON.stringify(result.patterns)}::jsonb,${steps ? JSON.stringify(steps) : null}::jsonb,${opts.pdfPath ?? null},${opts.htmlPath ?? null},${opts.videoPath ?? null})
+    ON CONFLICT (id) DO UPDATE SET url=EXCLUDED.url,domain=EXCLUDED.domain,scan_type=EXCLUDED.scan_type,workflow_id=EXCLUDED.workflow_id,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,score_numeric=EXCLUDED.score_numeric,score_grade=EXCLUDED.score_grade,pattern_count=EXCLUDED.pattern_count,critical_count=EXCLUDED.critical_count,high_count=EXCLUDED.high_count,patterns=EXCLUDED.patterns,workflow_steps=EXCLUDED.workflow_steps,pdf_path=EXCLUDED.pdf_path,html_path=EXCLUDED.html_path,video_path=EXCLUDED.video_path`
 }
 
-// ─── Queries ───
-
-export function getTrustenScanHistory(limit = 20): ScanHistoryRow[] {
-  ensureTrustenSchema()
-  const db = getDb()
-  const rows = db
-    .prepare(
-      `SELECT id, url, domain, scan_type, workflow_id, started_at, completed_at,
-              score_numeric, score_grade, pattern_count, critical_count, high_count,
-              pdf_path, html_path, created_at
-       FROM trusten_scans
-       ORDER BY created_at DESC
-       LIMIT ?`,
-    )
-    .all(limit) as Array<Record<string, unknown>>
-
-  return rows.map(rowToHistory)
+export async function getTrustenScanHistory(
+  limit = 20,
+): Promise<ScanHistoryRow[]> {
+  const rows =
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at FROM trusten_scans ORDER BY created_at DESC LIMIT ${limit}`
+  return rows.map(mapScanHistoryRow)
 }
-
-export function getTrustenScansByDomain(
+export async function getTrustenScansByDomain(
   domain: string,
   limit = 50,
-): ScanHistoryRow[] {
-  ensureTrustenSchema()
-  const db = getDb()
-  const rows = db
-    .prepare(
-      `SELECT id, url, domain, scan_type, workflow_id, started_at, completed_at,
-              score_numeric, score_grade, pattern_count, critical_count, high_count,
-              pdf_path, html_path, created_at
-       FROM trusten_scans
-       WHERE domain = ?
-       ORDER BY created_at DESC
-       LIMIT ?`,
-    )
-    .all(domain, limit) as Array<Record<string, unknown>>
-
-  return rows.map(rowToHistory)
+): Promise<ScanHistoryRow[]> {
+  const rows =
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at FROM trusten_scans WHERE domain=${domain} ORDER BY created_at DESC LIMIT ${limit}`
+  return rows.map(mapScanHistoryRow)
 }
-
-export function getTrustenScanById(id: string): ScanResult | null {
-  ensureTrustenSchema()
-  const db = getDb()
-  const row = db.prepare(`SELECT * FROM trusten_scans WHERE id = ?`).get(id) as
-    | Record<string, unknown>
-    | undefined
-
-  if (!row) return null
-
+export async function getTrustenScanById(
+  id: string,
+): Promise<ScanResult | null> {
+  const rows = await getDb()`SELECT * FROM trusten_scans WHERE id=${id} LIMIT 1`
+  return rows[0] ? mapScanRow(rows[0]) : null
+}
+export async function getGlobalStats(): Promise<GlobalStats> {
+  const [r] =
+    await getDb()`SELECT COUNT(*)::int total_scans,COUNT(DISTINCT domain)::int total_domains,COALESCE(SUM(pattern_count),0)::int total_patterns,COALESCE(AVG(score_numeric),0)::float8 avg_score,COUNT(*) FILTER(WHERE score_grade='A')::int clean_sites,COUNT(*) FILTER(WHERE score_grade IN('D','F'))::int dirty_sites FROM trusten_scans`
   return {
-    id: row.id as string,
-    url: row.url as string,
-    domain: row.domain as string,
-    scanType: row.scan_type as 'quick' | 'deep',
-    startedAt: row.started_at as string,
-    completedAt: row.completed_at as string,
-    patterns: JSON.parse(row.patterns_json as string) as DetectedPattern[],
-    score: {
-      numeric: row.score_numeric as number,
-      grade: row.score_grade as 'A' | 'B' | 'C' | 'D' | 'F',
-      categoryBreakdown: {},
-      summary: '',
-    },
-    workflowSteps: row.workflow_steps_json
-      ? (JSON.parse(row.workflow_steps_json as string) as WorkflowStep[])
-      : undefined,
-    pdfPath: row.pdf_path as string | null,
-    htmlPath: row.html_path as string | null,
-    videoPath: row.video_path as string | null,
+    totalScans: Number(r.total_scans),
+    totalDomains: Number(r.total_domains),
+    totalPatterns: Number(r.total_patterns),
+    avgScore: Math.round(Number(r.avg_score) * 10) / 10,
+    cleanSites: Number(r.clean_sites),
+    dirtySites: Number(r.dirty_sites),
   }
 }
 
-export function getGlobalStats(): GlobalStats {
-  ensureTrustenSchema()
-  const db = getDb()
-
-  const totals = db
-    .prepare(
-      `SELECT
-         COUNT(*) as total_scans,
-         COUNT(DISTINCT domain) as total_domains,
-         SUM(pattern_count) as total_patterns,
-         AVG(score_numeric) as avg_score,
-         SUM(CASE WHEN score_grade = 'A' THEN 1 ELSE 0 END) as clean_sites,
-         SUM(CASE WHEN score_grade IN ('D','F') THEN 1 ELSE 0 END) as dirty_sites
-       FROM trusten_scans`,
-    )
-    .get() as Record<string, unknown>
-
+const DOMAIN_SQL = `SELECT domain,COUNT(*)::int scan_count,MAX(created_at) latest_scan_at,AVG(score_numeric)::float8 avg_score,SUM(pattern_count)::int total_patterns,SUM(critical_count)::int critical_count,SUM(high_count)::int high_count,(array_agg(score_grade ORDER BY created_at DESC))[1] latest_grade,(array_agg(score_numeric ORDER BY created_at DESC))[1]::float8 latest_score FROM trusten_scans`
+function mapDomain(r: Record<string, unknown>): DomainSummary {
   return {
-    totalScans: (totals.total_scans as number) ?? 0,
-    totalDomains: (totals.total_domains as number) ?? 0,
-    totalPatterns: (totals.total_patterns as number) ?? 0,
-    avgScore: Math.round(((totals.avg_score as number) ?? 0) * 10) / 10,
-    cleanSites: (totals.clean_sites as number) ?? 0,
-    dirtySites: (totals.dirty_sites as number) ?? 0,
+    domain: r.domain as string,
+    scanCount: Number(r.scan_count),
+    latestGrade: r.latest_grade as string,
+    latestScore: Math.round(Number(r.latest_score)),
+    latestScanAt:
+      r.latest_scan_at instanceof Date
+        ? r.latest_scan_at.toISOString()
+        : String(r.latest_scan_at),
+    avgScore: Math.round(Number(r.avg_score) * 10) / 10,
+    totalPatterns: Number(r.total_patterns),
+    criticalCount: Number(r.critical_count),
+    highCount: Number(r.high_count),
   }
 }
-
-// Columns shared by both domain-summary queries (per-domain aggregates).
-const DOMAIN_SUMMARY_AGGREGATE = `
-  domain,
-  COUNT(*) as scan_count,
-  MAX(created_at) as latest_scan_at,
-  AVG(score_numeric) as avg_score,
-  SUM(pattern_count) as total_patterns,
-  SUM(critical_count) as critical_count,
-  SUM(high_count) as high_count`
-
-/** Map an aggregate row + the domain's most recent grade/score into a DomainSummary. */
-function buildDomainSummary(row: Record<string, unknown>): DomainSummary {
-  const domain = row.domain as string
-  const latest = getDb()
-    .prepare(
-      `SELECT score_grade, score_numeric FROM trusten_scans
-       WHERE domain = ? ORDER BY created_at DESC LIMIT 1`,
+export async function getDomainSummaries(limit = 50): Promise<DomainSummary[]> {
+  return (
+    await getDb().unsafe(
+      `${DOMAIN_SQL} GROUP BY domain ORDER BY latest_scan_at DESC LIMIT $1`,
+      [limit],
     )
-    .get(domain) as Record<string, unknown> | undefined
-
-  return {
-    domain,
-    scanCount: row.scan_count as number,
-    latestGrade: (latest?.score_grade as string) ?? 'F',
-    latestScore: Math.round((latest?.score_numeric as number) ?? 0),
-    latestScanAt: row.latest_scan_at as string,
-    avgScore: Math.round(((row.avg_score as number) ?? 0) * 10) / 10,
-    totalPatterns: (row.total_patterns as number) ?? 0,
-    criticalCount: (row.critical_count as number) ?? 0,
-    highCount: (row.high_count as number) ?? 0,
-  }
+  ).map(mapDomain)
+}
+export async function getDomainSummary(
+  domain: string,
+): Promise<DomainSummary | null> {
+  const rows = await getDb().unsafe(
+    `${DOMAIN_SQL} WHERE domain=$1 GROUP BY domain`,
+    [domain],
+  )
+  return rows[0] ? mapDomain(rows[0]) : null
 }
 
-export function getDomainSummaries(limit = 50): DomainSummary[] {
-  ensureTrustenSchema()
-  const rows = getDb()
-    .prepare(
-      `SELECT ${DOMAIN_SUMMARY_AGGREGATE}
-       FROM trusten_scans
-       GROUP BY domain
-       ORDER BY latest_scan_at DESC
-       LIMIT ?`,
-    )
-    .all(limit) as Array<Record<string, unknown>>
-
-  return rows.map((r) => buildDomainSummary(r))
-}
-
-export function getDomainSummary(domain: string): DomainSummary | null {
-  ensureTrustenSchema()
-  const row = getDb()
-    .prepare(
-      `SELECT ${DOMAIN_SUMMARY_AGGREGATE}
-       FROM trusten_scans
-       WHERE domain = ?
-       GROUP BY domain`,
-    )
-    .get(domain) as Record<string, unknown> | undefined
-
-  return row ? buildDomainSummary(row) : null
-}
-
-// ─── Audit jobs ───
-
-export function createAuditJob(
+export async function createAuditJob(
   url: string,
   domain: string,
   workflows: string[],
-): string {
-  ensureTrustenSchema()
-  const db = getDb()
-  const id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-
-  db.prepare(
-    `INSERT INTO trusten_audit_jobs (id, url, domain, workflows_json)
-     VALUES (?, ?, ?, ?)`,
-  ).run(id, url, domain, JSON.stringify(workflows))
-
+): Promise<string> {
+  const id = `audit-${randomUUID()}`
+  await getDb()`INSERT INTO trusten_audit_jobs(id,url,domain,workflows) VALUES(${id},${url},${domain},${JSON.stringify(workflows)}::jsonb)`
   return id
 }
-
-export function updateAuditJob(
+export async function updateAuditJob(
   id: string,
-  update: {
-    status?: AuditJob['status']
-    scanIds?: string[]
-    error?: string
-    completedAt?: string
-    plan?: AuditPlanItem[]
-  },
-): void {
-  ensureTrustenSchema()
-  const db = getDb()
-
-  const fields: string[] = []
-  const values: string[] = []
-
-  if (update.status !== undefined) {
-    fields.push('status = ?')
-    values.push(update.status)
-  }
-  if (update.scanIds !== undefined) {
-    fields.push('scan_ids_json = ?')
-    values.push(JSON.stringify(update.scanIds))
-  }
-  if (update.error !== undefined) {
-    fields.push('error = ?')
-    values.push(update.error ?? '')
-  }
-  if (update.completedAt !== undefined) {
-    fields.push('completed_at = ?')
-    values.push(update.completedAt)
-  }
-  if (update.plan !== undefined) {
-    fields.push('plan_json = ?')
-    values.push(JSON.stringify(update.plan))
-  }
-
-  if (fields.length === 0) return
-  values.push(id)
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db.prepare(
-    `UPDATE trusten_audit_jobs SET ${fields.join(', ')} WHERE id = ?`,
-  ).run(...(values as any[]))
+  u: AuditJobUpdate,
+): Promise<void> {
+  if (Object.values(u).every((v) => v === undefined)) return
+  await getDb()`UPDATE trusten_audit_jobs SET
+    status=CASE WHEN ${u.status !== undefined} THEN ${u.status ?? null} ELSE status END,
+    scan_ids=CASE WHEN ${u.scanIds !== undefined} THEN ${u.scanIds ? JSON.stringify(u.scanIds) : null}::jsonb ELSE scan_ids END,
+    error=CASE WHEN ${u.error !== undefined} THEN ${u.error ?? null} ELSE error END,
+    completed_at=CASE WHEN ${u.completedAt !== undefined} THEN ${u.completedAt ?? null}::timestamptz ELSE completed_at END,
+    plan=CASE WHEN ${u.plan !== undefined} THEN ${u.plan ? JSON.stringify(u.plan) : null}::jsonb ELSE plan END WHERE id=${id}`
+}
+export async function getAuditJob(id: string): Promise<AuditJob | null> {
+  const rows =
+    await getDb()`SELECT * FROM trusten_audit_jobs WHERE id=${id} LIMIT 1`
+  return rows[0] ? mapAuditJobRow(rows[0]) : null
+}
+export async function getRecentAuditJobs(limit = 20): Promise<AuditJob[]> {
+  return (
+    await getDb()`SELECT * FROM trusten_audit_jobs ORDER BY created_at DESC LIMIT ${limit}`
+  ).map(mapAuditJobRow)
 }
 
-export function getAuditJob(id: string): AuditJob | null {
-  ensureTrustenSchema()
-  const db = getDb()
-  const row = db
-    .prepare(`SELECT * FROM trusten_audit_jobs WHERE id = ?`)
-    .get(id) as Record<string, unknown> | undefined
-
-  if (!row) return null
-  return rowToJob(row)
+/** Mark jobs orphaned by a prior process exit as terminal before serving. */
+export async function failIncompleteAuditJobs(): Promise<number> {
+  const result = await getDb()`UPDATE trusten_audit_jobs
+    SET status = 'failed',
+        error = 'The scanner restarted before this audit finished',
+        completed_at = now()
+    WHERE status IN ('pending', 'running')`
+  return result.count
 }
 
-export function getRecentAuditJobs(limit = 20): AuditJob[] {
-  ensureTrustenSchema()
-  const db = getDb()
-  const rows = db
-    .prepare(
-      `SELECT * FROM trusten_audit_jobs ORDER BY created_at DESC LIMIT ?`,
-    )
-    .all(limit) as Array<Record<string, unknown>>
-
-  return rows.map(rowToJob)
-}
-
-// ─── Page-finding cache (deep scan → quick scan) ───
-
-export function cachePageFindings(
+export async function cachePageFindings(
   urlKey: string,
   url: string,
   patterns: DetectedPattern[],
   scanId: string,
-): void {
-  if (patterns.length === 0) return
-  ensureTrustenSchema()
-  const db = getDb()
-  db.prepare(
-    `INSERT OR REPLACE INTO trusten_page_cache (url_key, url, patterns_json, scan_id, created_at)
-     VALUES (?, ?, ?, ?, datetime('now'))`,
-  ).run(urlKey, url, JSON.stringify(patterns), scanId)
+): Promise<void> {
+  if (!patterns.length) return
+  await getDb()`INSERT INTO trusten_page_cache(url_key,url,patterns,scan_id,created_at) VALUES(${urlKey},${url},${JSON.stringify(patterns)}::jsonb,${scanId},now()) ON CONFLICT(url_key) DO UPDATE SET url=EXCLUDED.url,patterns=EXCLUDED.patterns,scan_id=EXCLUDED.scan_id,created_at=now()`
 }
-
-/** Returns cached deep-scan findings for a page if fresh within `ttlDays`. */
-export function getCachedPageFindings(
+export async function getCachedPageFindings(
   urlKey: string,
   ttlDays = 7,
-): { patterns: DetectedPattern[]; cachedAt: string; scanId: string } | null {
-  ensureTrustenSchema()
-  const db = getDb()
-  const row = db
-    .prepare(
-      `SELECT patterns_json, scan_id, created_at FROM trusten_page_cache
-       WHERE url_key = ? AND created_at >= datetime('now', ?)`,
-    )
-    .get(urlKey, `-${ttlDays} days`) as Record<string, unknown> | undefined
-
-  if (!row) return null
+): Promise<{
+  patterns: DetectedPattern[]
+  cachedAt: string
+  scanId: string
+} | null> {
+  const rows =
+    await getDb()`SELECT patterns,scan_id,created_at FROM trusten_page_cache WHERE url_key=${urlKey} AND created_at>=now()-(${ttlDays}*interval '1 day') LIMIT 1`
+  const r = rows[0]
+  if (!r) return null
   return {
-    patterns: JSON.parse(row.patterns_json as string) as DetectedPattern[],
-    cachedAt: row.created_at as string,
-    scanId: (row.scan_id as string) ?? '',
-  }
-}
-
-// ─── Private helpers ───
-
-function rowToHistory(r: Record<string, unknown>): ScanHistoryRow {
-  return {
-    id: r.id as string,
-    url: r.url as string,
-    domain: r.domain as string,
-    scanType: r.scan_type as string,
-    workflowId: r.workflow_id as string | null,
-    startedAt: r.started_at as string,
-    completedAt: r.completed_at as string,
-    scoreNumeric: r.score_numeric as number,
-    scoreGrade: r.score_grade as string,
-    patternCount: r.pattern_count as number,
-    criticalCount: r.critical_count as number,
-    highCount: r.high_count as number,
-    pdfPath: r.pdf_path as string | null,
-    htmlPath: r.html_path as string | null,
-    createdAt: r.created_at as string,
-  }
-}
-
-function rowToJob(r: Record<string, unknown>): AuditJob {
-  return {
-    id: r.id as string,
-    url: r.url as string,
-    domain: r.domain as string,
-    status: r.status as AuditJob['status'],
-    workflows: JSON.parse(r.workflows_json as string) as string[],
-    createdAt: r.created_at as string,
-    completedAt: r.completed_at as string | null,
-    scanIds: JSON.parse(r.scan_ids_json as string) as string[],
-    error: r.error as string | null,
-    plan: r.plan_json
-      ? (JSON.parse(r.plan_json as string) as AuditPlanItem[])
-      : [],
+    patterns: (typeof r.patterns === 'string'
+      ? JSON.parse(r.patterns)
+      : r.patterns) as DetectedPattern[],
+    cachedAt:
+      r.created_at instanceof Date
+        ? r.created_at.toISOString()
+        : String(r.created_at),
+    scanId: (r.scan_id as string | null) ?? '',
   }
 }

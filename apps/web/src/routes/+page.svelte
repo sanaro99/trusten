@@ -1,6 +1,7 @@
 <script lang="ts">
 import { goto } from '$app/navigation'
-import { api } from '$lib/api'
+import { api, publicScanErrorMessage } from '$lib/api'
+import { getTurnstileToken } from '$lib/turnstile'
 import type { PageData } from './$types'
 
 let { data }: { data: PageData } = $props()
@@ -8,6 +9,7 @@ let { data }: { data: PageData } = $props()
 let url = $state('')
 let busy = $state(false)
 let problem = $state('')
+let turnstileContainer = $state<HTMLDivElement>()
 
 async function check(event: SubmitEvent) {
   event.preventDefault()
@@ -19,11 +21,16 @@ async function check(event: SubmitEvent) {
   busy = true
   problem = ''
   try {
-    const result = await api.quickScan({ url })
+    if (!turnstileContainer) throw new Error('Scan form is not ready')
+    const turnstileToken = await getTurnstileToken(
+      turnstileContainer,
+      'quick_scan',
+    )
+    const result = await api.quickScan({ url, turnstileToken })
     if (result.scanId) await goto(`/scan/${result.scanId}`)
     else problem = 'We could not check that site. Please try again.'
-  } catch {
-    problem = 'We could not reach the checking service. Try again in a moment.'
+  } catch (error) {
+    problem = publicScanErrorMessage(error)
   } finally {
     busy = false
   }
@@ -63,6 +70,7 @@ async function check(event: SubmitEvent) {
     >
       {busy ? 'Checking…' : 'Check this site'}
     </button>
+    <div class="mt-3" bind:this={turnstileContainer}></div>
   </form>
 
   <p class="mt-6 text-text-muted">
