@@ -10,7 +10,7 @@ import {
   AuditRequestSchema,
   QuickScanRequestSchema,
 } from '@trusten/shared/api'
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { logger } from '../../lib/logger'
 import { discoverWorkflows } from '../agent/discovery'
 import type { BrowserDriver } from '../browser/driver'
@@ -26,6 +26,15 @@ import {
 } from '../db'
 import { TrustenEngine } from '../index'
 import { closeChannel, publish } from '../live/hub'
+import type {
+  JobCapabilityAccess,
+  JobCapabilityScope,
+} from '../security/job-capability'
+import {
+  type PublicScanAdmission,
+  PublicScanAdmissionError,
+  type PublicScanAdmissionGrant,
+} from '../security/public-scan-admission'
 import type { ScanWorkflow } from '../types'
 import { checkRateLimit, isAllowedByRobots } from '../utils/guardrails'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
@@ -34,6 +43,66 @@ import { parseBody } from './validate'
 interface Config {
   browser: BrowserDriver
   executionDir: string
+  admission: PublicScanAdmission
+  capabilities: JobCapabilityAccess
+  secureCookies?: boolean
+}
+
+const DEMO_SESSION_COOKIE = 'trusten_demo'
+
+function bearerToken(header: string | undefined): string | undefined {
+  const match = /^Bearer\s+([^\s]+)$/i.exec(header ?? '')
+  return match?.[1]
+}
+
+async function authorizeJob(
+  c: Context,
+  capabilities: JobCapabilityAccess,
+  jobId: string,
+  scope: JobCapabilityScope,
+): Promise<boolean> {
+  const token = bearerToken(c.req.header('authorization'))
+  if (!token) return false
+  return (await capabilities.authorize(jobId, token, scope)).authorized
+}
+
+function readCookie(
+  header: string | undefined,
+  name: string,
+): string | undefined {
+  if (!header) return undefined
+  for (const part of header.split(';')) {
+    const [key, ...value] = part.trim().split('=')
+    if (key === name) {
+      try {
+        return decodeURIComponent(value.join('='))
+      } catch {
+        return undefined
+      }
+    }
+  }
+  return undefined
+}
+
+function clientIp(headers: Headers): string {
+  return headers.get('x-trusten-client-ip')?.trim() || 'unknown'
+}
+
+function setDemoSession(c: Context, sessionId: string, secure: boolean): void {
+  c.header(
+    'Set-Cookie',
+    `${DEMO_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; Max-Age=2592000; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax`,
+  )
+}
+
+function admissionResponse(c: Context, error: PublicScanAdmissionError) {
+  const quota = error.code.endsWith('QUOTA_EXCEEDED')
+  if (error.retryAfterSeconds)
+    c.header('Retry-After', String(error.retryAfterSeconds))
+  if (quota) return c.json({ error: error.message, code: error.code }, 429)
+  if (error.code === 'DEMO_BUSY' || error.code === 'BOT_UNAVAILABLE')
+    return c.json({ error: error.message, code: error.code }, 503)
+  return c.json({ error: error.message, code: error.code }, 403)
 }
 
 // In-memory tracking of running audit jobs (job progress)
@@ -81,7 +150,7 @@ export function createTrustenDashboardRoutes(config: Config) {
   app.get('/report/:id/screenshot/:step', async (c) => {
     const id = c.req.param('id')
     const step = Number(c.req.param('step'))
-    const scan = getTrustenScanById(id)
+    const scan = await getTrustenScanById(id)
 
     const wfStep = scan?.workflowSteps?.find((s) => s.stepNumber === step) as
       | { screenshotPath?: string; stepNumber: number }
@@ -124,7 +193,7 @@ export function createTrustenDashboardRoutes(config: Config) {
   // Session video — stream the recorded .webm from filesystem
   app.get('/report/:id/video', async (c) => {
     const id = c.req.param('id')
-    const scan = getTrustenScanById(id)
+    const scan = await getTrustenScanById(id)
     if (!scan?.videoPath) {
       return c.text('Video not found', 404)
     }
@@ -145,7 +214,7 @@ export function createTrustenDashboardRoutes(config: Config) {
   // PDF download — serve from filesystem
   app.get('/report/:id/pdf', async (c) => {
     const id = c.req.param('id')
-    const scan = getTrustenScanById(id)
+    const scan = await getTrustenScanById(id)
     if (!scan?.pdfPath) {
       return c.text('PDF not found', 404)
     }
@@ -208,12 +277,38 @@ export function createTrustenDashboardRoutes(config: Config) {
     const qsDomain = parseHostname(url)
     if (!qsDomain) return c.json({ error: 'Invalid URL' }, 400)
 
-    const qsGuard = await preScanGuard(url, qsDomain)
-    if (qsGuard) return c.json({ error: qsGuard.error }, qsGuard.status)
+    let admitted: PublicScanAdmissionGrant
+    try {
+      admitted = await config.admission.admit({
+        kind: 'quick',
+        target: url,
+        domain: qsDomain,
+        turnstileToken: parsed.data.turnstileToken,
+        anonymousSession: readCookie(
+          c.req.header('cookie'),
+          DEMO_SESSION_COOKIE,
+        ),
+        clientIp: clientIp(c.req.raw.headers),
+      })
+    } catch (error) {
+      if (error instanceof PublicScanAdmissionError)
+        return admissionResponse(c, error)
+      throw error
+    }
+
+    const qsGuard = await preScanGuard(
+      admitted.target.url,
+      admitted.target.hostname,
+    )
+    if (qsGuard) {
+      config.admission.release(admitted.id)
+      return c.json({ error: qsGuard.error }, qsGuard.status)
+    }
 
     try {
       const engine = new TrustenEngine(config.browser, config.executionDir)
-      const result = await engine.quickScan(url)
+      const result = await engine.quickScan(admitted.target.url)
+      setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
       return c.json({
         scanId: result.id,
         domain: result.domain,
@@ -225,6 +320,8 @@ export function createTrustenDashboardRoutes(config: Config) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error('Trusten dashboard quick-scan failed', { url, error: msg })
       return c.json({ error: msg }, 500)
+    } finally {
+      config.admission.release(admitted.id)
     }
   })
 
@@ -246,28 +343,92 @@ export function createTrustenDashboardRoutes(config: Config) {
       return c.json({ error: 'No valid workflows selected' }, 400)
     }
 
-    const guard = await preScanGuard(url, domain)
-    if (guard) return c.json({ error: guard.error }, guard.status)
+    let admitted: PublicScanAdmissionGrant
+    try {
+      admitted = await config.admission.admit({
+        kind: 'audit',
+        target: url,
+        domain,
+        turnstileToken: parsed.data.turnstileToken,
+        anonymousSession: readCookie(
+          c.req.header('cookie'),
+          DEMO_SESSION_COOKIE,
+        ),
+        clientIp: clientIp(c.req.raw.headers),
+      })
+    } catch (error) {
+      if (error instanceof PublicScanAdmissionError)
+        return admissionResponse(c, error)
+      throw error
+    }
 
-    const jobId = createAuditJob(url, domain, validWorkflows)
+    const guard = await preScanGuard(
+      admitted.target.url,
+      admitted.target.hostname,
+    )
+    if (guard) {
+      config.admission.release(admitted.id)
+      return c.json({ error: guard.error }, guard.status)
+    }
+
+    let jobId: string
+    let capability: Awaited<ReturnType<JobCapabilityAccess['issue']>>
+    try {
+      jobId = await createAuditJob(
+        admitted.target.url,
+        admitted.target.hostname,
+        validWorkflows,
+      )
+      capability = await config.capabilities.issue(jobId)
+    } catch (error) {
+      config.admission.release(admitted.id)
+      throw error
+    }
     runningJobs.set(jobId, { currentStep: 'queued', completedWorkflows: [] })
 
     // Run async in the background — do not await
-    runAuditJob(jobId, url, domain, validWorkflows, config, {
-      watch,
-      mode,
-    }).catch((err) => {
-      logger.error('Trusten audit job crashed', { jobId, error: String(err) })
-    })
+    runAuditJob(
+      jobId,
+      admitted.target.url,
+      admitted.target.hostname,
+      validWorkflows,
+      config,
+      {
+        watch,
+        mode,
+      },
+    )
+      .catch((err) => {
+        logger.error('Trusten audit job crashed', { jobId, error: String(err) })
+      })
+      .finally(() => config.admission.release(admitted.id))
 
-    return c.json({ jobId, domain })
+    setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
+    return c.json({
+      jobId,
+      domain: admitted.target.hostname,
+      capabilityToken: capability.token,
+      capabilityExpiresAt: capability.expiresAt,
+    })
+  })
+
+  app.post('/api/audit/:jobId/live-ticket', async (c) => {
+    const jobId = c.req.param('jobId')
+    const token = bearerToken(c.req.header('authorization'))
+    if (!token) return c.json({ error: 'Not authorized' }, 404)
+    const ticket = await config.capabilities.issueLiveTicket(jobId, token)
+    if (!ticket) return c.json({ error: 'Not authorized' }, 404)
+    return c.json({ ticket: ticket.token, expiresAt: ticket.expiresAt })
   })
 
   // Poll audit job status
-  app.get('/api/audit/:jobId', (c) => {
+  app.get('/api/audit/:jobId', async (c) => {
     const jobId = c.req.param('jobId')
+    if (!(await authorizeJob(c, config.capabilities, jobId, 'status'))) {
+      return c.json({ error: 'Job not found' }, 404)
+    }
     const progress = runningJobs.get(jobId)
-    const job = getAuditJob(jobId)
+    const job = await getAuditJob(jobId)
 
     if (!job) return c.json({ error: 'Job not found' }, 404)
 
@@ -287,30 +448,30 @@ export function createTrustenDashboardRoutes(config: Config) {
   })
 
   // JSON stats
-  app.get('/api/stats', (c) => {
-    return c.json(getGlobalStats())
+  app.get('/api/stats', async (c) => {
+    return c.json(await getGlobalStats())
   })
 
   // JSON domain summary
-  app.get('/api/domain/:domain', (c) => {
+  app.get('/api/domain/:domain', async (c) => {
     const domain = c.req.param('domain')
-    const summary = getDomainSummary(domain)
-    const scans = getTrustenScansByDomain(domain, 20)
+    const summary = await getDomainSummary(domain)
+    const scans = await getTrustenScansByDomain(domain, 20)
     return c.json({ domain, summary, scans })
   })
 
   // JSON scan detail
-  app.get('/api/scan/:id', (c) => {
+  app.get('/api/scan/:id', async (c) => {
     const id = c.req.param('id')
-    const scan = getTrustenScanById(id)
+    const scan = await getTrustenScanById(id)
     if (!scan) return c.json({ error: 'Not found' }, 404)
     return c.json(scan)
   })
 
   // JSON scan history
-  app.get('/api/history', (c) => {
+  app.get('/api/history', async (c) => {
     const limit = Number(c.req.query('limit') ?? '50')
-    const scans = getTrustenScanHistory(Math.min(limit, 200))
+    const scans = await getTrustenScanHistory(Math.min(limit, 200))
     return c.json({ scans, total: scans.length })
   })
 
@@ -330,7 +491,7 @@ async function runAuditJob(
   const scanIds: string[] = []
   const progress = runningJobs.get(jobId)!
 
-  updateAuditJob(jobId, { status: 'running' })
+  await updateAuditJob(jobId, { status: 'running' })
 
   try {
     const engine = new TrustenEngine(config.browser, config.executionDir)
@@ -345,7 +506,7 @@ async function runAuditJob(
         action: 'Exploring the site and planning workflows…',
       })
       wfList = await discoverWorkflows(config.browser, url)
-      updateAuditJob(jobId, {
+      await updateAuditJob(jobId, {
         plan: wfList.map((w) => ({
           id: w.id,
           name: w.name,
@@ -383,7 +544,7 @@ async function runAuditJob(
         })
         scanIds.push(result.id)
         progress.completedWorkflows.push(workflow.id)
-        updateAuditJob(jobId, { scanIds })
+        await updateAuditJob(jobId, { scanIds })
         const steps = result.workflowSteps ?? []
         const advancedCount = steps.filter(
           (s) => s.status === 'reached' || s.status === 'observed',
@@ -416,7 +577,7 @@ async function runAuditJob(
       }
     }
 
-    updateAuditJob(jobId, {
+    await updateAuditJob(jobId, {
       status: 'done',
       scanIds,
       completedAt: new Date().toISOString(),
@@ -431,7 +592,7 @@ async function runAuditJob(
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    updateAuditJob(jobId, {
+    await updateAuditJob(jobId, {
       status: 'failed',
       error: msg,
       completedAt: new Date().toISOString(),

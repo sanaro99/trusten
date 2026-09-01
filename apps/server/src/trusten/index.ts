@@ -17,7 +17,7 @@ import type { BrowserDriver } from './browser/driver'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
 import { calculateScore } from './scoring/engine'
-import { type ScanStore, sqliteScanStore } from './store'
+import { postgresScanStore, type ScanStore } from './store'
 import type {
   AnalyzerContext,
   AnalyzerResult,
@@ -59,7 +59,7 @@ export class TrustenEngine {
   constructor(
     browser: BrowserDriver,
     executionDir?: string,
-    store: ScanStore = sqliteScanStore,
+    store: ScanStore = postgresScanStore,
   ) {
     this.browser = browser
     this.store = store
@@ -89,7 +89,7 @@ export class TrustenEngine {
       await this.waitForPageLoad(pageId)
 
       const context = await this.captureContext(pageId)
-      const patterns = this.mergeCachedFindings(
+      const patterns = await this.mergeCachedFindings(
         url,
         await this.runAllAnalyzers(context),
       )
@@ -351,7 +351,7 @@ export class TrustenEngine {
         // surface them instantly.
         if (stepPatterns.length > 0) {
           try {
-            this.store.cachePageFindings(
+            await this.store.cachePageFindings(
               normalizeUrlKey(currentUrl),
               currentUrl,
               stepPatterns,
@@ -493,7 +493,7 @@ export class TrustenEngine {
 
     logger.info('Trusten analyzing provided content', { domain, scanId })
 
-    const patterns = this.mergeCachedFindings(
+    const patterns = await this.mergeCachedFindings(
       url,
       await this.runAllAnalyzers(context),
     )
@@ -531,7 +531,7 @@ export class TrustenEngine {
     logger.info('Trusten analyzing current page', { url, scanId })
 
     const context = await this.captureContext(pageId)
-    const patterns = this.mergeCachedFindings(
+    const patterns = await this.mergeCachedFindings(
       url,
       await this.runAllAnalyzers(context),
     )
@@ -699,12 +699,14 @@ export class TrustenEngine {
    * it), deduped against the live findings. Lets a Quick Scan on a page the user
    * is actively browsing surface the richer patterns a full audit already found.
    */
-  private mergeCachedFindings(
+  private async mergeCachedFindings(
     url: string,
     live: DetectedPattern[],
-  ): DetectedPattern[] {
+  ): Promise<DetectedPattern[]> {
     try {
-      const cached = this.store.getCachedPageFindings(normalizeUrlKey(url))
+      const cached = await this.store.getCachedPageFindings(
+        normalizeUrlKey(url),
+      )
       if (!cached || cached.patterns.length === 0) return live
       const key = (p: DetectedPattern) =>
         `${p.category}|${p.element?.selector ?? ''}|${p.description}`
@@ -811,7 +813,7 @@ export class TrustenEngine {
     workflowId?: string,
   ): Promise<void> {
     try {
-      this.store.saveScan(result, {
+      await this.store.saveScan(result, {
         workflowId,
         pdfPath: result.pdfPath ?? undefined,
         htmlPath: result.htmlPath ?? undefined,

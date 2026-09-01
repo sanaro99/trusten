@@ -1,7 +1,7 @@
 /**
  * Trusten — Scan persistence boundary
  *
- * The engine talks to storage only through ScanStore, so the SQLite layer
+ * The engine talks to storage only through ScanStore, so the PostgreSQL layer
  * (db.ts) can be swapped or stubbed (e.g. in tests) without touching scan
  * orchestration. The default implementation delegates straight to db.ts.
  */
@@ -28,13 +28,13 @@ export interface ScanStore {
     url: string,
     patterns: DetectedPattern[],
     scanId: string,
-  ): void
-  getCachedPageFindings(urlKey: string): CachedPageFindings | null
-  saveScan(result: ScanResult, opts?: SaveScanOptions): void
+  ): Promise<void>
+  getCachedPageFindings(urlKey: string): Promise<CachedPageFindings | null>
+  saveScan(result: ScanResult, opts?: SaveScanOptions): Promise<void>
 }
 
-/** Default store backed by the bundled SQLite database (db.ts). */
-export const sqliteScanStore: ScanStore = {
+/** Default store backed by PostgreSQL (db.ts). */
+export const postgresScanStore: ScanStore = {
   cachePageFindings,
   getCachedPageFindings: (urlKey) => getCachedPageFindings(urlKey),
   saveScan: saveTrustenScan,

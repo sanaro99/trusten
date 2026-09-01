@@ -26,6 +26,14 @@ describe('QuickScanRequestSchema', () => {
       QuickScanRequestSchema.parse({ url: '  https://example.com  ' }).url,
     ).toBe('https://example.com')
   })
+
+  test('accepts an optional Turnstile token', () => {
+    const parsed = QuickScanRequestSchema.parse({
+      url: 'https://example.com',
+      turnstileToken: 'test-token',
+    })
+    expect(parsed.turnstileToken).toBe('test-token')
+  })
 })
 
 describe('QuickScanResponseSchema', () => {
@@ -67,6 +75,14 @@ describe('AuditRequestSchema', () => {
     expect(() =>
       AuditRequestSchema.parse({ url: 'https://example.com', mode: 'psychic' }),
     ).toThrow()
+  })
+
+  test('accepts an optional Turnstile token', () => {
+    const parsed = AuditRequestSchema.parse({
+      url: 'https://example.com',
+      turnstileToken: 'test-token',
+    })
+    expect(parsed.turnstileToken).toBe('test-token')
   })
 })
 

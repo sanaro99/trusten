@@ -2,8 +2,12 @@ import { z } from 'zod'
 import { GradeSchema } from '../domain'
 
 const trimmedUrl = z.string().trim().min(1, 'url is required')
+const turnstileToken = z.string().trim().min(1).optional()
 
-export const QuickScanRequestSchema = z.object({ url: trimmedUrl })
+export const QuickScanRequestSchema = z.object({
+  url: trimmedUrl,
+  turnstileToken,
+})
 export type QuickScanRequest = z.infer<typeof QuickScanRequestSchema>
 
 /**
@@ -22,6 +26,7 @@ export type QuickScanResponse = z.infer<typeof QuickScanResponseSchema>
 
 export const AuditRequestSchema = z.object({
   url: trimmedUrl,
+  turnstileToken,
   workflows: z.array(z.string()).optional(),
   watch: z.boolean().default(false),
   mode: z.enum(['fixed', 'discover']).default('fixed'),
@@ -31,8 +36,16 @@ export type AuditRequest = z.infer<typeof AuditRequestSchema>
 export const AuditStartResponseSchema = z.object({
   jobId: z.string(),
   domain: z.string(),
+  capabilityToken: z.string(),
+  capabilityExpiresAt: z.number(),
 })
 export type AuditStartResponse = z.infer<typeof AuditStartResponseSchema>
+
+export const LiveTicketResponseSchema = z.object({
+  ticket: z.string(),
+  expiresAt: z.number(),
+})
+export type LiveTicketResponse = z.infer<typeof LiveTicketResponseSchema>
 
 export const AuditPlanItemSchema = z.object({
   id: z.string(),
