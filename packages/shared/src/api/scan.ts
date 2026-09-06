@@ -52,6 +52,7 @@ export const WorkflowStepSchema = z.object({
   navAdvanced: z.boolean().optional(),
   navReason: z.string().optional(),
 })
+export type WorkflowStep = z.infer<typeof WorkflowStepSchema>
 
 export const ScanDetailSchema = z.object({
   id: z.string(),

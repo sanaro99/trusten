@@ -7,13 +7,13 @@ interface Props {
 let { label, children }: Props = $props()
 </script>
 
-<details class="mt-3 border-border border-t pt-3">
+<details class="collapse-arrow collapse mt-3 bg-base-200">
   <summary
-    class="flex min-h-target cursor-pointer items-center font-semibold text-purple"
+    class="collapse-title min-h-target cursor-pointer font-semibold text-primary"
   >
     {label}
   </summary>
-  <div class="mt-2 text-text-muted text-sm">
+  <div class="collapse-content text-base-content/65 text-sm">
     {@render children()}
   </div>
 </details>

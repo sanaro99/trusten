@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { type LiveState, reduceLiveEvent } from './live.svelte'
+import {
+  completedAuditResultId,
+  type LiveState,
+  reduceLiveEvent,
+} from './live.svelte'
 
 const empty: LiveState = {
   steps: [],
@@ -52,5 +56,17 @@ describe('reduceLiveEvent', () => {
     })
     expect(next.status).toBe('failed')
     expect(next.error).toBe('We could not open the basket page')
+  })
+})
+
+describe('completedAuditResultId', () => {
+  test('selects the journey result instead of the preliminary homepage scan', () => {
+    expect(
+      completedAuditResultId(['quick-scan', 'checkout-scan', 'cancel-scan']),
+    ).toBe('cancel-scan')
+  })
+
+  test('returns nothing when the audit produced no scans', () => {
+    expect(completedAuditResultId([])).toBeUndefined()
   })
 })

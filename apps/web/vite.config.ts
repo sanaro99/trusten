@@ -24,6 +24,9 @@ export default defineConfig({
       // same path prefix, and without it the upgrade is dropped in dev.
       // Dev and prod then use identical relative URLs.
       '/trusten/api': { target: API_ORIGIN, changeOrigin: true, ws: true },
+      // Result pages load persisted screenshots and downloadable reports from
+      // the same Trusten service as the JSON API.
+      '/trusten/report': { target: API_ORIGIN, changeOrigin: true },
     },
   },
 })

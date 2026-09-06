@@ -6,7 +6,7 @@ interface Props {
   src: string
   box?: BoundingBox
   /** Natural size of the screenshot. */
-  image: ImageSize
+  image?: ImageSize
   /** Plain description of what the picture shows. */
   alt: string
   /** Render without interactivity — the mode the PDF report uses. */
@@ -24,12 +24,24 @@ let {
 }: Props = $props()
 
 const crop = $derived(
-  computeCrop(box, image, { padding: 48, minWidth: 480, displayWidth }),
+  image
+    ? computeCrop(box, image, { padding: 48, minWidth: 480, displayWidth })
+    : null,
 )
-const displayHeight = $derived(Math.round(crop.height * crop.scale))
+const displayHeight = $derived(crop ? Math.round(crop.height * crop.scale) : 0)
 </script>
 
-<figure class="m-0">
+{#if !image}
+  <figure class="m-0 block! w-full">
+    <div class="overflow-hidden rounded-box border border-base-300 bg-neutral shadow-inner">
+      <img {src} {alt} class="block max-h-[34rem] w-full object-contain" loading="lazy" />
+    </div>
+    {#if !isStatic}
+      <figcaption class="mt-2 text-sm text-base-content/60">{alt}</figcaption>
+    {/if}
+  </figure>
+{:else if crop}
+<figure class="m-0 block! w-full">
   <div
     class="relative overflow-hidden rounded-xl border border-border"
     style="width: {displayWidth}px; height: {displayHeight}px; max-width: 100%;"
@@ -71,3 +83,4 @@ const displayHeight = $derived(Math.round(crop.height * crop.scale))
     <figcaption class="mt-2 text-sm text-text-muted">{alt}</figcaption>
   {/if}
 </figure>
+{/if}
