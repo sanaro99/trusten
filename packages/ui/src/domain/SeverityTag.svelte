@@ -19,7 +19,7 @@ const content = $derived(SHOWN_LEVELS[level])
 <span
   data-level={level}
   aria-label="{content.label}. {content.meaning}"
-  class="inline-flex items-center gap-2 rounded-full px-3 py-1 font-semibold text-sm"
+  class="badge badge-outline gap-2 font-semibold"
   style="color: var({content.colorVar});"
 >
   <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">

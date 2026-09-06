@@ -22,6 +22,15 @@ export interface LiveState {
   error: string | null
 }
 
+/**
+ * Audit jobs begin with a lightweight homepage scan and append the completed
+ * journey scans. The final ID is therefore the durable result with steps and
+ * screenshots, not the first ID.
+ */
+export function completedAuditResultId(scanIds: string[]): string | undefined {
+  return scanIds[scanIds.length - 1]
+}
+
 /** Pure reducer — the whole transport-independent behaviour, testable alone. */
 export function reduceLiveEvent(state: LiveState, event: LiveEvent): LiveState {
   switch (event.type) {

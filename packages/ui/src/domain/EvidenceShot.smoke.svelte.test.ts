@@ -28,4 +28,19 @@ describe('EvidenceShot smoke', () => {
     expect(container.querySelector('rect')).toBeFalsy()
     expect(container.querySelector('figcaption')).toBeFalsy()
   })
+
+  test('renders a full evidence image when its natural size is unavailable', () => {
+    const { container } = render(EvidenceShot, {
+      props: {
+        src: '/trusten/report/scan-1/screenshot/2',
+        alt: 'The checkout page after adding an item',
+      },
+    })
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(
+      '/trusten/report/scan-1/screenshot/2',
+    )
+    expect(container.querySelector('figcaption')?.textContent).toContain(
+      'checkout page',
+    )
+  })
 })

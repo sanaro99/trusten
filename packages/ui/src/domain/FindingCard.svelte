@@ -21,7 +21,8 @@ const band = $derived(toConfidenceBand(pattern.confidence))
 const prefix = $derived(CONFIDENCE_PREFIX[band])
 </script>
 
-<article class="border-border border-t py-8">
+<article id="finding-{pattern.id}" class="card mb-6 border border-base-300 bg-base-100 shadow-xl">
+  <div class="card-body p-6 md:p-8">
   <header class="mb-4 flex flex-wrap items-baseline gap-3">
     <h3 class="m-0 font-bold text-2xl">
       <span class="text-text-muted">{index}.</span>
@@ -32,14 +33,12 @@ const prefix = $derived(CONFIDENCE_PREFIX[band])
 
   {#if pattern.element?.text}
     <p class="mb-2 text-text-muted">The site said:</p>
-    <blockquote
-      class="my-0 mb-4 border-purple border-l-4 bg-surface py-3 pl-4 font-medium"
-    >
+    <blockquote class="alert my-0 mb-4 border-l-4 border-primary bg-base-200 py-3 font-medium shadow-inner">
       "{pattern.element.text}"
     </blockquote>
   {/if}
 
-  {#if screenshotUrl && imageSize}
+  {#if screenshotUrl}
     <div class="mb-6">
       <EvidenceShot
         src={screenshotUrl}
@@ -88,4 +87,5 @@ const prefix = $derived(CONFIDENCE_PREFIX[band])
       </p>
     {/if}
   </Disclosure>
+  </div>
 </article>
