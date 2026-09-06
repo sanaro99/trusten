@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 
-test('dashboard surfaces use a coherent raised and inset neumorphic language', async ({ page }) => {
+test('dashboard surfaces use a coherent raised and inset neumorphic language', async ({
+  page,
+}) => {
   await page.goto('/')
 
   const shell = page.locator('.min-h-screen').first()
@@ -8,12 +10,16 @@ test('dashboard surfaces use a coherent raised and inset neumorphic language', a
   const addressInput = page.locator('#site')
 
   const [shellStyles, cardStyles, inputStyles] = await Promise.all([
-    shell.evaluate((element) => ({ backgroundColor: getComputedStyle(element).backgroundColor })),
+    shell.evaluate((element) => ({
+      backgroundColor: getComputedStyle(element).backgroundColor,
+    })),
     auditCard.evaluate((element) => ({
       backgroundColor: getComputedStyle(element).backgroundColor,
       boxShadow: getComputedStyle(element).boxShadow,
     })),
-    addressInput.evaluate((element) => ({ boxShadow: getComputedStyle(element).boxShadow })),
+    addressInput.evaluate((element) => ({
+      boxShadow: getComputedStyle(element).boxShadow,
+    })),
   ])
 
   expect(cardStyles.backgroundColor).toBe(shellStyles.backgroundColor)
@@ -22,7 +28,9 @@ test('dashboard surfaces use a coherent raised and inset neumorphic language', a
   expect(inputStyles.boxShadow).toContain('inset')
 })
 
-test('pointer press is communicated by inset shadow without a hard boundary', async ({ page }) => {
+test('pointer press is communicated by inset shadow without a hard boundary', async ({
+  page,
+}) => {
   await page.goto('/')
 
   const button = page.getByRole('button', { name: 'Check this site' })
@@ -48,7 +56,9 @@ test('pointer press is communicated by inset shadow without a hard boundary', as
   expect.soft(pressed.outlineWidth).toBe('0px')
 })
 
-test('keyboard focus stays visible through a soft shadow rather than an outline', async ({ page }) => {
+test('keyboard focus stays visible through a soft shadow rather than an outline', async ({
+  page,
+}) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/')
 
