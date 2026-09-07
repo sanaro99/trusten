@@ -4,7 +4,7 @@ import { gradeHeadline } from './grade'
 describe('gradeHeadline', () => {
   test('gives a plain sentence, never a score', () => {
     const { headline, sub } = gradeHeadline('D', 4)
-    expect(headline).toBe('This shop uses several unfair tricks')
+    expect(headline).toBe('This website uses several unfair tricks')
     expect(sub).toContain('4 things')
     expect(`${headline} ${sub}`).not.toMatch(/\d+\s*\/\s*100|score/i)
   })

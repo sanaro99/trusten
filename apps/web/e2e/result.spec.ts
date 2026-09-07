@@ -20,6 +20,17 @@ test('a result page reads plainly and is accessible', async ({ page }) => {
   expect(body).not.toMatch(/\b0\.\d\d\b/)
   expect(body).not.toMatch(/roach motel|zuckering|confirmshaming/i)
 
+  const firstEvidenceStep = page.getByRole('button', {
+    name: /Open evidence for step 1:/,
+  })
+  if ((await firstEvidenceStep.count()) > 0) {
+    await firstEvidenceStep.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText('Step 1', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('Step 0', { exact: true })).toHaveCount(0)
+  }
+
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa'])
     .analyze()

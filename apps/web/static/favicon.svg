@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Trusten shield</title>
+  <rect width="64" height="64" rx="16" fill="#efecf7"/>
+  <path d="M32 9 51 17v14c0 12-7.5 20.7-19 24-11.5-3.3-19-12-19-24V17l19-8Z" fill="#5b469a"/>
+  <path d="m23 32 6 6 12-14" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -41,7 +41,7 @@ export interface PatternContent {
 export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
   [DarkPatternCategory.FAKE_URGENCY]: {
     name: 'A fake deadline',
-    what: 'This shop used a countdown or a "hurry" message to rush you.',
+    what: 'This website used a countdown or a "hurry" message to rush you.',
     why: 'The deadline often is not real. It is there to stop you comparing prices or thinking it over.',
     watchFor: 'Timers that start again when you reload the page.',
     lawPlain:
@@ -50,8 +50,8 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
 
   [DarkPatternCategory.FAKE_SCARCITY]: {
     name: "Pretending it's nearly sold out",
-    what: 'This shop said only a few items were left.',
-    why: 'Shops often show this whether it is true or not, so you buy before checking elsewhere.',
+    what: 'This website said only a few items were left.',
+    why: 'Websites often show this whether it is true or not, so you buy before checking elsewhere.',
     watchFor: 'A "only 2 left" message that says the same thing days later.',
     lawPlain:
       'Claiming something is nearly gone when it is not is illegal in the EU, the UK and the US.',
@@ -103,7 +103,7 @@ export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
     watchFor:
       'Count the lines on the final bill against the things you actually chose, before you pay.',
     lawPlain:
-      'In the EU, the UK and the US, a shop cannot charge you for anything you did not actively agree to buy.',
+      'In the EU, the UK and the US, a seller cannot charge you for anything you did not actively agree to buy.',
   },
 
   [DarkPatternCategory.DRIP_PRICING]: {

@@ -8,11 +8,11 @@
 import type { Grade } from '@trusten/shared/domain'
 
 const HEADLINES: Record<Grade, string> = {
-  A: 'This shop looks fair',
-  B: 'This shop is mostly fair',
-  C: 'This shop uses some unfair tricks',
-  D: 'This shop uses several unfair tricks',
-  F: 'Be careful with this shop',
+  A: 'This website looks fair',
+  B: 'This website is mostly fair',
+  C: 'This website uses some unfair tricks',
+  D: 'This website uses several unfair tricks',
+  F: 'Be careful with this website',
 }
 
 export function gradeHeadline(

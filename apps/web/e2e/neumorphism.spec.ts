@@ -1,18 +1,14 @@
 import { expect, test } from '@playwright/test'
 
-test('dashboard surfaces use a coherent raised and inset neumorphic language', async ({
+test('landing surfaces use a coherent lavender raised and inset language', async ({
   page,
 }) => {
   await page.goto('/')
 
-  const shell = page.locator('.min-h-screen').first()
   const auditCard = page.locator('form.card').first()
   const addressInput = page.locator('#site')
 
-  const [shellStyles, cardStyles, inputStyles] = await Promise.all([
-    shell.evaluate((element) => ({
-      backgroundColor: getComputedStyle(element).backgroundColor,
-    })),
+  const [cardStyles, inputStyles] = await Promise.all([
     auditCard.evaluate((element) => ({
       backgroundColor: getComputedStyle(element).backgroundColor,
       boxShadow: getComputedStyle(element).boxShadow,
@@ -22,9 +18,9 @@ test('dashboard surfaces use a coherent raised and inset neumorphic language', a
     })),
   ])
 
-  expect(cardStyles.backgroundColor).toBe(shellStyles.backgroundColor)
+  expect(cardStyles.backgroundColor).toBe('rgb(244, 241, 249)')
   expect(cardStyles.boxShadow).toContain('rgb(255, 255, 255)')
-  expect(cardStyles.boxShadow).toContain('rgb(184, 185, 190)')
+  expect(cardStyles.boxShadow).toContain('rgba(160, 150, 181')
   expect(inputStyles.boxShadow).toContain('inset')
 })
 
@@ -56,7 +52,7 @@ test('pointer press is communicated by inset shadow without a hard boundary', as
   expect.soft(pressed.outlineWidth).toBe('0px')
 })
 
-test('keyboard focus stays visible through a soft shadow rather than an outline', async ({
+test('keyboard focus stays visible through a high-contrast soft ring', async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -73,7 +69,40 @@ test('keyboard focus stays visible through a soft shadow rather than an outline'
   }))
 
   expect(focused.boxShadow).not.toBe('none')
-  expect(focused.boxShadow).toContain('12px')
+  expect(focused.boxShadow).toContain('6px')
   expect(focused.outlineStyle).toBe('none')
   expect(focused.outlineWidth).toBe('0px')
+})
+
+test('landing page explains common pressure tactics in plain language', async ({
+  page,
+}) => {
+  await page.goto('/')
+
+  await expect(
+    page.getByRole('heading', { name: 'Know when a website is pushing you.' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Everyday website tricks' }),
+  ).toBeVisible()
+  await expect(page.getByText('A timer that starts again')).toBeVisible()
+  await expect(page.getByText('Fees that appear late')).toBeVisible()
+})
+
+test('mobile navigation exposes every main destination', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Open navigation menu' }).click()
+  const navigation = page.getByRole('list', { name: 'Mobile navigation' })
+  await expect(navigation.getByRole('link', { name: 'Home' })).toBeVisible()
+  await expect(
+    navigation.getByRole('link', { name: 'Explore results' }),
+  ).toBeVisible()
+  await expect(
+    navigation.getByRole('link', { name: 'Common tricks' }),
+  ).toBeVisible()
+  await expect(
+    navigation.getByRole('link', { name: 'How it works' }),
+  ).toBeVisible()
 })

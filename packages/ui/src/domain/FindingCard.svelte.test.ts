@@ -50,6 +50,12 @@ describe('FindingCard', () => {
     )
   })
 
+  test('gives the reader a practical next step before technical detail', () => {
+    render(FindingCard, { props })
+    expect(screen.getByText('What you can do')).toBeTruthy()
+    expect(screen.getByText(/Pause and reload the page/)).toBeTruthy()
+  })
+
   test('shows no confidence number anywhere', () => {
     const { container } = render(FindingCard, { props })
     expect(container.textContent).not.toContain('0.87')

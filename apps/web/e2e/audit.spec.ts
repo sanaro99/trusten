@@ -8,6 +8,23 @@ test('the home page asks for one thing', async ({ page }) => {
   ).toBeVisible()
 })
 
+test('the full check explains what it will and will not do', async ({
+  page,
+}) => {
+  await page.goto('/audit')
+
+  await expect(
+    page.getByRole('heading', {
+      name: 'See what happens beyond the first page.',
+    }),
+  ).toBeVisible()
+  await expect(page.getByLabel('Website address')).toBeVisible()
+  await expect(page.getByText('does not place an order')).toBeVisible()
+  await expect(
+    page.getByText('If the website blocks part of the check'),
+  ).toBeVisible()
+})
+
 test('an empty submission explains itself in a sentence', async ({ page }) => {
   await page.goto('/')
   await page.waitForLoadState('networkidle')
