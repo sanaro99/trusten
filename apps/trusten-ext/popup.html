@@ -8,17 +8,21 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --ink: #1b1430;
-      --primary: #7c3aed;
-      --primary-dark: #6d28d9;
-      --primary-soft: #ede9fe;
-      --bg: #faf9f6;
-      --bg-warm: #f3f0e9;
-      --border: #e9e3d8;
-      --text: #211c2e;
-      --muted: #6c6577;
-      --muted-2: #9791a6;
-      --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+      --ink: #292638;
+      --primary: #5b469a;
+      --primary-dark: #493777;
+      --primary-soft: #ded7ef;
+      --bg: #efecf7;
+      --surface: #f4f1f9;
+      --surface-raised: #f7f4fb;
+      --border: #d9d3e5;
+      --text: #292638;
+      --muted: #5f596e;
+      --muted-2: #716a80;
+      --shadow: 5px 5px 11px rgba(160,150,181,.44), -5px -5px 11px rgba(255,255,255,.88);
+      --shadow-lg: 9px 9px 22px rgba(160,150,181,.42), -9px -9px 22px rgba(255,255,255,.9);
+      --inset: inset 3px 3px 7px rgba(160,150,181,.42), inset -3px -3px 7px rgba(255,255,255,.86);
+      --focus: 0 0 0 3px var(--bg), 0 0 0 6px #6d57ab;
       --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
@@ -26,8 +30,9 @@
       width: 384px;
       min-height: 120px;
       font-family: var(--sans);
-      font-size: 13px;
-      background: var(--bg);
+      font-size: 14px;
+      line-height: 1.5;
+      background: radial-gradient(circle at 90% 5%, rgba(215,204,240,.65), transparent 190px), var(--bg);
       color: var(--text);
       -webkit-font-smoothing: antialiased;
     }
@@ -36,7 +41,7 @@
     .header {
       position: relative;
       overflow: hidden;
-      background: var(--ink);
+      background: var(--surface-raised);
       padding: 15px 16px 14px;
       display: flex;
       align-items: center;
@@ -45,24 +50,25 @@
     .header::before {
       content: '';
       position: absolute; inset: 0;
-      background: radial-gradient(220px 130px at 88% -30%, rgba(139,92,246,.45), transparent 60%);
+      background: radial-gradient(220px 130px at 88% -30%, rgba(139,92,246,.2), transparent 60%);
       pointer-events: none;
     }
     .header-left { display: flex; align-items: center; gap: 10px; position: relative; }
     .logo-shield { width: 30px; height: 30px; flex-shrink: 0; }
-    .header-title { color: #fff; font-weight: 600; font-size: 16px; font-family: var(--serif); letter-spacing: -.01em; }
-    .header-sub { color: var(--muted-2); font-size: 11px; margin-top: 1px; }
+    .header-title { color: var(--text); font-weight: 750; font-size: 17px; letter-spacing: -.02em; }
+    .header-sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
     .header-link {
       position: relative;
-      color: #c9bff0; font-size: 11px; font-weight: 500; text-decoration: none;
-      padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(167,139,250,.3);
+      color: var(--primary-dark); font-size: 11px; font-weight: 700; text-decoration: none;
+      padding: 7px 10px; border-radius: 9px; border: 1px solid var(--border);
+      background: var(--surface); box-shadow: var(--shadow);
       transition: border-color .15s, color .15s, background .15s;
     }
-    .header-link:hover { border-color: rgba(167,139,250,.6); color: #fff; background: rgba(167,139,250,.12); }
+    .header-link:hover { color: var(--primary); background: var(--primary-soft); }
 
     /* ── URL bar ── */
     .url-bar {
-      background: var(--bg-warm);
+      background: var(--bg);
       border-bottom: 1px solid var(--border);
       padding: 9px 16px;
       display: flex;
@@ -77,8 +83,9 @@
     }
 
     /* ── Idle state ── */
-    .idle-body { padding: 26px 18px; text-align: center; }
-    .idle-body p { color: var(--muted); font-size: 12.5px; margin-bottom: 18px; line-height: 1.55; }
+    .idle-body { margin: 16px; padding: 22px 18px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); }
+    .idle-body h1 { font-size: 20px; line-height: 1.25; margin-bottom: 7px; letter-spacing: -.02em; }
+    .idle-body p { color: var(--muted); font-size: 13px; margin-bottom: 18px; line-height: 1.55; }
     .btn-scan {
       width: 100%;
       background: var(--primary);
@@ -91,14 +98,15 @@
       cursor: pointer;
       transition: background .15s, transform .1s, box-shadow .15s;
       display: flex; align-items: center; justify-content: center; gap: 8px;
-      box-shadow: 0 1px 2px rgba(76,29,149,.3);
+      min-height: 44px;
+      box-shadow: 4px 4px 9px rgba(104,82,157,.35), -3px -3px 7px rgba(255,255,255,.6);
     }
     .btn-scan:hover { background: var(--primary-dark); }
-    .btn-scan:active { transform: scale(.985); }
+    .btn-scan:active { transform: scale(.985); box-shadow: var(--inset); }
     .btn-scan:disabled { background: #c4b5fd; cursor: default; transform: none; box-shadow: none; }
 
     /* ── Loading state ── */
-    .loading-body { padding: 30px 16px; text-align: center; display: none; }
+    .loading-body { margin: 16px; padding: 28px 16px; text-align: center; display: none; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow); }
     .spinner {
       width: 36px; height: 36px;
       border: 3px solid var(--border);
@@ -114,30 +122,34 @@
     /* ── Error state ── */
     .error-body { padding: 20px 16px; display: none; }
     .error-box {
-      background: #fbeceb; border: 1px solid #f3c6c3; border-radius: 11px;
+      background: #f6e8ed; border: 1px solid #dec1cb; border-radius: 13px;
       padding: 14px;
     }
-    .error-title { color: #b3231c; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
-    .error-msg { color: #7d1a15; font-size: 12px; line-height: 1.5; }
+    .error-title { color: #75263e; font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+    .error-msg { color: #632438; font-size: 12px; line-height: 1.5; }
     .btn-retry {
       margin-top: 12px;
       width: 100%;
-      background: #fff; color: #b3231c;
-      border: 1px solid #efb3ae; border-radius: 9px;
-      padding: 9px; font-size: 13px; font-weight: 600;
+      background: var(--surface); color: #75263e;
+      border: 1px solid #dec1cb; border-radius: 9px;
+      min-height: 44px; padding: 9px; font-size: 13px; font-weight: 700;
       cursor: pointer;
     }
-    .btn-retry:hover { background: #fbeceb; }
+    .btn-retry:hover { background: #f6e8ed; }
 
     /* ── Results state ── */
     .results-body { display: none; }
 
     .score-band {
+      margin: 16px 16px 10px;
       padding: 16px;
       display: flex;
       align-items: center;
       gap: 14px;
-      border-bottom: 1px solid var(--border);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow-lg);
     }
     .grade-circle {
       width: 58px; height: 58px; border-radius: 50%;
@@ -145,8 +157,8 @@
       flex-shrink: 0;
       border: 3px solid;
     }
-    .grade-letter { font-size: 25px; font-weight: 600; line-height: 1; font-family: var(--serif); }
-    .grade-num { font-size: 10px; color: var(--muted-2); margin-top: 1px; }
+    .grade-letter { font-size: 25px; font-weight: 750; line-height: 1; }
+    .grade-num { font-size: 9px; color: var(--muted); margin-top: 3px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 
     .score-info { flex: 1; min-width: 0; }
     .score-domain { font-weight: 600; font-size: 14px; color: var(--text); }
@@ -155,25 +167,30 @@
     .severity-badges {
       padding: 10px 16px;
       display: flex; gap: 6px; flex-wrap: wrap;
-      border-bottom: 1px solid var(--border);
+      margin: 0 16px 6px;
+      border-radius: 11px;
+      background: var(--surface);
+      box-shadow: var(--inset);
     }
     .badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px; color: #fff; letter-spacing: .02em; }
-    .badge-critical { background: #d23b34; }
-    .badge-high { background: #e0651b; }
-    .badge-medium { background: #cf8a00; }
-    .badge-low { background: #15a05a; }
-    .badge-clean { background: #15a05a; }
+    .badge-critical { background: #8f2d46; }
+    .badge-high { background: #a13f24; }
+    .badge-medium { background: #925113; }
+    .badge-low { background: #176b55; }
+    .badge-clean { background: #176b55; }
 
     /* ── Pattern list ── */
     .patterns-header {
       padding: 12px 16px 6px;
-      font-size: 11px; font-weight: 600; color: var(--muted-2); text-transform: uppercase;
-      letter-spacing: .05em;
+      font-size: 12px; font-weight: 700; color: var(--muted);
     }
     .patterns-list { max-height: 264px; overflow-y: auto; }
     .pattern-row {
       padding: 11px 16px;
-      border-bottom: 1px solid var(--border);
+      margin: 0 12px 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
       display: grid;
       grid-template-columns: auto 1fr;
       gap: 6px 10px;
@@ -187,7 +204,7 @@
     .pattern-cat { font-weight: 600; font-size: 12px; color: var(--text); }
     .pattern-desc { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
     .pattern-reg { font-size: 10px; color: var(--primary-dark); font-weight: 500; margin-top: 3px; }
-    .no-patterns { padding: 22px 16px; text-align: center; color: #15a05a; font-size: 13px; font-weight: 500; }
+    .no-patterns { padding: 22px 16px; text-align: center; color: #176b55; font-size: 13px; font-weight: 600; }
 
     /* ── Action bar ── */
     .action-bar {
@@ -198,18 +215,18 @@
     }
     .btn-annotate {
       flex: 1;
-      background: var(--ink); color: #fff;
+      background: var(--primary); color: #fff;
       border: none; border-radius: 9px;
-      padding: 10px 12px; font-size: 12px; font-weight: 600;
+      min-height: 44px; padding: 10px 12px; font-size: 12px; font-weight: 700;
       cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
       transition: background .15s;
     }
-    .btn-annotate:hover { background: #271c45; }
-    .btn-annotate.active { background: var(--primary); }
+    .btn-annotate:hover { background: var(--primary-dark); }
+    .btn-annotate.active { background: var(--primary-dark); box-shadow: var(--inset); }
     .btn-dashboard {
-      background: #fff; color: var(--primary-dark);
+      background: var(--surface); color: var(--primary-dark);
       border: 1px solid var(--border); border-radius: 9px;
-      padding: 10px 12px; font-size: 12px; font-weight: 600;
+      min-height: 44px; padding: 10px 12px; font-size: 12px; font-weight: 700;
       cursor: pointer; text-decoration: none;
       display: flex; align-items: center; justify-content: center; gap: 5px;
       transition: background .15s, border-color .15s;
@@ -221,10 +238,22 @@
     .btn-rescan {
       width: 100%;
       background: transparent; color: var(--muted-2);
-      border: none; padding: 9px; font-size: 11px; font-weight: 500;
+      border: none; min-height: 44px; padding: 9px; font-size: 11px; font-weight: 600;
       cursor: pointer; border-top: 1px solid var(--border);
     }
     .btn-rescan:hover { color: var(--muted); }
+
+    button:focus-visible, a:focus-visible {
+      outline: none;
+      box-shadow: var(--focus);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+      .btn-scan, .header-link, .btn-annotate, .btn-dashboard {
+        transition: none;
+      }
+    }
 
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -243,10 +272,10 @@
       </svg>
       <div>
         <div class="header-title">Trusten</div>
-        <div class="header-sub">Dark pattern scanner</div>
+        <div class="header-sub">See when a website pushes you</div>
       </div>
     </div>
-    <a id="dashboardLink" href="http://localhost:9200/trusten/" target="_blank" class="header-link">Dashboard ↗</a>
+    <a id="dashboardLink" href="http://localhost:9200/trusten/" target="_blank" rel="noopener" class="header-link">Open Trusten ↗</a>
   </div>
 
   <!-- URL bar -->
@@ -260,37 +289,38 @@
 
   <!-- Idle -->
   <div class="idle-body" id="stateIdle">
-    <p>Analyze this page for manipulative design patterns across all Trusten detectors.</p>
+    <h1>Check this website's choices</h1>
+    <p>Trusten looks for wording and designs that may rush, confuse, or pressure you.</p>
     <button class="btn-scan" id="btnScan">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
-      Scan this page
+      Check this page
     </button>
   </div>
 
   <!-- Loading -->
-  <div class="loading-body" id="stateLoading">
+  <div class="loading-body" id="stateLoading" role="status" aria-live="polite">
     <div class="spinner"></div>
-    <div class="loading-label">Scanning for dark patterns…</div>
-    <div class="loading-hint">Analyzing DOM, text, and structure</div>
+    <div class="loading-label">Checking this page…</div>
+    <div class="loading-hint">Looking at the words and choices you can see</div>
   </div>
 
   <!-- Error -->
-  <div class="error-body" id="stateError">
+  <div class="error-body" id="stateError" role="alert">
     <div class="error-box">
-      <div class="error-title" id="errorTitle">Could not connect to Trusten</div>
-      <div class="error-msg" id="errorMsg">Start the Trusten server, then try again.</div>
+      <div class="error-title" id="errorTitle">Trusten is not available right now</div>
+      <div class="error-msg" id="errorMsg">Open Trusten on this computer, then try again.</div>
     </div>
     <button class="btn-retry" id="btnRetry">Try again</button>
   </div>
 
   <!-- Results -->
-  <div class="results-body" id="stateResults">
+  <div class="results-body" id="stateResults" aria-live="polite">
     <div class="score-band">
       <div class="grade-circle" id="gradeCircle">
         <span class="grade-letter" id="gradeLetter">—</span>
-        <span class="grade-num" id="gradeNum">—/100</span>
+        <span class="grade-num" id="gradeNum">Trusten grade</span>
       </div>
       <div class="score-info">
         <div class="score-domain" id="resultDomain">—</div>
@@ -300,7 +330,7 @@
 
     <div class="severity-badges" id="severityBadges"></div>
 
-    <div class="patterns-header" id="patternsHeader">Detected patterns</div>
+    <div class="patterns-header" id="patternsHeader">What Trusten noticed</div>
     <div class="patterns-list" id="patternsList"></div>
 
     <div class="action-bar">
@@ -308,17 +338,17 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
         </svg>
-        Highlight on page
+        Highlight these choices
       </button>
-      <a class="btn-dashboard" id="btnFullReport" href="#" target="_blank">
+      <a class="btn-dashboard" id="btnFullReport" href="#" target="_blank" rel="noopener">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
         </svg>
-        Full report
+        See evidence
       </a>
     </div>
 
-    <button class="btn-rescan" id="btnRescan">↺ Scan again</button>
+    <button class="btn-rescan" id="btnRescan">↺ Check again</button>
   </div>
 
   <script src="popup.js"></script>

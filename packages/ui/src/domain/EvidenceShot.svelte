@@ -37,7 +37,7 @@ const displayHeight = $derived(crop ? Math.round(crop.height * crop.scale) : 0)
       <img {src} {alt} class="block max-h-[34rem] w-full object-contain" loading="lazy" />
     </div>
     {#if !isStatic}
-      <figcaption class="mt-2 text-sm text-base-content/60">{alt}</figcaption>
+      <figcaption class="mt-2 text-sm text-base-content/70">{alt}</figcaption>
     {/if}
   </figure>
 {:else if crop}

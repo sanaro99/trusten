@@ -67,12 +67,14 @@ export function reduceLiveEvent(state: LiveState, event: LiveEvent): LiveState {
 }
 
 export function createLiveScan() {
-  let state = $state<LiveState>({
+  const initialState = (): LiveState => ({
     steps: [],
     frame: null,
     status: 'running',
     error: null,
   })
+
+  let state = $state<LiveState>(initialState())
 
   let socket: WebSocket | null = null
 
@@ -93,6 +95,14 @@ export function createLiveScan() {
       return state
     },
     connect,
+    fail(message: string) {
+      state = { ...state, status: 'failed', error: message }
+    },
+    reset() {
+      socket?.close()
+      socket = null
+      state = initialState()
+    },
     destroy() {
       socket?.close()
       socket = null

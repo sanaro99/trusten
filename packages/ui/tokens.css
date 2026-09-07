@@ -1,35 +1,36 @@
 /**
  * Trusten design tokens.
  *
- * Single source of truth for colour, type and spacing across the dashboard,
- * the PDF report and the extension. Replaces the 135 literal hex values that
- * used to live in dashboard/ui.ts.
+ * A calm lavender-neutral system: violet identifies actions and brand,
+ * while neutral surfaces keep long reports comfortable to read.
  */
 :root {
-  /* Brand */
-  --trusten-purple: #6d28d9;
-  --trusten-purple-strong: #5b21b6;
+  /* Brand and interaction */
+  --trusten-purple: #5b469a;
+  --trusten-purple-strong: #493777;
+  --trusten-purple-soft: #ded7ef;
 
-  /* Grade — carried over from dashboard/theme.ts */
-  --trusten-grade-a: #15803d;
-  --trusten-grade-b: #4d7c0f;
-  --trusten-grade-c: #a16207;
-  --trusten-grade-d: #c2410c;
-  --trusten-grade-f: #b91c1c;
+  /* Grades */
+  --trusten-grade-a: #176b55;
+  --trusten-grade-b: #3f7350;
+  --trusten-grade-c: #925113;
+  --trusten-grade-d: #a13f24;
+  --trusten-grade-f: #8f2d46;
 
   /* Shown levels (see src/content/severity.ts) */
-  --trusten-level-serious: #b91c1c;
-  --trusten-level-worth-knowing: #a16207;
-  --trusten-level-minor: #15803d;
+  --trusten-level-serious: #8f2d46;
+  --trusten-level-worth-knowing: #925113;
+  --trusten-level-minor: #176b55;
 
   /* Surfaces and text */
-  --trusten-bg: #ffffff;
-  --trusten-surface: #f8f7fb;
-  --trusten-border: #e4e1ec;
-  --trusten-text: #1c1a22;
-  --trusten-text-muted: #55505f;
+  --trusten-bg: #efecf7;
+  --trusten-surface: #f4f1f9;
+  --trusten-surface-raised: #f7f4fb;
+  --trusten-border: #d9d3e5;
+  --trusten-text: #292638;
+  --trusten-text-muted: #5f596e;
 
-  /* Type — 18px base is a requirement for this audience, not a preference */
+  /* Type — 18px base is intentional for Trusten's broad audience. */
   --trusten-text-base: 1.125rem;
   --trusten-line-height: 1.7;
   --trusten-measure: 68ch;
@@ -38,23 +39,29 @@
   --trusten-target-min: 44px;
 }
 
+/* Dark values are opt-in so an operating-system preference cannot create a
+   half-dark interface while Trusten's application theme is explicitly light. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --trusten-bg: #131118;
-    --trusten-surface: #1c1a22;
-    --trusten-border: #322d3d;
-    --trusten-text: #f4f2f8;
-    --trusten-text-muted: #b3aec0;
+  :root[data-theme="dark"] {
+    --trusten-purple: #c5b5ee;
+    --trusten-purple-strong: #ddd2f7;
+    --trusten-purple-soft: #413657;
+    --trusten-bg: #1c1924;
+    --trusten-surface: #24202d;
+    --trusten-surface-raised: #2a2534;
+    --trusten-border: #443c52;
+    --trusten-text: #f5f1fb;
+    --trusten-text-muted: #c5bed0;
 
-    --trusten-grade-a: #4ade80;
-    --trusten-grade-b: #a3e635;
-    --trusten-grade-c: #fbbf24;
-    --trusten-grade-d: #fb923c;
-    --trusten-grade-f: #f87171;
+    --trusten-grade-a: #65d4ae;
+    --trusten-grade-b: #8bd29a;
+    --trusten-grade-c: #f0bd69;
+    --trusten-grade-d: #f39775;
+    --trusten-grade-f: #f18aa5;
 
-    --trusten-level-serious: #f87171;
-    --trusten-level-worth-knowing: #fbbf24;
-    --trusten-level-minor: #4ade80;
+    --trusten-level-serious: #f18aa5;
+    --trusten-level-worth-knowing: #f0bd69;
+    --trusten-level-minor: #65d4ae;
   }
 }
 
@@ -63,6 +70,8 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
 }
