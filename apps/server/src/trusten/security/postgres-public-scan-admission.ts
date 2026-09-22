@@ -35,10 +35,11 @@ export class PostgresPublicScanAdmissionPersistence
         reservation.ipQuota.windowMs,
         reservation.domainQuota.windowMs,
       )
+      const oldestTrackedAt = new Date(now.getTime() - largestWindowMs)
       await tx`DELETE FROM trusten_public_scan_leases WHERE expires_at <= ${now}`
       await tx`
         DELETE FROM trusten_public_scan_quota_events
-        WHERE occurred_at <= ${now} - (${largestWindowMs} * interval '1 millisecond')
+        WHERE occurred_at <= ${oldestTrackedAt}
       `
 
       const sessionId = await this.resolveSession(tx, reservation)
@@ -118,12 +119,13 @@ export class PostgresPublicScanAdmissionPersistence
     PublicScanAdmissionReservationResult,
     { allowed: false }
   > | null> {
+    const windowStart = new Date(now.getTime() - quota.windowMs)
     const rows = (await tx`
       SELECT COUNT(*)::integer AS count, MIN(occurred_at) AS oldest
       FROM trusten_public_scan_quota_events
       WHERE dimension = ${dimension}
         AND quota_key = ${key}
-        AND occurred_at > ${now} - (${quota.windowMs} * interval '1 millisecond')
+        AND occurred_at > ${windowStart}
     `) as Array<{ count: number; oldest: Date | null }>
     const row = rows[0]
     if (Number(row?.count ?? 0) < quota.limit) return null

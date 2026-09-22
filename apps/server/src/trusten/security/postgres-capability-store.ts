@@ -21,7 +21,7 @@ export class PostgreSqlCapabilityStore implements CapabilityStore {
       ${record.kind},
       ${record.jobId},
       ${record.tokenHash},
-      ${[...record.scopes]},
+      ${this.db.array([...record.scopes], 'TEXT')},
       ${toDate(record.expiresAt)},
       ${optionalDate(record.revokedAt)},
       ${optionalDate(record.consumedAt)},

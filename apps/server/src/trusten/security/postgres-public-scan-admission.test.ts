@@ -97,6 +97,11 @@ describe('PostgresPublicScanAdmissionPersistence', () => {
         statement.startsWith('INSERT INTO trusten_public_scan_leases'),
       ),
     ).toBe(true)
+    expect(
+      statements.some((statement) =>
+        statement.includes("interval '1 millisecond'"),
+      ),
+    ).toBe(false)
     await expect(store.release('lease-1')).resolves.toBe(true)
   })
 })

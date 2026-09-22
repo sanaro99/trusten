@@ -155,6 +155,7 @@ async function main(): Promise<void> {
   )
 
   const server = Bun.serve({
+    hostname: process.env.TRUSTEN_BIND_HOST ?? '0.0.0.0',
     port: PORT,
     fetch: app.fetch,
     websocket,
