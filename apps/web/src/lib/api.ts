@@ -37,6 +37,8 @@ export class ApiError extends Error {
 export function publicScanErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.code === 'TARGET_REJECTED')
     return 'That address cannot be checked safely. Try a public website.'
+  if (error instanceof ApiError && error.code === 'SCAN_INCOMPLETE')
+    return 'We could not inspect enough of that page to give a result. Try again or check a different URL.'
   if (error instanceof ApiError && error.status === 429)
     return 'You have reached the demo limit. Please try again later.'
   if (error instanceof ApiError && error.code === 'DEMO_BUSY')

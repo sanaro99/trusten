@@ -63,9 +63,12 @@ export class VisualAnalyzer extends BaseAnalyzer {
         screenshotBase64: context.screenshotBase64 || undefined,
       })
 
-      return { patterns: this.parseLLMResponse(raw, context) }
+      return {
+        patterns: this.parseLLMResponse(raw, context),
+        metadata: { visualCheckAvailable: true },
+      }
     } catch {
-      return { patterns: [] }
+      return { patterns: [], metadata: { visualCheckAvailable: false } }
     }
   }
 

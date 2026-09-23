@@ -13,6 +13,9 @@ describe('publicScanErrorMessage', () => {
     expect(publicScanErrorMessage(new ApiError(403, 'BOT_REJECTED'))).toContain(
       'visitor check',
     )
+    expect(
+      publicScanErrorMessage(new ApiError(422, 'SCAN_INCOMPLETE')),
+    ).toContain('could not inspect enough')
   })
 
   test('keeps a generic fallback for transport failures', () => {

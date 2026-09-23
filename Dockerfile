@@ -33,9 +33,14 @@ RUN bun run build:web
 
 ENV NODE_ENV=production \
     HOME=/data \
+    XDG_CONFIG_HOME=/tmp/.chromium \
+    XDG_CACHE_HOME=/tmp/.chromium \
     TRUSTEN_PORT=9200 \
     HOST=0.0.0.0 \
     PORT=3000
+
+# Catch Chromium startup failures in the image before a user starts a scan.
+RUN cd apps/server && bun -e "import puppeteer from 'puppeteer'; const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'] }); await browser.close()"
 
 EXPOSE 3000 9200
 CMD ["bun", "run", "start"]

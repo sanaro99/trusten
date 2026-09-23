@@ -26,6 +26,7 @@ import {
 } from '../db'
 import { TrustenEngine } from '../index'
 import { closeChannel, publish } from '../live/hub'
+import { ScanIncompleteError } from '../scan-incomplete-error'
 import type {
   JobCapabilityAccess,
   JobCapabilityScope,
@@ -319,6 +320,9 @@ export function createTrustenDashboardRoutes(config: Config) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error('Trusten dashboard quick-scan failed', { url, error: msg })
+      if (err instanceof ScanIncompleteError) {
+        return c.json({ code: 'SCAN_INCOMPLETE', error: msg }, 422)
+      }
       return c.json({ error: msg }, 500)
     } finally {
       config.admission.release(admitted.id)

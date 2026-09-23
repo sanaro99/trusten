@@ -51,6 +51,7 @@ export const WorkflowStepSchema = z.object({
   status: WorkflowStepStatusSchema.optional(),
   navAdvanced: z.boolean().optional(),
   navReason: z.string().optional(),
+  visualCheckAvailable: z.boolean().optional(),
 })
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>
 
