@@ -75,6 +75,19 @@ describe('quick scan evidence', () => {
     expect(saved).toHaveLength(0)
   })
 
+  test('rejects a verification redirect even when it has enough text', async () => {
+    const { engine, saved, closed } = fixture({
+      url: 'https://www.temu.com/bgn_verification.html?verifyCode=sample',
+      title: 'Temu',
+      html: '<html><body><p>Verification content</p></body></html>',
+      text: 'Verification content that would otherwise be scored.',
+      screenshot: Buffer.from('verification image').toString('base64'),
+    })
+    await expect(engine.quickScan('https://www.temu.com/')).rejects.toThrow()
+    expect(saved).toHaveLength(0)
+    expect(closed).toEqual([1])
+  })
+
   test('saves the page screenshot even when no patterns are found', async () => {
     const jpeg = Buffer.from('captured image')
     const { engine, saved } = fixture({

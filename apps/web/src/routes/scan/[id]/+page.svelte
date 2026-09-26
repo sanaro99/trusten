@@ -1,5 +1,8 @@
 <script lang="ts">
-import type { DetectedPattern } from '@trusten/shared/domain'
+import {
+  type DetectedPattern,
+  isAccessChallengeUrl,
+} from '@trusten/shared/domain'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
 import { splitFindings } from '$lib/findings'
@@ -16,6 +19,11 @@ const quickEvidence = $derived(
 const missingQuickEvidence = $derived(
   data.scan.scanType === 'quick' && !quickEvidence?.screenshotPath,
 )
+const blockedQuickEvidence = $derived(
+  data.scan.scanType === 'quick' &&
+    !!quickEvidence?.url &&
+    isAccessChallengeUrl(quickEvidence.url),
+)
 const limitedQuickEvidence = $derived(
   data.scan.scanType === 'quick' &&
     !!quickEvidence?.screenshotPath &&
@@ -31,26 +39,34 @@ const summary = $derived(
           headline: 'We cannot verify this quick check',
           sub: 'This result did not save a page capture. Run a new check to get a reviewable result.',
         }
-      : limitedQuickEvidence
+      : blockedQuickEvidence
         ? {
             ...getReportSummary(data.scan.score.grade, split.main.length, []),
             limited: true,
-            eyebrow: 'Partial quick check',
-            headline:
-              data.scan.patterns.length === 0
-                ? 'No concerns found in available checks'
-                : `${data.scan.patterns.length} ${data.scan.patterns.length === 1 ? 'concern' : 'concerns'} found on this page`,
-            sub: 'We captured this page, but visual analysis was unavailable. The grade is not conclusive.',
+            eyebrow: 'Check blocked',
+            headline: 'We could not inspect this website',
+            sub: 'The website sent our browser to a verification page. This result does not assess the requested site.',
           }
-        : {
-            ...getReportSummary(data.scan.score.grade, split.main.length, []),
-            eyebrow: 'Quick check · one page',
-            headline:
-              data.scan.patterns.length === 0
-                ? 'No concerns found on this page'
-                : `${data.scan.patterns.length} ${data.scan.patterns.length === 1 ? 'concern' : 'concerns'} found on this page`,
-            sub: 'We checked the captured page for common patterns. Checkout and other journeys need a deeper check.',
-          }
+        : limitedQuickEvidence
+          ? {
+              ...getReportSummary(data.scan.score.grade, split.main.length, []),
+              limited: true,
+              eyebrow: 'Partial quick check',
+              headline:
+                data.scan.patterns.length === 0
+                  ? 'No concerns found in available checks'
+                  : `${data.scan.patterns.length} ${data.scan.patterns.length === 1 ? 'concern' : 'concerns'} found on this page`,
+              sub: 'We captured this page, but visual analysis was unavailable. The grade is not conclusive.',
+            }
+          : {
+              ...getReportSummary(data.scan.score.grade, split.main.length, []),
+              eyebrow: 'Quick check · one page',
+              headline:
+                data.scan.patterns.length === 0
+                  ? 'No concerns found on this page'
+                  : `${data.scan.patterns.length} ${data.scan.patterns.length === 1 ? 'concern' : 'concerns'} found on this page`,
+              sub: 'We checked the captured page for common patterns. Checkout and other journeys need a deeper check.',
+            }
     : getReportSummary(data.scan.score.grade, split.main.length, workflowSteps),
 )
 const seriousCount = $derived(
@@ -155,7 +171,7 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
 
     {#if split.main.length === 0 && split.aside.length === 0}
       <div class="alert {summary.limited ? 'alert-warning' : 'alert-success'} shadow-lg">
-        <span>{missingQuickEvidence ? 'The page evidence for this older result is unavailable. Run a new check before relying on its grade.' : limitedQuickEvidence ? 'Text and page checks found no concern, but visual analysis did not complete. Review the screenshot before relying on this result.' : summary.limited ? 'We did not find a concern in the pages we reached. Because the check was limited, this does not mean the whole website is clear.' : data.scan.scanType === 'quick' ? 'We did not find common tricks on the captured page. This result covers one page only.' : 'We checked the available pages for common tricks and did not find any concerns.'}</span>
+        <span>{missingQuickEvidence ? 'The page evidence for this older result is unavailable. Run a new check before relying on its grade.' : blockedQuickEvidence ? 'The captured page is a website verification screen. No findings about the requested site can be drawn from this check.' : limitedQuickEvidence ? 'Text and page checks found no concern, but visual analysis did not complete. Review the screenshot before relying on this result.' : summary.limited ? 'We did not find a concern in the pages we reached. Because the check was limited, this does not mean the whole website is clear.' : data.scan.scanType === 'quick' ? 'We did not find common tricks on the captured page. This result covers one page only.' : 'We checked the available pages for common tricks and did not find any concerns.'}</span>
       </div>
     {:else}
       {#each split.main as pattern, i (pattern.id)}

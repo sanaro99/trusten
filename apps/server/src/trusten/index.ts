@@ -9,6 +9,7 @@
  *   analyzeCurrentPage() — Scan whatever page is currently open
  */
 
+import { isAccessChallengeUrl } from '@trusten/shared/domain'
 import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
@@ -93,6 +94,7 @@ export class TrustenEngine {
       const context = await this.captureContext(pageId)
       if (
         !/^https?:\/\//i.test(context.url) ||
+        isAccessChallengeUrl(context.url) ||
         !/<body[\s>]/i.test(context.domSnapshot) ||
         !context.visibleText.trim() ||
         !context.screenshotBase64 ||
