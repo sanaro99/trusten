@@ -73,7 +73,7 @@ function comparisonText(
   <meta name="description" content="See how Trusten's checks of {data.detail.domain} changed over time." />
 </svelte:head>
 
-<main class="mx-auto max-w-5xl px-6 py-12">
+<main id="main-content" class="history-page mx-auto max-w-5xl px-6 py-12">
   <nav aria-label="Breadcrumb">
     <a class="link link-primary text-sm font-semibold" href="/explore">← Back to all websites</a>
   </nav>

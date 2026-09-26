@@ -134,7 +134,7 @@ async function waitForResult(jobId: string, capabilityToken: string) {
   <meta name="description" content="Watch Trusten follow a website journey and explain the choices it finds in plain language." />
 </svelte:head>
 
-<main class="mx-auto max-w-6xl px-6 py-12">
+<main id="main-content" class="audit-page mx-auto max-w-6xl px-6 py-12">
   <div class="badge badge-primary badge-outline font-bold">Full website check</div>
   <h1 class="mt-4 mb-0 max-w-3xl font-bold text-4xl leading-tight md:text-6xl">
     See what happens beyond the first page.
@@ -147,7 +147,7 @@ async function waitForResult(jobId: string, capabilityToken: string) {
 
   {#if !started}
     <section class="mt-9 grid gap-5 lg:grid-cols-[1fr_.72fr]" aria-label="Start a full website check">
-      <form class="card border border-base-300 bg-base-100" onsubmit={start}>
+      <form class="card audit-form" onsubmit={start}>
         <div class="card-body p-6 md:p-8">
           <h2 class="card-title text-2xl">Which website should we check?</h2>
           <label class="mt-3 block font-semibold" for="audit-url">Website address</label>
@@ -173,7 +173,7 @@ async function waitForResult(jobId: string, capabilityToken: string) {
         </div>
       </form>
 
-      <aside class="card border border-base-300 bg-base-100" aria-labelledby="safe-check-heading">
+      <aside class="card audit-assurance" aria-labelledby="safe-check-heading">
         <div class="card-body p-6 md:p-8">
           <div class="neo-inset grid size-12 place-items-center rounded-2xl text-primary" aria-hidden="true">✓</div>
           <h2 id="safe-check-heading" class="mt-2 text-2xl font-bold">A careful, private check</h2>

@@ -33,7 +33,7 @@ const displayHeight = $derived(crop ? Math.round(crop.height * crop.scale) : 0)
 
 {#if !image}
   <figure class="m-0 block! w-full">
-    <div class="overflow-hidden rounded-box border border-base-300 bg-neutral shadow-inner">
+    <div class="evidence-image overflow-hidden rounded-box bg-neutral">
       <img {src} {alt} class="block max-h-[34rem] w-full object-contain" loading="lazy" />
     </div>
     {#if !isStatic}
@@ -43,7 +43,7 @@ const displayHeight = $derived(crop ? Math.round(crop.height * crop.scale) : 0)
 {:else if crop}
 <figure class="m-0 block! w-full">
   <div
-    class="relative overflow-hidden rounded-xl border border-border"
+    class="evidence-image relative overflow-hidden rounded-xl"
     style="width: {displayWidth}px; height: {displayHeight}px; max-width: 100%;"
   >
     <img

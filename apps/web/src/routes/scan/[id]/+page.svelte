@@ -106,12 +106,12 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
   <title>{data.scan.domain} — Trusten</title>
 </svelte:head>
 
-<main class="mx-auto max-w-6xl px-6 py-12">
+<main id="main-content" class="report-page mx-auto max-w-6xl px-6 py-12">
   <div class="breadcrumbs text-sm text-base-content/70">
     <ul><li><a href="/">Dashboard</a></li><li><a href="/explore">Results</a></li><li>{data.scan.domain}</li></ul>
   </div>
 
-  <header class="card mt-5 overflow-hidden border border-base-300 bg-base-100 shadow-2xl">
+  <header class="report-summary card mt-5 overflow-hidden">
     <div class="card-body gap-6 p-7 md:flex-row md:items-center md:p-10">
       {#if summary.limited}
         <div class="grid size-24 shrink-0 place-items-center rounded-full border border-warning/35 bg-warning/10 text-center shadow-inner">
@@ -143,7 +143,7 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
       <div class="badge badge-primary badge-outline font-bold">Evidence trail</div>
       <h2 id="page-evidence-heading" class="mt-3 mb-0 font-bold text-3xl">Page we checked</h2>
       <p class="mt-2 mb-5 break-all text-base-content/65">{quickEvidence.url}</p>
-      <figure class="m-0 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-lg">
+      <figure class="evidence-frame m-0 overflow-hidden rounded-box bg-base-100">
         <img
           class="block max-h-[42rem] w-full object-contain"
           src="/trusten/report/{encodeURIComponent(data.scan.id)}/screenshot/{quickEvidence.stepNumber}"
