@@ -13,6 +13,7 @@ export interface ScanHistoryRow {
   completedAt: string
   scoreNumeric: number
   scoreGrade: string
+  quickCoverage: 'complete' | 'partial' | 'missing' | 'blocked' | null
   patternCount: number
   criticalCount: number
   highCount: number
@@ -102,7 +103,7 @@ export async function getTrustenScanHistory(
   limit = 20,
 ): Promise<ScanHistoryRow[]> {
   const rows =
-    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at FROM trusten_scans ORDER BY created_at DESC LIMIT ${limit}`
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_scans ORDER BY created_at DESC LIMIT ${limit}`
   return rows.map(mapScanHistoryRow)
 }
 export async function getTrustenScansByDomain(
@@ -110,7 +111,7 @@ export async function getTrustenScansByDomain(
   limit = 50,
 ): Promise<ScanHistoryRow[]> {
   const rows =
-    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at FROM trusten_scans WHERE domain=${domain} ORDER BY created_at DESC LIMIT ${limit}`
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_scans WHERE domain=${domain} ORDER BY created_at DESC LIMIT ${limit}`
   return rows.map(mapScanHistoryRow)
 }
 export async function getTrustenScanById(

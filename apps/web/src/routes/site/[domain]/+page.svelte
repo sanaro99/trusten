@@ -2,6 +2,7 @@
 import type { ScanHistoryRow } from '@trusten/shared/api'
 import type { Grade } from '@trusten/shared/domain'
 import { GradeBadge } from '@trusten/ui/domain'
+import { hasConclusiveGrade, historyCoverageLabel } from '$lib/history-coverage'
 import type { PageData } from './$types'
 
 let { data }: { data: PageData } = $props()
@@ -34,6 +35,8 @@ function verdictText(grade: string): string {
 }
 
 function findingText(scan: ScanHistoryRow): string {
+  const limited = historyCoverageLabel(scan)
+  if (limited) return 'This check cannot establish a website grade'
   const serious = scan.criticalCount + scan.highCount
   if (serious > 0)
     return `${serious} serious ${serious === 1 ? 'concern' : 'concerns'} among ${scan.patternCount} found`
@@ -47,6 +50,8 @@ function comparisonText(
   older?: ScanHistoryRow,
 ): string {
   if (!older) return 'This is the first check shared for this website.'
+  if (!hasConclusiveGrade(current) || !hasConclusiveGrade(older))
+    return 'A grade comparison is unavailable for these checks.'
   const change = current.scoreNumeric - older.scoreNumeric
   const findingChange = current.patternCount - older.patternCount
   if (change >= 5)
@@ -81,10 +86,14 @@ function comparisonText(
   {#if latest}
     <section class="card mt-8 border border-base-300 bg-base-100 p-6 shadow-xl" aria-labelledby="latest-heading">
       <div class="flex flex-wrap items-start gap-5">
-        <GradeBadge grade={latest.scoreGrade as Grade} />
+        {#if hasConclusiveGrade(latest)}
+          <GradeBadge grade={latest.scoreGrade as Grade} />
+        {:else}
+          <span class="grid size-16 shrink-0 place-items-center rounded-full border border-warning/35 bg-warning/10 text-2xl font-bold" aria-label="Limited check">!</span>
+        {/if}
         <div class="min-w-0 flex-1">
           <p class="m-0 text-sm font-semibold text-base-content/70">Latest check</p>
-          <h2 id="latest-heading" class="mt-1 mb-0 text-2xl font-bold">{verdictText(latest.scoreGrade)}</h2>
+          <h2 id="latest-heading" class="mt-1 mb-0 text-2xl font-bold">{historyCoverageLabel(latest) ?? verdictText(latest.scoreGrade)}</h2>
           <p class="mt-2 mb-0 text-base-content/70">
             Checked {dateFormatter.format(new Date(latest.createdAt))} · {findingText(latest)}
           </p>
@@ -115,12 +124,16 @@ function comparisonText(
             <span class="absolute top-7 -left-[1.95rem] size-3 rounded-full bg-primary ring-4 ring-base-100" aria-hidden="true"></span>
             <article class="card border border-base-300 bg-base-100 p-5 shadow-lg">
               <div class="flex flex-wrap items-start gap-4">
-                <GradeBadge grade={scan.scoreGrade as Grade} />
+                {#if hasConclusiveGrade(scan)}
+                  <GradeBadge grade={scan.scoreGrade as Grade} />
+                {:else}
+                  <span class="grid size-16 shrink-0 place-items-center rounded-full border border-warning/35 bg-warning/10 text-2xl font-bold" aria-label="Limited check">!</span>
+                {/if}
                 <div class="min-w-0 flex-1">
                   <p class="m-0 text-sm font-semibold text-base-content/70">
                     {index === 0 ? 'Latest check · ' : ''}{dateFormatter.format(new Date(scan.createdAt))}
                   </p>
-                  <h3 class="mt-1 mb-0 text-xl font-bold">{verdictText(scan.scoreGrade)}</h3>
+                  <h3 class="mt-1 mb-0 text-xl font-bold">{historyCoverageLabel(scan) ?? verdictText(scan.scoreGrade)}</h3>
                   <p class="mt-2 mb-0 text-base-content/70">{findingText(scan)}</p>
                   {#if scans[index + 1]}
                     <p class="mt-2 mb-0 text-sm text-base-content/70">{comparisonText(scan, scans[index + 1])}</p>

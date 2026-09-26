@@ -23,6 +23,32 @@ describe('PostgreSQL row mapping', () => {
     expect(row.scoreNumeric).toBe(82.5)
     expect(row.patternCount).toBe(2)
     expect(row.startedAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(row.quickCoverage).toBe('missing')
+  })
+  test('marks a saved verification page as blocked in history', () => {
+    const row = mapScanHistoryRow({
+      scan_type: 'quick',
+      evidence_url:
+        'https://www.temu.com/bgn_verification.html?verifyCode=sample',
+      evidence_screenshot_path: '/data/screenshot.jpg',
+      visual_check_available: 'false',
+    })
+    expect(row.quickCoverage).toBe('blocked')
+  })
+  test('keeps a complete quick check distinct from partial coverage', () => {
+    const base = {
+      scan_type: 'quick',
+      evidence_url: 'https://example.com/',
+      evidence_screenshot_path: '/data/screenshot.jpg',
+    }
+    expect(
+      mapScanHistoryRow({ ...base, visual_check_available: 'true' })
+        .quickCoverage,
+    ).toBe('complete')
+    expect(
+      mapScanHistoryRow({ ...base, visual_check_available: 'false' })
+        .quickCoverage,
+    ).toBe('partial')
   })
   test('maps native jsonb scan fields', () => {
     const row = mapScanRow({
