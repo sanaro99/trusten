@@ -12,7 +12,7 @@ const colorVar = $derived(`--trusten-grade-${grade.toLowerCase()}`)
 
 <span
   class="inline-flex size-18 shrink-0 items-center justify-center rounded-box bg-base-200 font-bold text-4xl shadow-inner"
-  style="color: var({colorVar}); border: 3px solid var({colorVar});"
+  style="color: var({colorVar});"
   aria-label="Grade {grade}"
 >
   {grade}

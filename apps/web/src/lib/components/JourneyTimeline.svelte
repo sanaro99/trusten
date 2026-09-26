@@ -50,12 +50,12 @@ function closeStep() {
         {#if index < steps.length - 1}
           <span aria-hidden="true" class="absolute bottom-0 left-[1.15rem] top-9 w-1 rounded-full bg-base-300 md:left-1/2 md:right-[-50%] md:top-[1.15rem] md:h-1 md:w-auto"></span>
         {/if}
-        <span aria-hidden="true" class="absolute left-0 top-2 z-10 grid size-10 place-items-center rounded-full border-4 border-base-100 font-bold shadow-md md:left-1/2 md:top-0 md:-translate-x-1/2 {content.status === 'complete' ? 'bg-success text-success-content' : content.status === 'blocked' ? 'bg-warning text-warning-content' : 'bg-base-300 text-base-content/70'}">
+        <span aria-hidden="true" class="absolute left-0 top-2 z-10 grid size-10 place-items-center rounded-full font-bold shadow-md md:left-1/2 md:top-0 md:-translate-x-1/2 {content.status === 'complete' ? 'bg-success text-success-content' : content.status === 'blocked' ? 'bg-warning text-warning-content' : 'bg-base-300 text-base-content/70'}">
           {content.status === 'complete' ? '✓' : index + 1}
         </span>
         <button
           type="button"
-          class="card min-h-full w-full border border-base-300 bg-base-100 text-left shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+          class="journey-card card min-h-full w-full bg-base-100 text-left transition"
           aria-label="Open evidence for step {index + 1}: {content.title}"
           onclick={() => openStep(step)}
         >
@@ -76,8 +76,8 @@ function closeStep() {
 <dialog bind:this={dialog} class="modal modal-bottom sm:modal-middle" aria-labelledby="step-dialog-title" onclose={() => (selected = undefined)}>
   {#if selected}
     {@const content = getJourneyStepContent(selected)}
-    <div class="modal-box max-w-4xl border border-base-300 bg-base-100 p-0 shadow-2xl">
-      <header class="flex items-start justify-between gap-4 border-b border-base-300 p-5 md:p-6">
+    <div class="modal-box max-w-4xl bg-base-100 p-0 shadow-2xl">
+      <header class="flex items-start justify-between gap-4 p-5 md:p-6">
         <div>
           <div class="mb-2 flex flex-wrap items-center gap-2">
             <span class="badge badge-primary">Step {selected.stepNumber}</span>

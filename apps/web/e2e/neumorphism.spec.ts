@@ -11,6 +11,7 @@ test('landing surfaces use a coherent lavender raised and inset language', async
   const [cardStyles, inputStyles] = await Promise.all([
     auditCard.evaluate((element) => ({
       backgroundColor: getComputedStyle(element).backgroundColor,
+      borderWidth: getComputedStyle(element).borderWidth,
       boxShadow: getComputedStyle(element).boxShadow,
     })),
     addressInput.evaluate((element) => ({
@@ -18,8 +19,9 @@ test('landing surfaces use a coherent lavender raised and inset language', async
     })),
   ])
 
+  expect(cardStyles.borderWidth).toBe('0px')
   expect(cardStyles.backgroundColor).toBe('rgb(244, 241, 249)')
-  expect(cardStyles.boxShadow).toContain('rgb(255, 255, 255)')
+  expect(cardStyles.boxShadow).toContain('rgba(255, 255, 255')
   expect(cardStyles.boxShadow).toContain('rgba(160, 150, 181')
   expect(inputStyles.boxShadow).toContain('inset')
 })
@@ -93,7 +95,7 @@ test('mobile navigation exposes every main destination', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'Open navigation menu' }).click()
+  await page.getByLabel('Open navigation menu').click()
   const navigation = page.getByRole('list', { name: 'Mobile navigation' })
   await expect(navigation.getByRole('link', { name: 'Home' })).toBeVisible()
   await expect(

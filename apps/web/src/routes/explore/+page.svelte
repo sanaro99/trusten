@@ -127,7 +127,7 @@ function clearFilters() {
   />
 </svelte:head>
 
-<main class="mx-auto max-w-6xl px-6 py-12">
+<main id="main-content" class="library-page mx-auto max-w-6xl px-6 py-12">
   <div class="badge badge-primary badge-outline font-bold">Public evidence library</div>
   <h1 class="mt-4 mb-0 max-w-3xl font-bold text-4xl md:text-5xl">See how websites shape your choices</h1>
   <p class="mt-3 max-w-2xl text-base-content/70">
@@ -135,15 +135,17 @@ function clearFilters() {
   </p>
 
   {#if data.historyUnavailable}
-    <section class="card mt-8 border border-base-300 bg-base-100 p-6 shadow-lg" role="status">
-      <h2 class="m-0 text-xl font-bold">The evidence library is taking a break</h2>
-      <p class="mt-2 mb-0 text-base-content/70">
-        We cannot load past checks right now. You can still check a website yourself.
-      </p>
-      <a class="btn btn-primary mt-5 w-fit" href="/">Check a website</a>
+    <section class="library-state card mt-8 p-6 sm:p-9" role="status">
+      <span class="library-state-icon" aria-hidden="true">↗</span>
+      <div>
+        <p class="eyebrow m-0">A pause in the archive</p>
+        <h2 class="m-0 mt-2 text-xl font-bold">The evidence library is taking a break</h2>
+        <p class="mt-2 mb-0 text-base-content/70">We cannot load past checks right now. You can still check a website yourself.</p>
+        <a class="btn btn-primary mt-5 w-fit" href="/">Check a website</a>
+      </div>
     </section>
   {:else}
-    <section class="card mt-8 border border-base-300 bg-base-100 p-5 shadow-lg" aria-labelledby="filters-heading">
+    <section class="filter-panel card mt-8 p-5 sm:p-7" aria-labelledby="filters-heading">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="filters-heading" class="m-0 text-xl font-bold">Find a website</h2>
@@ -192,13 +194,13 @@ function clearFilters() {
     </div>
 
     {#if groups.length === 0}
-      <section class="card mt-6 border border-base-300 bg-base-100 p-8 text-center shadow-lg">
+      <section class="library-state card mt-6 p-8 text-center">
         <h2 class="m-0 text-2xl font-bold">No checks have been shared yet</h2>
         <p class="mt-2 text-base-content/70">Start with a website you use and help build the public evidence library.</p>
         <a class="btn btn-primary mx-auto mt-4 w-fit" href="/">Check the first website</a>
       </section>
     {:else if results.length === 0}
-      <section class="card mt-6 border border-base-300 bg-base-100 p-8 text-center shadow-lg">
+      <section class="library-state card mt-6 p-8 text-center">
         <h2 class="m-0 text-2xl font-bold">No websites match those filters</h2>
         <p class="mt-2 text-base-content/70">Try a shorter name or clear the filters to see every website.</p>
         <button class="btn btn-primary mx-auto mt-4" type="button" onclick={clearFilters}>Show all websites</button>
@@ -207,7 +209,7 @@ function clearFilters() {
       <ul class="mt-6 grid list-none gap-5 p-0 md:grid-cols-2">
         {#each results as group (group.domain)}
           <li>
-            <article class="card h-full border border-base-300 bg-base-100 p-6 shadow-lg">
+            <article class="library-result card h-full p-6">
               <div class="flex items-start gap-4">
                 {#if hasConclusiveGrade(group.latest)}
                   <GradeBadge grade={group.latest.scoreGrade as Grade} />
