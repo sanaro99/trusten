@@ -26,6 +26,7 @@ import puppeteer, {
 import { PuppeteerScreenRecorder } from 'puppeteer-screen-recorder'
 import { logger } from '../../lib/logger'
 import { publish } from '../live/hub'
+import { ScanIncompleteError } from '../scan-incomplete-error'
 import type { AuthorizedTarget } from '../security/target-policy'
 import type { CookieInfo, NetworkRequest } from '../types'
 import type {
@@ -288,16 +289,26 @@ export class PuppeteerDriver implements BrowserDriver {
     }
 
     try {
-      await page.goto(initialUrl, {
+      const response = await page.goto(initialUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 30_000,
       })
+      if (response && response.status() >= 400) {
+        throw new ScanIncompleteError(
+          `Target page returned HTTP ${response.status()}`,
+        )
+      }
     } catch (err) {
-      if (entry.policyViolation) throw entry.policyViolation
+      const failure = entry.policyViolation ?? err
       logger.warn('Trusten Puppeteer: initial navigation slow/failed', {
         url,
-        error: String(err),
+        error: String(failure),
       })
+      await this.closePage(pageId).catch(() => undefined)
+      if (failure instanceof ScanIncompleteError || entry.policyViolation) {
+        throw failure
+      }
+      throw new ScanIncompleteError('The target page did not finish loading.')
     }
     return pageId
   }

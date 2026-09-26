@@ -1,6 +1,7 @@
 <script lang="ts">
 import { goto } from '$app/navigation'
 import { api, publicScanErrorMessage } from '$lib/api'
+import { historyCoverageLabel } from '$lib/history-coverage'
 import { getTurnstileToken } from '$lib/turnstile'
 import type { PageData } from './$types'
 
@@ -242,8 +243,8 @@ async function check(event: SubmitEvent) {
         {#each data.recent as scan (scan.id)}
           <li class="card neo-pressable border border-base-300">
             <a class="card-body min-h-28 flex-row items-center gap-4 no-underline" href="/scan/{scan.id}">
-              <span class="badge badge-primary size-14 text-xl font-bold">{scan.scoreGrade}</span>
-              <span><strong class="block break-all text-base-content">{scan.domain}</strong><small class="text-base-content/65">{scan.patternCount} {scan.patternCount === 1 ? 'concern' : 'concerns'} · {readableDate(scan.createdAt)}</small></span>
+              <span class="badge {historyCoverageLabel(scan) ? 'badge-warning' : 'badge-primary'} size-14 text-xl font-bold">{historyCoverageLabel(scan) ? '!' : scan.scoreGrade}</span>
+              <span><strong class="block break-all text-base-content">{scan.domain}</strong><small class="text-base-content/65">{historyCoverageLabel(scan) ?? `${scan.patternCount} ${scan.patternCount === 1 ? 'concern' : 'concerns'}`} · {readableDate(scan.createdAt)}</small></span>
               <span class="ml-auto text-primary" aria-hidden="true">&rarr;</span>
             </a>
           </li>

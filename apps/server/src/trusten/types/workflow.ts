@@ -32,6 +32,8 @@ export interface WorkflowStep {
   navAdvanced?: boolean
   /** Human-readable explanation of the navigation outcome. */
   navReason?: string
+  /** Whether the visual LLM check completed on a quick scan. */
+  visualCheckAvailable?: boolean
 }
 
 export interface WorkflowStepDefinition {

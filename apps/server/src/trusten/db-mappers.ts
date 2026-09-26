@@ -1,3 +1,4 @@
+import { isAccessChallengeUrl } from '@trusten/shared/domain'
 import type { AuditJob, AuditPlanItem, ScanHistoryRow } from './db'
 import type { DetectedPattern, ScanResult, WorkflowStep } from './types'
 
@@ -12,6 +13,16 @@ const json = <T>(value: unknown, fallback: T): T =>
       : (value as T)
 
 export function mapScanHistoryRow(r: Row): ScanHistoryRow {
+  const quickCoverage =
+    r.scan_type !== 'quick'
+      ? null
+      : !r.evidence_screenshot_path
+        ? 'missing'
+        : isAccessChallengeUrl(String(r.evidence_url ?? ''))
+          ? 'blocked'
+          : r.visual_check_available === 'true'
+            ? 'complete'
+            : 'partial'
   return {
     id: r.id as string,
     url: r.url as string,
@@ -22,6 +33,7 @@ export function mapScanHistoryRow(r: Row): ScanHistoryRow {
     completedAt: iso(r.completed_at),
     scoreNumeric: Number(r.score_numeric),
     scoreGrade: r.score_grade as string,
+    quickCoverage,
     patternCount: Number(r.pattern_count),
     criticalCount: Number(r.critical_count),
     highCount: Number(r.high_count),

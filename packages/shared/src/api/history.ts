@@ -10,6 +10,9 @@ export const ScanHistoryRowSchema = z.object({
   completedAt: z.string(),
   scoreNumeric: z.number(),
   scoreGrade: z.string(),
+  quickCoverage: z
+    .enum(['complete', 'partial', 'missing', 'blocked'])
+    .nullable(),
   patternCount: z.number(),
   criticalCount: z.number(),
   highCount: z.number(),

@@ -13,6 +13,7 @@ export interface ScanHistoryRow {
   completedAt: string
   scoreNumeric: number
   scoreGrade: string
+  quickCoverage: 'complete' | 'partial' | 'missing' | 'blocked' | null
   patternCount: number
   criticalCount: number
   highCount: number
@@ -94,7 +95,7 @@ export async function saveTrustenScan(
     : null
   await getDb()`INSERT INTO trusten_scans
     (id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,patterns,workflow_steps,pdf_path,html_path,video_path)
-    VALUES (${result.id},${result.url},${result.domain},${result.scanType},${opts.workflowId ?? null},${result.startedAt},${result.completedAt},${result.score.numeric},${result.score.grade},${result.patterns.length},${critical},${high},${JSON.stringify(result.patterns)}::jsonb,${steps ? JSON.stringify(steps) : null}::jsonb,${opts.pdfPath ?? null},${opts.htmlPath ?? null},${opts.videoPath ?? null})
+    VALUES (${result.id},${result.url},${result.domain},${result.scanType},${opts.workflowId ?? null},${result.startedAt},${result.completedAt},${result.score.numeric},${result.score.grade},${result.patterns.length},${critical},${high},${result.patterns}::jsonb,${steps}::jsonb,${opts.pdfPath ?? null},${opts.htmlPath ?? null},${opts.videoPath ?? null})
     ON CONFLICT (id) DO UPDATE SET url=EXCLUDED.url,domain=EXCLUDED.domain,scan_type=EXCLUDED.scan_type,workflow_id=EXCLUDED.workflow_id,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,score_numeric=EXCLUDED.score_numeric,score_grade=EXCLUDED.score_grade,pattern_count=EXCLUDED.pattern_count,critical_count=EXCLUDED.critical_count,high_count=EXCLUDED.high_count,patterns=EXCLUDED.patterns,workflow_steps=EXCLUDED.workflow_steps,pdf_path=EXCLUDED.pdf_path,html_path=EXCLUDED.html_path,video_path=EXCLUDED.video_path`
 }
 
@@ -102,7 +103,7 @@ export async function getTrustenScanHistory(
   limit = 20,
 ): Promise<ScanHistoryRow[]> {
   const rows =
-    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at FROM trusten_scans ORDER BY created_at DESC LIMIT ${limit}`
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_scans ORDER BY created_at DESC LIMIT ${limit}`
   return rows.map(mapScanHistoryRow)
 }
 export async function getTrustenScansByDomain(
@@ -110,7 +111,7 @@ export async function getTrustenScansByDomain(
   limit = 50,
 ): Promise<ScanHistoryRow[]> {
   const rows =
-    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at FROM trusten_scans WHERE domain=${domain} ORDER BY created_at DESC LIMIT ${limit}`
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_scans WHERE domain=${domain} ORDER BY created_at DESC LIMIT ${limit}`
   return rows.map(mapScanHistoryRow)
 }
 export async function getTrustenScanById(
@@ -173,7 +174,7 @@ export async function createAuditJob(
   workflows: string[],
 ): Promise<string> {
   const id = `audit-${randomUUID()}`
-  await getDb()`INSERT INTO trusten_audit_jobs(id,url,domain,workflows) VALUES(${id},${url},${domain},${JSON.stringify(workflows)}::jsonb)`
+  await getDb()`INSERT INTO trusten_audit_jobs(id,url,domain,workflows) VALUES(${id},${url},${domain},${workflows}::jsonb)`
   return id
 }
 export async function updateAuditJob(
@@ -183,10 +184,10 @@ export async function updateAuditJob(
   if (Object.values(u).every((v) => v === undefined)) return
   await getDb()`UPDATE trusten_audit_jobs SET
     status=CASE WHEN ${u.status !== undefined} THEN ${u.status ?? null} ELSE status END,
-    scan_ids=CASE WHEN ${u.scanIds !== undefined} THEN ${u.scanIds ? JSON.stringify(u.scanIds) : null}::jsonb ELSE scan_ids END,
+    scan_ids=CASE WHEN ${u.scanIds !== undefined} THEN ${u.scanIds ?? null}::jsonb ELSE scan_ids END,
     error=CASE WHEN ${u.error !== undefined} THEN ${u.error ?? null} ELSE error END,
     completed_at=CASE WHEN ${u.completedAt !== undefined} THEN ${u.completedAt ?? null}::timestamptz ELSE completed_at END,
-    plan=CASE WHEN ${u.plan !== undefined} THEN ${u.plan ? JSON.stringify(u.plan) : null}::jsonb ELSE plan END WHERE id=${id}`
+    plan=CASE WHEN ${u.plan !== undefined} THEN ${u.plan ?? null}::jsonb ELSE plan END WHERE id=${id}`
 }
 export async function getAuditJob(id: string): Promise<AuditJob | null> {
   const rows =
@@ -216,7 +217,7 @@ export async function cachePageFindings(
   scanId: string,
 ): Promise<void> {
   if (!patterns.length) return
-  await getDb()`INSERT INTO trusten_page_cache(url_key,url,patterns,scan_id,created_at) VALUES(${urlKey},${url},${JSON.stringify(patterns)}::jsonb,${scanId},now()) ON CONFLICT(url_key) DO UPDATE SET url=EXCLUDED.url,patterns=EXCLUDED.patterns,scan_id=EXCLUDED.scan_id,created_at=now()`
+  await getDb()`INSERT INTO trusten_page_cache(url_key,url,patterns,scan_id,created_at) VALUES(${urlKey},${url},${patterns}::jsonb,${scanId},now()) ON CONFLICT(url_key) DO UPDATE SET url=EXCLUDED.url,patterns=EXCLUDED.patterns,scan_id=EXCLUDED.scan_id,created_at=now()`
 }
 export async function getCachedPageFindings(
   urlKey: string,

@@ -2,6 +2,7 @@
 import type { ScanHistoryRow } from '@trusten/shared/api'
 import type { Grade } from '@trusten/shared/domain'
 import { GradeBadge } from '@trusten/ui/domain'
+import { hasConclusiveGrade, historyCoverageLabel } from '$lib/history-coverage'
 import type { PageData } from './$types'
 
 type DomainGroup = {
@@ -37,6 +38,8 @@ function verdictText(grade: string): string {
 }
 
 function concernText(scan: ScanHistoryRow): string {
+  const limited = historyCoverageLabel(scan)
+  if (limited) return limited
   const serious = scan.criticalCount + scan.highCount
   if (serious > 0)
     return `${serious} serious ${serious === 1 ? 'concern' : 'concerns'}`
@@ -46,7 +49,10 @@ function concernText(scan: ScanHistoryRow): string {
 }
 
 function trendText(group: DomainGroup): string {
+  if (!hasConclusiveGrade(group.latest))
+    return 'Open the result to review the evidence'
   if (!group.previous) return 'First check'
+  if (!hasConclusiveGrade(group.previous)) return 'No comparable previous grade'
   const change = group.latest.scoreNumeric - group.previous.scoreNumeric
   if (change >= 5) return 'Improved since the previous check'
   if (change <= -5) return 'More concerning than the previous check'
@@ -77,7 +83,11 @@ const results = $derived.by(() => {
   const search = query.trim().toLowerCase()
   const filtered = groups.filter((group) => {
     if (search && !group.domain.toLowerCase().includes(search)) return false
-    if (verdict === 'clear' && group.latest.patternCount > 0) return false
+    if (
+      verdict === 'clear' &&
+      (!hasConclusiveGrade(group.latest) || group.latest.patternCount > 0)
+    )
+      return false
     if (verdict === 'concerns' && group.latest.patternCount === 0) return false
     if (
       concern === 'serious' &&
@@ -199,12 +209,16 @@ function clearFilters() {
           <li>
             <article class="card h-full border border-base-300 bg-base-100 p-6 shadow-lg">
               <div class="flex items-start gap-4">
-                <GradeBadge grade={group.latest.scoreGrade as Grade} />
+                {#if hasConclusiveGrade(group.latest)}
+                  <GradeBadge grade={group.latest.scoreGrade as Grade} />
+                {:else}
+                  <span class="grid size-16 shrink-0 place-items-center rounded-full border border-warning/35 bg-warning/10 text-2xl font-bold" aria-label="Limited check">!</span>
+                {/if}
                 <div class="min-w-0 flex-1">
                   <h2 class="m-0 truncate text-xl font-bold">
                     <a class="link link-primary" href="/site/{encodeURIComponent(group.domain)}">{group.domain}</a>
                   </h2>
-                  <p class="mt-1 mb-0 font-semibold">{verdictText(group.latest.scoreGrade)}</p>
+                  <p class="mt-1 mb-0 font-semibold">{historyCoverageLabel(group.latest) ?? verdictText(group.latest.scoreGrade)}</p>
                 </div>
               </div>
 

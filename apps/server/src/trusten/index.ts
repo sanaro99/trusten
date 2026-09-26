@@ -9,6 +9,7 @@
  *   analyzeCurrentPage() — Scan whatever page is currently open
  */
 
+import { isAccessChallengeUrl } from '@trusten/shared/domain'
 import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
@@ -16,6 +17,7 @@ import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
+import { ScanIncompleteError } from './scan-incomplete-error'
 import { calculateScore } from './scoring/engine'
 import { postgresScanStore, type ScanStore } from './store'
 import type {
@@ -60,6 +62,7 @@ export class TrustenEngine {
     browser: BrowserDriver,
     executionDir?: string,
     store: ScanStore = postgresScanStore,
+    reportsDir?: string,
   ) {
     this.browser = browser
     this.store = store
@@ -70,7 +73,7 @@ export class TrustenEngine {
       process.env.HOME ??
       executionDir ??
       process.cwd()
-    this.reportsDir = `${home}/Desktop/trusten-reports`
+    this.reportsDir = reportsDir ?? `${home}/Desktop/trusten-reports`
   }
 
   /**
@@ -89,10 +92,46 @@ export class TrustenEngine {
       await this.waitForPageLoad(pageId)
 
       const context = await this.captureContext(pageId)
-      const patterns = await this.mergeCachedFindings(
-        url,
-        await this.runAllAnalyzers(context),
+      if (
+        !/^https?:\/\//i.test(context.url) ||
+        isAccessChallengeUrl(context.url) ||
+        !/<body[\s>]/i.test(context.domSnapshot) ||
+        !context.visibleText.trim() ||
+        !context.screenshotBase64 ||
+        (context.visibleText.length < 2500 &&
+          /^(just a moment|access denied|security check|verify (you are|you're) human|captcha|robot check)/i.test(
+            context.pageTitle.trim(),
+          ))
+      ) {
+        throw new ScanIncompleteError(
+          'Could not capture a usable page for this quick check. Please try again or check a different URL.',
+        )
+      }
+
+      const [fs, path] = await Promise.all([
+        import('node:fs'),
+        import('node:path'),
+      ])
+      const screenshotDir = path.join(this.reportsDir, 'screenshots', scanId)
+      fs.mkdirSync(screenshotDir, { recursive: true })
+      const screenshotPath = path.join(screenshotDir, 'step-1.jpg')
+      fs.writeFileSync(
+        screenshotPath,
+        Buffer.from(context.screenshotBase64, 'base64'),
       )
+
+      let visualCheckAvailable = false
+      const livePatterns = await this.runAnalyzers(
+        ALL_ANALYZERS,
+        context,
+        (analyzer, analyzerResult) => {
+          if (analyzer.name === 'VisualAnalyzer') {
+            visualCheckAvailable =
+              analyzerResult.metadata?.visualCheckAvailable === true
+          }
+        },
+      )
+      const patterns = await this.mergeCachedFindings(url, livePatterns)
       const score = calculateScore(patterns)
 
       const result: ScanResult = {
@@ -104,10 +143,24 @@ export class TrustenEngine {
         completedAt: new Date().toISOString(),
         patterns,
         score,
+        workflowSteps: [
+          {
+            stepNumber: 1,
+            action: 'Inspect the initial page',
+            url: context.url,
+            screenshot: '',
+            screenshotPath,
+            patternsFound: patterns,
+            timestamp: new Date().toISOString(),
+            status: 'observed',
+            navAdvanced: false,
+            visualCheckAvailable,
+          },
+        ],
       }
 
-      // Persist quick scans too so the dashboard can show them
-      await this.persistScan(result)
+      // A quick result is only complete when the result page can load it.
+      await this.store.saveScan(result)
 
       logger.info('Trusten quick scan complete', {
         url,
@@ -734,6 +787,7 @@ export class TrustenEngine {
   private async runAnalyzers(
     analyzers: BaseAnalyzer[],
     context: AnalyzerContext,
+    onResult?: (analyzer: BaseAnalyzer, result: AnalyzerResult) => void,
   ): Promise<DetectedPattern[]> {
     const results = await Promise.allSettled(
       analyzers.map((analyzer) =>
@@ -741,14 +795,18 @@ export class TrustenEngine {
           logger.warn(`Trusten analyzer ${analyzer.name} failed`, {
             error: err instanceof Error ? err.message : String(err),
           })
-          return { patterns: [] } satisfies AnalyzerResult
+          return {
+            patterns: [],
+            metadata: { visualCheckAvailable: false },
+          } satisfies AnalyzerResult
         }),
       ),
     )
 
     const patterns: DetectedPattern[] = []
-    for (const result of results) {
+    for (const [index, result] of results.entries()) {
       if (result.status === 'fulfilled') {
+        onResult?.(analyzers[index], result.value)
         patterns.push(...result.value.patterns)
       }
     }
