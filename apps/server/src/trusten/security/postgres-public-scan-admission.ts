@@ -1,10 +1,11 @@
 import type { SQL } from 'bun'
-import type {
-  PublicScanAdmissionPersistence,
-  PublicScanAdmissionReservation,
-  PublicScanAdmissionReservationResult,
-  PublicScanQuotaDimension,
-  WindowQuota,
+import {
+  DEFAULT_ATTEMPT_QUOTA,
+  type PublicScanAdmissionPersistence,
+  type PublicScanAdmissionReservation,
+  type PublicScanAdmissionReservationResult,
+  type PublicScanQuotaDimension,
+  type WindowQuota,
 } from './public-scan-admission'
 
 const ADMISSION_LOCK = 814005240
@@ -36,7 +37,9 @@ export class PostgresPublicScanAdmissionPersistence
         reservation.domainQuota.windowMs,
       )
       const oldestTrackedAt = new Date(now.getTime() - largestWindowMs)
-      await tx`DELETE FROM trusten_public_scan_leases WHERE expires_at <= ${now}`
+      // Expiring capacity must not erase the ownership needed to refund a
+      // scan that finishes with a failure after its execution lease expires.
+      await tx`DELETE FROM trusten_public_scan_leases WHERE expires_at <= ${now} AND refund_expires_at <= ${now}`
       await tx`
         DELETE FROM trusten_public_scan_quota_events
         WHERE occurred_at <= ${oldestTrackedAt}
@@ -52,6 +55,26 @@ export class PostgresPublicScanAdmissionPersistence
         const blocked = await this.quotaBlocked(tx, dimension, key, quota, now)
         if (blocked) return blocked
       }
+
+      const attemptQuota = reservation.attemptQuota ?? DEFAULT_ATTEMPT_QUOTA
+      const attemptStart = new Date(now.getTime() - attemptQuota.windowMs)
+      await tx`DELETE FROM trusten_public_scan_attempts WHERE occurred_at <= ${attemptStart}`
+      const [attempts] = await tx`
+        SELECT COUNT(*)::integer AS count, MIN(occurred_at) AS oldest
+        FROM trusten_public_scan_attempts
+        WHERE client_ip = ${reservation.clientIp} AND occurred_at > ${attemptStart}
+      `
+      if (Number(attempts?.count ?? 0) >= attemptQuota.limit)
+        return {
+          allowed: false,
+          dimension: 'retry',
+          retryAfterMs: Math.max(
+            1,
+            (attempts.oldest?.getTime() ?? now.getTime()) +
+              attemptQuota.windowMs -
+              now.getTime(),
+          ),
+        }
 
       const outstanding = (await tx`
         SELECT COUNT(*)::integer AS count
@@ -70,28 +93,37 @@ export class PostgresPublicScanAdmissionPersistence
       for (const [dimension, key] of dimensions) {
         await tx`
           INSERT INTO trusten_public_scan_quota_events
-            (dimension, quota_key, occurred_at)
-          VALUES (${dimension}, ${key}, ${now})
+            (dimension, quota_key, occurred_at, reservation_id)
+          VALUES (${dimension}, ${key}, ${now}, ${reservation.id})
         `
       }
       await tx`
-        INSERT INTO trusten_public_scan_leases (id, expires_at)
+        INSERT INTO trusten_public_scan_leases (id, expires_at, refund_expires_at)
         VALUES (
           ${reservation.id},
-          ${new Date(now.getTime() + reservation.leaseDurationMs)}
+          ${new Date(now.getTime() + reservation.leaseDurationMs)},
+          ${new Date(now.getTime() + largestWindowMs)}
         )
       `
+      await tx`INSERT INTO trusten_public_scan_attempts (id, client_ip, occurred_at) VALUES (${reservation.id}, ${reservation.clientIp}, ${now})`
       return { allowed: true, sessionId }
     })
   }
 
-  async release(id: string): Promise<boolean> {
-    const deleted = (await this.sql`
-      DELETE FROM trusten_public_scan_leases
-      WHERE id = ${id}
-      RETURNING id
-    `) as Array<{ id: string }>
-    return deleted.length > 0
+  async release(id: string, refundQuota = false): Promise<boolean> {
+    return this.sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(${ADMISSION_LOCK})`
+      const deleted = (await tx`
+        DELETE FROM trusten_public_scan_leases
+        WHERE id = ${id}
+        RETURNING id
+      `) as Array<{ id: string }>
+      if (!deleted.length) return false
+      if (refundQuota) {
+        await tx`DELETE FROM trusten_public_scan_quota_events WHERE reservation_id = ${id}`
+      }
+      return true
+    })
   }
 
   private async resolveSession(

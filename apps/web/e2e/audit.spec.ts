@@ -1,5 +1,61 @@
 import { expect, test } from '@playwright/test'
 
+test('a blocked quick check accepts a bare address, explains the block, and offers the extension', async ({
+  page,
+}) => {
+  const targets: string[] = []
+  await page.route('**/trusten/api/quick-scan', (route) => {
+    targets.push(route.request().postDataJSON().url)
+    return route.fulfill({
+      status: 422,
+      json: { code: 'SITE_BLOCKED', error: 'Security verification' },
+    })
+  })
+  await page.goto('/')
+  await page.waitForLoadState('networkidle')
+  await page.getByLabel('Website address').fill('temu.com')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page
+      .getByRole('button', { name: 'Check this site', exact: true })
+      .click()
+    await expect(page.getByRole('alert')).toContainText(
+      'blocked the automated check',
+    )
+    await expect(
+      page.getByRole('link', {
+        name: 'Get the Trusten Chrome extension',
+        exact: true,
+      }),
+    ).toHaveAttribute('href', '/extension')
+    await expect(
+      page.getByRole('button', { name: 'Check this site', exact: true }),
+    ).toBeEnabled()
+  }
+  expect(targets).toEqual(['https://temu.com', 'https://temu.com'])
+})
+
+test('a domain cooldown reports its wait instead of a visitor demo limit', async ({
+  page,
+}) => {
+  await page.route('**/trusten/api/quick-scan', (route) =>
+    route.fulfill({
+      status: 429,
+      headers: { 'Retry-After': '90' },
+      json: { code: 'DOMAIN_QUOTA_EXCEEDED', error: 'Domain quota' },
+    }),
+  )
+  await page.goto('/')
+  await page.waitForLoadState('networkidle')
+  await page.getByLabel('Website address').fill('temu.com')
+  await page
+    .getByRole('button', { name: 'Check this site', exact: true })
+    .click()
+  await expect(page.getByRole('alert')).toContainText(
+    'website was checked recently',
+  )
+  await expect(page.getByRole('alert')).toContainText('2 minutes')
+})
+
 test('the home page asks for one thing', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByLabel('Website address')).toBeVisible()

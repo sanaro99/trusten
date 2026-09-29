@@ -7,6 +7,7 @@
  */
 import {
   type AuditRequest,
+  AuditRequestSchema,
   AuditStartResponseSchema,
   AuditStatusSchema,
   DomainDetailSchema,
@@ -14,6 +15,7 @@ import {
   HistoryResponseSchema,
   LiveTicketResponseSchema,
   type QuickScanRequest,
+  QuickScanRequestSchema,
   QuickScanResponseSchema,
   ScanDetailSchema,
 } from '@trusten/shared/api'
@@ -44,28 +46,50 @@ export class VisitorCheckError extends Error {
   }
 }
 
+function retryMessage(seconds?: number): string {
+  if (!seconds) return 'Please try again later.'
+  const amount = seconds < 60 ? Math.ceil(seconds) : Math.ceil(seconds / 60)
+  const unit = seconds < 60 ? 'second' : 'minute'
+  return `Please try again in ${amount} ${unit}${amount === 1 ? '' : 's'}.`
+}
+
 export function publicScanErrorMessage(error: unknown): string {
   if (error instanceof VisitorCheckError)
     return 'We could not complete the visitor check. Please try again.'
-  if (error instanceof ApiError && error.code === 'TARGET_REJECTED')
+  if (!(error instanceof ApiError))
+    return 'We could not reach the checking service. Try again in a moment.'
+  if (error.code === 'TARGET_REJECTED')
     return 'That address cannot be checked safely. Try a public website.'
-  if (error instanceof ApiError && error.code === 'SCAN_INCOMPLETE')
+  if (error.code === 'SITE_BLOCKED')
+    return 'That website blocked the automated check. Open the page in Chrome and use the Trusten Chrome extension to check it.'
+  if (error.code === 'PAGE_NOT_READY')
+    return 'That page did not finish loading in time. Please try again, or check it with the Trusten Chrome extension.'
+  if (error.code === 'PAGE_LOAD_FAILED')
+    return 'We could not load that website. Check the address and try again, or use the Trusten Chrome extension on the page.'
+  if (error.code === 'SCAN_INCOMPLETE')
     return 'We could not inspect enough of that page to give a result. Try again or check a different URL.'
-  if (error instanceof ApiError && error.status === 429)
-    return 'You have reached the demo limit. Please try again later.'
-  if (error instanceof ApiError && error.code === 'DEMO_BUSY')
+  if (error.code === 'DOMAIN_QUOTA_EXCEEDED')
+    return `This website was checked recently. ${retryMessage(error.retryAfterSeconds)} You can also check a different website.`
+  if (
+    error.code === 'SESSION_QUOTA_EXCEEDED' ||
+    error.code === 'IP_QUOTA_EXCEEDED'
+  )
+    return `You have reached the demo limit. ${retryMessage(error.retryAfterSeconds)}`
+  if (error.status === 429)
+    return `Too many requests. ${retryMessage(error.retryAfterSeconds)}`
+  if (error.code === 'DEMO_BUSY')
     return 'The public demo is busy. Please try again in a moment.'
-  if (error instanceof ApiError && error.code?.startsWith('BOT_'))
+  if (error.code?.startsWith('BOT_'))
     return 'We could not complete the visitor check. Please try again.'
-  if (error instanceof ApiError && error.status === 400)
+  if (error.status === 400)
     return 'Please enter a valid website address and try again.'
-  if (error instanceof ApiError && error.status === 403)
+  if (error.status === 403)
     return 'That website does not allow this check. Try a different website.'
-  if (error instanceof ApiError && error.status === 404)
+  if (error.status === 404)
     return 'This check is no longer available. Start a new check.'
-  if (error instanceof ApiError && error.code === 'SERVICE_UNAVAILABLE')
+  if (error.code === 'SERVICE_UNAVAILABLE')
     return 'The checking service is temporarily unavailable. Try again in a moment.'
-  if (error instanceof ApiError && error.status >= 500)
+  if (error.status >= 500)
     return 'The checking service could not complete this check. Try again or check a different URL.'
   return 'We could not reach the checking service. Try again in a moment.'
 }
@@ -129,6 +153,15 @@ async function post<S extends ZodType>(
   return schema.parse(await res.json())
 }
 
+function parseScanRequest<S extends ZodType>(
+  schema: S,
+  request: unknown,
+): z.infer<S> {
+  const parsed = schema.safeParse(request)
+  if (!parsed.success) throw new ApiError(400)
+  return parsed.data
+}
+
 export const api = {
   getStats: (f: Fetcher = fetch) => get(f, '/stats', GlobalStatsSchema),
 
@@ -141,8 +174,13 @@ export const api = {
   getDomainDetail: (domain: string, f: Fetcher = fetch) =>
     get(f, `/domain/${encodeURIComponent(domain)}`, DomainDetailSchema),
 
-  startAudit: (req: AuditRequest, f: Fetcher = fetch) =>
-    post(f, '/audit', req, AuditStartResponseSchema),
+  startAudit: async (req: AuditRequest, f: Fetcher = fetch) =>
+    post(
+      f,
+      '/audit',
+      parseScanRequest(AuditRequestSchema, req),
+      AuditStartResponseSchema,
+    ),
 
   getAuditStatus: (
     jobId: string,
@@ -169,6 +207,11 @@ export const api = {
       capabilityToken,
     ),
 
-  quickScan: (req: QuickScanRequest, f: Fetcher = fetch) =>
-    post(f, '/quick-scan', req, QuickScanResponseSchema),
+  quickScan: async (req: QuickScanRequest, f: Fetcher = fetch) =>
+    post(
+      f,
+      '/quick-scan',
+      parseScanRequest(QuickScanRequestSchema, req),
+      QuickScanResponseSchema,
+    ),
 }

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { createAuditJob, saveTrustenScan } from '../../trusten/db'
 import { JobCapabilityAccess } from '../../trusten/security/job-capability'
 import { PostgreSqlCapabilityStore } from '../../trusten/security/postgres-capability-store'
+import { PostgresPublicScanAdmissionPersistence } from '../../trusten/security/postgres-public-scan-admission'
 import { closeDb, getDb, initializeDb, migrateDb } from './index'
 
 const databaseUrl = process.env.TRUSTEN_TEST_DATABASE_URL
@@ -28,6 +29,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
       '001_initial.sql',
       '002_job_capabilities.sql',
       '003_public_scan_admission.sql',
+      '004_refundable_scan_quotas.sql',
+      '005_scan_attempt_throttle.sql',
+      '006_scan_reservation_retention.sql',
     ])
     expect(
       rows.every((row) => /^[0-9a-f]{64}$/.test(String(row.checksum))),
@@ -51,8 +55,24 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
       'trusten_public_scan_sessions',
       'trusten_public_scan_quota_events',
       'trusten_public_scan_leases',
+      'trusten_public_scan_attempts',
     ]) {
       expect(tables.has(table)).toBe(true)
+    }
+  })
+
+  test('allows a previous application image to insert a lease after the retention migration', async () => {
+    const id = crypto.randomUUID()
+    const sql = getDb()
+    try {
+      const [lease] = await sql`
+        INSERT INTO trusten_public_scan_leases (id, expires_at)
+        VALUES (${id}, now() + interval '15 minutes')
+        RETURNING refund_expires_at
+      `
+      expect(lease.refund_expires_at).toBeInstanceOf(Date)
+    } finally {
+      await sql`DELETE FROM trusten_public_scan_leases WHERE id = ${id}`
     }
   })
 
@@ -83,6 +103,92 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
       expect(row?.kind).toBe('array')
     } finally {
       await getDb()`DELETE FROM trusten_scans WHERE id = ${id}`
+    }
+  })
+
+  test('refunds only the failed reservation while retaining completed scan allowances', async () => {
+    const sql = getDb()
+    const persistence = new PostgresPublicScanAdmissionPersistence(sql)
+    const completedId = crypto.randomUUID()
+    const failedId = crypto.randomUUID()
+    const key = crypto.randomUUID()
+    const session = `quota-test-${key}`
+    const reserve = (id: string) =>
+      persistence.reserve({
+        id,
+        generatedSessionId: session,
+        clientIp: key,
+        domain: key,
+        attemptQuota: { limit: 2, windowMs: 60000 },
+        sessionQuota: { limit: 3, windowMs: 60000 },
+        ipQuota: { limit: 3, windowMs: 60000 },
+        domainQuota: { limit: 3, windowMs: 60000 },
+        maxOutstanding: 100,
+        leaseDurationMs: 30000,
+        now: Date.now(),
+      })
+    try {
+      expect((await reserve(completedId)).allowed).toBe(true)
+      expect((await reserve(failedId)).allowed).toBe(true)
+      expect(await persistence.release(completedId)).toBe(true)
+      expect(await persistence.release(failedId, true)).toBe(true)
+      expect(await persistence.release(completedId, true)).toBe(false)
+      expect(await persistence.release(failedId, true)).toBe(false)
+      const [row] =
+        await sql`SELECT COUNT(*)::integer AS count FROM trusten_public_scan_quota_events WHERE quota_key = ${key} OR quota_key = ${session}`
+      expect(row.count).toBe(3)
+      const retry = await reserve(crypto.randomUUID())
+      expect(retry.allowed).toBe(false)
+      if (!retry.allowed) expect(retry.dimension).toBe('retry')
+    } finally {
+      await sql`DELETE FROM trusten_public_scan_leases WHERE id = ${completedId} OR id = ${failedId}`
+      await sql`DELETE FROM trusten_public_scan_attempts WHERE client_ip = ${key}`
+      await sql`DELETE FROM trusten_public_scan_quota_events WHERE quota_key = ${key} OR quota_key = ${session}`
+      await sql`DELETE FROM trusten_public_scan_sessions WHERE id = ${session}`
+    }
+  })
+
+  test('retains refund ownership after capacity expiry and finalizes a completed reservation once', async () => {
+    const sql = getDb()
+    const persistence = new PostgresPublicScanAdmissionPersistence(sql)
+    const key = `expired-${crypto.randomUUID()}`
+    const failedId = crypto.randomUUID()
+    const completedId = crypto.randomUUID()
+    const unrelatedId = crypto.randomUUID()
+    const cleanupTriggerId = crypto.randomUUID()
+    const reserve = (id: string, quotaKey = key) =>
+      persistence.reserve({
+        id,
+        generatedSessionId: quotaKey,
+        clientIp: quotaKey,
+        domain: quotaKey,
+        sessionQuota: { limit: 1, windowMs: 60000 },
+        ipQuota: { limit: 1, windowMs: 60000 },
+        domainQuota: { limit: 1, windowMs: 60000 },
+        maxOutstanding: 100,
+        leaseDurationMs: 1000,
+        now: Date.now(),
+      })
+    try {
+      expect((await reserve(failedId)).allowed).toBe(true)
+      await sql`UPDATE trusten_public_scan_leases SET expires_at = now() - interval '1 second' WHERE id = ${failedId}`
+      expect((await reserve(unrelatedId, `${key}-other`)).allowed).toBe(true)
+      await persistence.release(unrelatedId, true)
+      expect(await persistence.release(failedId, true)).toBe(true)
+      expect(await persistence.release(failedId, true)).toBe(false)
+      expect((await reserve(completedId)).allowed).toBe(true)
+      await sql`UPDATE trusten_public_scan_leases SET expires_at = now() - interval '1 second' WHERE id = ${completedId}`
+      await reserve(cleanupTriggerId, `${key}-other`)
+      expect(await persistence.release(completedId)).toBe(true)
+      expect(await persistence.release(completedId, true)).toBe(false)
+      const retry = await reserve(crypto.randomUUID())
+      expect(retry.allowed).toBe(false)
+      if (!retry.allowed) expect(retry.dimension).toBe('session')
+    } finally {
+      await sql`DELETE FROM trusten_public_scan_leases WHERE id IN (${failedId}, ${completedId}, ${unrelatedId}, ${cleanupTriggerId})`
+      await sql`DELETE FROM trusten_public_scan_attempts WHERE client_ip IN (${key}, ${`${key}-other`})`
+      await sql`DELETE FROM trusten_public_scan_quota_events WHERE quota_key IN (${key}, ${`${key}-other`})`
+      await sql`DELETE FROM trusten_public_scan_sessions WHERE id IN (${key}, ${`${key}-other`})`
     }
   })
 

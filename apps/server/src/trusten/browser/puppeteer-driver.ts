@@ -125,20 +125,50 @@ export type BrowserTargetAuthorizer = (url: string) => Promise<AuthorizedTarget>
 
 export class PuppeteerDriver implements BrowserDriver {
   private browser: Browser | null = null
+  private browserLaunch: Promise<Browser> | null = null
   private pages = new Map<number, PageEntry>()
   private nextPageId = 1
 
   constructor(private readonly authorizeTarget?: BrowserTargetAuthorizer) {}
 
-  private async getBrowser(): Promise<Browser> {
-    if (!this.browser) {
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
-      })
-      logger.info('Trusten Puppeteer Chromium launched')
+  private discardBrowser(browser: Browser): void {
+    // A delayed event from an old browser must not discard its replacement.
+    if (this.browser !== browser) return
+    this.browser = null
+    for (const [pageId, entry] of this.pages) {
+      if (entry.page.browser() === browser)
+        void this.closePage(pageId).catch(() => undefined)
     }
-    return this.browser
+    // A lost connection can leave Chrome running. Puppeteer's close callback
+    // also reaps that process when the protocol connection is already closed.
+    void browser.close().catch(() => undefined)
+  }
+
+  private async getBrowser(): Promise<Browser> {
+    if (this.browser?.connected) return this.browser
+    if (this.browser) this.discardBrowser(this.browser)
+    if (!this.browserLaunch) {
+      this.browserLaunch = puppeteer
+        .launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-blink-features=AutomationControlled',
+          ],
+        })
+        .then((browser) => {
+          this.browser = browser
+          browser.once('disconnected', () => this.discardBrowser(browser))
+          logger.info('Trusten Puppeteer Chromium launched')
+          return browser
+        })
+    }
+    const launch = this.browserLaunch
+    try {
+      return await launch
+    } finally {
+      if (this.browserLaunch === launch) this.browserLaunch = null
+    }
   }
 
   private entry(pageId: number): PageEntry {
@@ -305,6 +335,9 @@ export class PuppeteerDriver implements BrowserDriver {
       if (response && response.status() >= 400) {
         throw new ScanIncompleteError(
           `Target page returned HTTP ${response.status()}`,
+          [401, 403, 429].includes(response.status())
+            ? 'SITE_BLOCKED'
+            : 'PAGE_LOAD_FAILED',
         )
       }
     } catch (err) {
@@ -317,7 +350,10 @@ export class PuppeteerDriver implements BrowserDriver {
       if (failure instanceof ScanIncompleteError || entry.policyViolation) {
         throw failure
       }
-      throw new ScanIncompleteError('The target page did not finish loading.')
+      throw new ScanIncompleteError(
+        'The target page did not finish loading.',
+        'PAGE_LOAD_FAILED',
+      )
     }
     return pageId
   }
@@ -599,6 +635,8 @@ export class PuppeteerDriver implements BrowserDriver {
 
   /** Shut down the browser and all contexts (graceful shutdown). */
   async close(): Promise<void> {
+    // Shutdown can race the first page request while Chrome is still starting.
+    await this.browserLaunch?.catch(() => undefined)
     for (const [, e] of this.pages) {
       if (e.recorder) await e.recorder.stop().catch(() => undefined)
       if (e.liveClient)
@@ -607,8 +645,9 @@ export class PuppeteerDriver implements BrowserDriver {
     }
     this.pages.clear()
     if (this.browser) {
-      await this.browser.close().catch(() => undefined)
+      const browser = this.browser
       this.browser = null
+      await browser.close().catch(() => undefined)
     }
   }
 }

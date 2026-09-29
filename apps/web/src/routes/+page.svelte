@@ -1,6 +1,6 @@
 <script lang="ts">
 import { goto } from '$app/navigation'
-import { api, publicScanErrorMessage } from '$lib/api'
+import { ApiError, api, publicScanErrorMessage } from '$lib/api'
 import { historyCoverageLabel } from '$lib/history-coverage'
 import { getTurnstileToken } from '$lib/turnstile'
 import type { PageData } from './$types'
@@ -10,6 +10,7 @@ let { data }: { data: PageData } = $props()
 let url = $state('')
 let busy = $state(false)
 let problem = $state('')
+let extensionHelp = $state(false)
 let turnstileContainer = $state<HTMLDivElement>()
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -27,6 +28,7 @@ function readableDate(value: string) {
 
 async function check(event: SubmitEvent) {
   event.preventDefault()
+  extensionHelp = false
   if (!url.trim()) {
     problem = 'Please type the address of the website you want to check.'
     return
@@ -45,6 +47,11 @@ async function check(event: SubmitEvent) {
     else problem = 'We could not check that website. Please try again.'
   } catch (error) {
     problem = publicScanErrorMessage(error)
+    extensionHelp =
+      error instanceof ApiError &&
+      ['SITE_BLOCKED', 'PAGE_NOT_READY', 'PAGE_LOAD_FAILED'].includes(
+        error.code ?? '',
+      )
   } finally {
     busy = false
   }
@@ -90,6 +97,9 @@ async function check(event: SubmitEvent) {
           <p id="site-hint" class="mb-0 mt-2 text-sm text-base-content/65">A quick check usually takes about a minute. No account needed.</p>
           {#if problem}
             <div id="site-problem" class="alert alert-error mt-3" role="alert">{problem}</div>
+            {#if extensionHelp}
+              <a class="link link-primary mt-2 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>
+            {/if}
           {/if}
           <div class="mt-1" bind:this={turnstileContainer}></div>
         </div>

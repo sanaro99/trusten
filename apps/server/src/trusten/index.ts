@@ -95,8 +95,7 @@ export class TrustenEngine {
       pageId = await this.browser.newPage(url, { background: true })
       await this.waitForPageLoad(pageId)
 
-      const context = await this.captureContext(pageId)
-      this.assertUsableContext(context)
+      const context = await this.captureUsableContext(pageId)
 
       const [fs, path] = await Promise.all([
         import('node:fs'),
@@ -218,7 +217,7 @@ export class TrustenEngine {
       })
       const pid = pageId
       await this.waitForPageLoad(pid)
-      this.assertUsableContext(await this.captureContext(pid))
+      await this.captureUsableContext(pid)
 
       const fakeProfile = generateFakeProfile()
       // Consent workflows must inspect the original banner and preference path.
@@ -639,6 +638,8 @@ export class TrustenEngine {
       cookies: [],
     }
 
+    this.assertPageNotBlocked(context)
+
     logger.info('Trusten analyzing provided content', { domain, scanId })
 
     const patterns = await this.mergeCachedFindings(
@@ -751,6 +752,9 @@ export class TrustenEngine {
     if (pageInfo?.httpStatus && pageInfo.httpStatus >= 400)
       throw new ScanIncompleteError(
         `Target page returned HTTP ${pageInfo.httpStatus}`,
+        [401, 403, 429].includes(pageInfo.httpStatus)
+          ? 'SITE_BLOCKED'
+          : 'PAGE_LOAD_FAILED',
       )
     const url = pageInfo?.url ?? ''
     const pageTitle = pageInfo?.title ?? ''
@@ -777,10 +781,15 @@ export class TrustenEngine {
       })
     } catch {
       // Fall back to extracting from DOM
-      visibleText = domSnapshot
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
+      try {
+        const text = await this.browser.evaluate(
+          pageId,
+          "document.body?.innerText || ''",
+        )
+        visibleText = typeof text.value === 'string' ? text.value : ''
+      } catch {
+        /* An unavailable DOM is not page evidence. */
+      }
     }
 
     // Capture screenshot (data is already base64-encoded)
@@ -841,20 +850,54 @@ export class TrustenEngine {
   }
 
   private assertUsableContext(context: AnalyzerContext): void {
+    this.assertPageNotBlocked(context)
+    if (!/^https?:\/\//i.test(context.url) || !context.screenshotBase64)
+      throw new ScanIncompleteError(
+        'Could not capture a usable page for this check. Please try again or check a different URL.',
+      )
     if (
-      !/^https?:\/\//i.test(context.url) ||
-      isAccessChallengeUrl(context.url) ||
       !/<body[\s>]/i.test(context.domSnapshot) ||
-      !context.visibleText.trim() ||
-      !context.screenshotBase64 ||
+      !context.visibleText
+        .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '')
+        .trim()
+    )
+      throw new ScanIncompleteError(
+        'This page did not render readable content in time. Try again or check the loaded page with the Trusten Chrome extension.',
+        'PAGE_NOT_READY',
+      )
+  }
+
+  private assertPageNotBlocked(context: AnalyzerContext): void {
+    if (
+      isAccessChallengeUrl(context.url) ||
       (context.visibleText.length < 2500 &&
-        /^(just a moment|access denied|security check|verify (you are|you're) human|captcha|robot check)/i.test(
+        /^(just a moment|access denied|security (check|verification)|verify (you are|you're) human|captcha|robot check)/i.test(
           context.pageTitle.trim(),
         ))
     )
       throw new ScanIncompleteError(
-        'Could not capture a usable page for this check. Please try again or check a different URL.',
+        'This website requires security verification and blocked the automated check. Finish the website verification in Chrome, then check the loaded page with the Trusten Chrome extension.',
+        'SITE_BLOCKED',
       )
+  }
+
+  private async captureUsableContext(pageId: number): Promise<AnalyzerContext> {
+    const deadline = Date.now() + 10000
+    while (true) {
+      const context = await this.captureContext(pageId)
+      try {
+        this.assertUsableContext(context)
+        return context
+      } catch (error) {
+        if (
+          !(error instanceof ScanIncompleteError) ||
+          error.code !== 'PAGE_NOT_READY' ||
+          Date.now() >= deadline
+        )
+          throw error
+        await sleep(500)
+      }
+    }
   }
 
   private async runAllAnalyzers(
