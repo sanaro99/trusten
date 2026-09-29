@@ -9,7 +9,7 @@
  *   5. "Highlight on Page" → executeScript injects the Trusten overlay
  */
 
-const SERVER = 'http://localhost:9200'
+let settings = TRUSTEN_DEFAULTS
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -187,7 +187,7 @@ function renderResults(data) {
 
   // Full report link
   const reportLink = document.getElementById('btnFullReport')
-  reportLink.href = `${SERVER}/trusten/scan/${data.scanId}`
+  reportLink.href = `${settings.dashboardOrigin}/scan/${encodeURIComponent(data.scanId)}`
 
   showState('results')
 }
@@ -198,19 +198,22 @@ function renderResults(data) {
  * This function is serialized and executed inside the page context.
  * It must be completely self-contained — no closure references.
  */
-function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
+function __trustenInjectOverlay(patterns, grade, scanId, dashboardOrigin) {
   var PANEL_ID = '__trusten_live__'
   var HL_ATTR = 'data-trusten-hl'
+  var originals = new Map()
 
   function removeAll() {
     var p = document.getElementById(PANEL_ID)
     if (p) p.remove()
-    document.querySelectorAll(`[${HL_ATTR}]`).forEach((el) => {
+    originals.forEach((style, el) => {
       el.removeAttribute(HL_ATTR)
-      el.style.outline = ''
-      el.style.outlineOffset = ''
-      el.style.boxShadow = ''
+      style.forEach(([name, value, priority]) => {
+        if (value) el.style.setProperty(name, value, priority)
+        else el.style.removeProperty(name)
+      })
     })
+    document.removeEventListener('keydown', onEsc)
   }
 
   function esc(s) {
@@ -222,8 +225,9 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
   }
 
   // Toggle off if already visible
-  if (document.getElementById(PANEL_ID)) {
-    removeAll()
+  var existing = document.getElementById(PANEL_ID)
+  if (existing) {
+    existing.__trustenCleanup()
     return 'hidden'
   }
 
@@ -281,7 +285,7 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
   }
 
   var gradeColor = GRADE_COLOR[grade] || '#8f2d46'
-  var dashUrl = `http://localhost:${serverPort}/trusten/scan/${scanId}`
+  var dashUrl = `${dashboardOrigin}/scan/${encodeURIComponent(scanId)}`
 
   // Highlight elements with CSS selectors
   var highlighted = 0
@@ -292,6 +296,15 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
         if (highlighted >= 6) return
         var rect = el.getBoundingClientRect()
         if (rect.width === 0 || rect.height === 0) return
+        if (!originals.has(el))
+          originals.set(
+            el,
+            ['outline', 'outline-offset', 'box-shadow'].map((name) => [
+              name,
+              el.style.getPropertyValue(name),
+              el.style.getPropertyPriority(name),
+            ]),
+          )
         el.setAttribute(HL_ATTR, '1')
         var color = SEV_COLOR[p.severity] || '#ea580c'
         el.style.outline = `3px solid ${color}`
@@ -346,9 +359,6 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
       '<div style="padding:20px 16px;text-align:center;color:#176b55;font-size:13px">✓ We did not find clear pressure tactics on this page</div>'
   }
 
-  var closeScript =
-    "var p=document.getElementById('__trusten_live__');if(p)p.remove();document.querySelectorAll('[data-trusten-hl]').forEach(function(e){e.removeAttribute('data-trusten-hl');e.style.outline='';e.style.outlineOffset='';e.style.boxShadow='';})"
-
   var panel = document.createElement('div')
   panel.id = PANEL_ID
   panel.style.cssText = [
@@ -391,9 +401,7 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
     '</div>' +
     '<div style="font-size:9px;color:#5f596e;text-transform:uppercase;font-weight:700">grade</div>' +
     '</div>' +
-    '<button onclick="' +
-    closeScript.replace(/"/g, '&quot;') +
-    '" aria-label="Close Trusten highlights" style="background:#efecf7;border:1px solid #d9d3e5;color:#493777;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">×</button>' +
+    '<button aria-label="Close Trusten highlights" style="background:#efecf7;border:1px solid #d9d3e5;color:#493777;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">×</button>' +
     '</div>' +
     '</div>' +
     '</div>' +
@@ -402,7 +410,7 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
     '</div>' +
     '<div style="padding:10px 14px;border-top:1px solid #d9d3e5;background:#f4f1f9;border-radius:0 0 16px 16px;flex-shrink:0">' +
     '<a href="' +
-    dashUrl +
+    esc(dashUrl) +
     '" target="_blank" rel="noopener" style="display:block;text-align:center;background:#5b469a;color:#fff;text-decoration:none;font-size:12px;font-weight:700;padding:10px 12px;border-radius:9px">' +
     'See the evidence in Trusten →' +
     '</a>' +
@@ -411,13 +419,17 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
   var target = document.body || document.documentElement
   if (!target) return 'error:no-body'
   target.appendChild(panel)
+  panel.__trustenCleanup = removeAll
+  panel
+    .querySelector('[aria-label="Close Trusten highlights"]')
+    .addEventListener('click', removeAll)
 
-  document.addEventListener('keydown', function onEsc(e) {
+  function onEsc(e) {
     if (e.key === 'Escape') {
       removeAll()
-      document.removeEventListener('keydown', onEsc)
     }
-  })
+  }
+  document.addEventListener('keydown', onEsc)
 
   return `shown:${patterns.length}`
 }
@@ -431,6 +443,14 @@ function __trustenInjectOverlay(patterns, grade, scanId, serverPort) {
 async function runScan() {
   if (!currentTab) return
 
+  if (!/^https?:\/\//i.test(currentTab.url || '')) {
+    showError(
+      'This page cannot be checked',
+      'Open an http:// or https:// website, then try again. Chrome internal pages cannot be checked.',
+    )
+    return
+  }
+
   showState('loading')
   overlayActive = false
 
@@ -441,12 +461,16 @@ async function runScan() {
   try {
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId: currentTab.id },
-      func: () => ({
-        url: location.href,
-        html: document.documentElement.outerHTML.slice(0, 500_000),
-        text: (document.body?.innerText ?? '').slice(0, 50_000),
-        pageTitle: document.title,
-      }),
+      func: () => {
+        var overlay = document.getElementById('__trusten_live__')
+        if (overlay?.__trustenCleanup) overlay.__trustenCleanup()
+        return {
+          url: location.href,
+          html: document.documentElement.outerHTML.slice(0, 500_000),
+          text: (document.body?.innerText ?? '').slice(0, 50_000),
+          pageTitle: document.title,
+        }
+      },
     })
     pageContent = injection.result
   } catch {
@@ -457,11 +481,14 @@ async function runScan() {
   try {
     // 2a. Preferred: analyze-page (live DOM, sees logged-in state)
     if (pageContent) {
-      const res = await fetch(`${SERVER}/trusten/api/analyze-page`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pageContent),
-      })
+      const res = await fetch(
+        `${settings.serverOrigin}/trusten/api/analyze-page`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pageContent),
+        },
+      )
       if (res.ok) {
         data = await res.json()
       } else if (res.status !== 404) {
@@ -473,11 +500,14 @@ async function runScan() {
 
     // 2b. Fallback: quick-scan (navigates to URL in background tab)
     if (!data) {
-      const scanRes = await fetch(`${SERVER}/trusten/api/quick-scan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      })
+      const scanRes = await fetch(
+        `${settings.serverOrigin}/trusten/api/quick-scan`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        },
+      )
       if (!scanRes.ok) {
         const body = await scanRes.json().catch(() => ({}))
         throw new Error(body.error || `Server error ${scanRes.status}`)
@@ -486,7 +516,7 @@ async function runScan() {
 
       // Fetch full result (patterns, descriptions, selectors)
       const fullRes = await fetch(
-        `${SERVER}/trusten/api/scan/${scanSummary.scanId}`,
+        `${settings.serverOrigin}/trusten/api/scan/${encodeURIComponent(scanSummary.scanId)}`,
       )
       if (!fullRes.ok) throw new Error(`Could not load scan details`)
       const full = await fullRes.json()
@@ -505,12 +535,13 @@ async function runScan() {
     if (err instanceof TypeError && err.message.includes('fetch')) {
       showError(
         'Trusten is not available right now',
-        'Open Trusten on this computer, then try again.',
+        `Check that Trusten is running at ${settings.serverOrigin}, and that the extension has permission to connect in its settings.`,
       )
     } else {
       showError(
         'We could not finish this check',
-        'Please try again. If it still does not work, open Trusten for more help.',
+        err.message ||
+          'Please try again. If it still does not work, open Trusten for more help.',
       )
     }
     return
@@ -529,7 +560,12 @@ async function toggleOverlay() {
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId: currentTab.id },
       func: __trustenInjectOverlay,
-      args: [scanResult.patterns, scanResult.grade, scanResult.scanId, 9200],
+      args: [
+        scanResult.patterns,
+        scanResult.grade,
+        scanResult.scanId,
+        settings.dashboardOrigin,
+      ],
     })
 
     const status = injection?.result ?? ''
@@ -561,6 +597,19 @@ async function toggleOverlay() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
+  try {
+    settings = await loadTrustenSettings()
+  } catch (err) {
+    showError('Check your Trusten connection', err.message)
+    document
+      .getElementById('btnSettings')
+      .addEventListener('click', () => chrome.runtime.openOptionsPage())
+    return
+  }
+  document.getElementById('dashboardLink').href = `${settings.dashboardOrigin}/`
+  document
+    .getElementById('btnSettings')
+    .addEventListener('click', () => chrome.runtime.openOptionsPage())
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   currentTab = tab
 

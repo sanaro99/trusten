@@ -81,6 +81,7 @@ interface PageEntry {
   frameDir: string | null
   frameCount: number
   policyViolation: Error | null
+  httpStatus?: number
 }
 
 /** Assemble a session mp4 from saved screencast jpeg frames via ffmpeg. */
@@ -190,7 +191,10 @@ export class PuppeteerDriver implements BrowserDriver {
           }
           await request.continue()
         } catch (error) {
-          if (request.isNavigationRequest()) {
+          if (
+            request.isNavigationRequest() &&
+            request.frame() === page.mainFrame()
+          ) {
             entry.policyViolation =
               error instanceof Error ? error : new Error(String(error))
           }
@@ -205,6 +209,11 @@ export class PuppeteerDriver implements BrowserDriver {
 
     // Capture network responses (third-party trackers, pricing/XHR calls, etc.)
     page.on('response', (res) => {
+      if (
+        res.request().isNavigationRequest() &&
+        res.request().frame() === page.mainFrame()
+      )
+        entry.httpStatus = res.status()
       if (entry.network.length >= MAX_NETWORK_RECORDS) return
       try {
         const req = res.request()
@@ -339,13 +348,19 @@ export class PuppeteerDriver implements BrowserDriver {
       ? await this.authorizeTarget(url)
       : { url }
     try {
-      await page.goto(target.url, {
+      const response = await page.goto(target.url, {
         waitUntil: 'domcontentloaded',
         timeout: 30_000,
       })
+      if (response && response.status() >= 400)
+        throw new ScanIncompleteError(
+          `Target page returned HTTP ${response.status()}`,
+        )
     } catch (err) {
       if (entry.policyViolation) throw entry.policyViolation
       logger.warn('Trusten Puppeteer: goto failed', { url, error: String(err) })
+      if (err instanceof ScanIncompleteError) throw err
+      throw new ScanIncompleteError('The target page did not finish loading.')
     }
   }
 
@@ -364,7 +379,13 @@ export class PuppeteerDriver implements BrowserDriver {
       } catch {
         /* unavailable mid-navigation */
       }
-      infos.push({ pageId, url, title, isActive: true })
+      infos.push({
+        pageId,
+        url,
+        title,
+        isActive: true,
+        httpStatus: e.httpStatus,
+      })
     }
     return infos.sort((a, b) => a.pageId - b.pageId)
   }

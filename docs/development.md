@@ -33,6 +33,10 @@ Do not hand-edit the development schema.
 | Variable | Default | Purpose |
 |---|---|---|
 | `TRUSTEN_PORT` | `9200` | HTTP/WebSocket port |
+| `TRUSTEN_API_ORIGIN` | `http://localhost:9200` | Scanner origin for the Vite development proxy |
+| `TRUSTEN_INTERNAL_API_ORIGIN` | — | Private scanner origin for adapter-node API/report forwarding and server-rendered data |
+| `TRUSTEN_REPORTS_DIR` | `~/Desktop/trusten-reports` | Directory for HTML/PDF reports, screenshots, and videos |
+| `ORIGIN` | — | Public web origin for adapter-node, including the actual HTTP(S) scheme |
 | `DATABASE_URL` | — | PostgreSQL connection string (required outside isolated tests) |
 | `PUBLIC_TURNSTILE_SITE_KEY` | — | Public web key; absence disables the widget locally |
 | `TRUSTEN_TURNSTILE_MODE` | `test` outside production | `enforce`, `test`, or `off` verification mode |
@@ -48,8 +52,16 @@ Do not hand-edit the development schema.
 | `TRUSTEN_RATE_WINDOW_MS` | `60000` | Per-domain scan rate-limit window |
 | `NODE_ENV` | — | `development` enables pretty logs |
 
-LLM is **optional**: without a key, deterministic detection and the fixed-workflow fallback
-still run. The LLM improves hybrid detection, deep-scan navigation, and agentic discovery.
+LLM is **optional**: without a configured model, deterministic detection and discovery
+from the website's actual public links and search forms still run. The LLM improves
+hybrid detection and navigation through less predictable interfaces. Unavailable
+visual checks are identified in results.
+
+When running adapter-node directly, set `ORIGIN` to the public web URL (for example
+`http://localhost:3000` locally) and `TRUSTEN_INTERNAL_API_ORIGIN` to the scanner's
+private origin. Browser API requests and evidence/report downloads then work on the
+web origin. Live video also needs the Vite WebSocket proxy or the deployed Caddy
+reverse proxy; HTTP progress polling continues when live video is unavailable.
 
 ## Project layout & conventions
 
@@ -73,6 +85,25 @@ curl -s -X POST localhost:9200/trusten/api/audit \
 
 Reports/screenshots/videos land in `~/Desktop/trusten-reports/`; relational
 state is stored in the PostgreSQL database selected by `DATABASE_URL`.
+Set `TRUSTEN_REPORTS_DIR` to override that artifact directory.
+
+Real Chromium regressions are opt-in:
+
+```powershell
+$env:TRUSTEN_BROWSER_TESTS = '1'
+$env:PUPPETEER_EXECUTABLE_PATH = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+bun test apps/server/src/trusten/deep-scan.browser.test.ts
+
+# Use a disposable PostgreSQL database; these tests create and delete their fixtures.
+$env:TRUSTEN_TEST_DATABASE_URL = 'postgresql://trusten@localhost:55433/trusten_verification'
+$env:TRUSTEN_IGNORE_ROBOTS = '1'
+$env:TRUSTEN_RATE_WINDOW_MS = '1'
+bun test apps/server/src/trusten/dashboard/audit.browser.test.ts
+node --test apps/trusten-ext/browser.test.mjs
+```
+
+These navigation fixtures run without a model. Leave provider keys unset and keep
+`TRUSTEN_LLM_PROVIDER` unset for deterministic regression runs.
 
 For local development, omit `PUBLIC_TURNSTILE_SITE_KEY` and use the server's
 explicit non-production disabled/test mode. To exercise the complete browser

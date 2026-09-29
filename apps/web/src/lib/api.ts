@@ -21,7 +21,10 @@ import type { ZodType, z } from 'zod'
 
 const BASE = '/trusten/api'
 
-type Fetcher = typeof globalThis.fetch
+type Fetcher = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
 
 export class ApiError extends Error {
   constructor(
@@ -34,7 +37,16 @@ export class ApiError extends Error {
   }
 }
 
+export class VisitorCheckError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'VisitorCheckError'
+  }
+}
+
 export function publicScanErrorMessage(error: unknown): string {
+  if (error instanceof VisitorCheckError)
+    return 'We could not complete the visitor check. Please try again.'
   if (error instanceof ApiError && error.code === 'TARGET_REJECTED')
     return 'That address cannot be checked safely. Try a public website.'
   if (error instanceof ApiError && error.code === 'SCAN_INCOMPLETE')
@@ -45,7 +57,34 @@ export function publicScanErrorMessage(error: unknown): string {
     return 'The public demo is busy. Please try again in a moment.'
   if (error instanceof ApiError && error.code?.startsWith('BOT_'))
     return 'We could not complete the visitor check. Please try again.'
+  if (error instanceof ApiError && error.status === 400)
+    return 'Please enter a valid website address and try again.'
+  if (error instanceof ApiError && error.status === 403)
+    return 'That website does not allow this check. Try a different website.'
+  if (error instanceof ApiError && error.status === 404)
+    return 'This check is no longer available. Start a new check.'
+  if (error instanceof ApiError && error.code === 'SERVICE_UNAVAILABLE')
+    return 'The checking service is temporarily unavailable. Try again in a moment.'
+  if (error instanceof ApiError && error.status >= 500)
+    return 'The checking service could not complete this check. Try again or check a different URL.'
   return 'We could not reach the checking service. Try again in a moment.'
+}
+
+async function responseError(res: Response): Promise<ApiError> {
+  const body: unknown = await res.json().catch(() => null)
+  const code =
+    body !== null &&
+    typeof body === 'object' &&
+    'code' in body &&
+    typeof body.code === 'string'
+      ? body.code
+      : undefined
+  const retryAfter = Number(res.headers.get('retry-after'))
+  return new ApiError(
+    res.status,
+    code,
+    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+  )
 }
 
 /**
@@ -65,7 +104,7 @@ async function get<S extends ZodType>(
       ? { Authorization: `Bearer ${capabilityToken}` }
       : undefined,
   })
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`)
+  if (!res.ok) throw await responseError(res)
   return schema.parse(await res.json())
 }
 
@@ -86,17 +125,7 @@ async function post<S extends ZodType>(
     },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      code?: string
-    } | null
-    const retryAfter = Number(res.headers.get('retry-after'))
-    throw new ApiError(
-      res.status,
-      body?.code,
-      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
-    )
-  }
+  if (!res.ok) throw await responseError(res)
   return schema.parse(await res.json())
 }
 

@@ -18,6 +18,8 @@ export interface DriverPageInfo {
   url: string
   title: string
   isActive?: boolean
+  /** HTTP status of the current main document, when available. */
+  httpStatus?: number
 }
 
 export interface ScreenshotResult {

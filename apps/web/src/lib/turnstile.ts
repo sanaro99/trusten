@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/public'
+import { VisitorCheckError } from './api'
 
 const SCRIPT_ID = 'trusten-turnstile-script'
 const SCRIPT_SRC =
@@ -99,7 +100,13 @@ export async function getTurnstileToken(
   const sitekey = env.PUBLIC_TURNSTILE_SITE_KEY?.trim()
   if (!sitekey) return undefined
 
-  const turnstile = await loadTurnstile()
+  const turnstile = await loadTurnstile().catch((error: unknown) => {
+    throw new VisitorCheckError(
+      error instanceof Error
+        ? error.message
+        : 'The bot check could not be loaded',
+    )
+  })
   return new Promise<string>((resolve, reject) => {
     let widgetId: string | undefined
     let settled = false
@@ -119,7 +126,7 @@ export async function getTurnstileToken(
       if (timeoutId) clearTimeout(timeoutId)
       removeWidget()
       if ('token' in result) resolve(result.token)
-      else reject(result.error)
+      else reject(new VisitorCheckError(result.error.message))
     }
 
     try {

@@ -31,9 +31,24 @@ describe('getReportSummary', () => {
     ).toBe(true)
   })
 
-  test('keeps the normal verdict for a well-covered journey', () => {
+  test('does not give a conclusive grade when only the final checkout step was blocked', () => {
+    const summary = getReportSummary(
+      'A',
+      0,
+      steps(['reached', 'observed', 'reached', 'reached', 'not-reached']),
+    )
+
+    expect(summary.limited).toBe(true)
+    expect(summary.completed).toBe(4)
+    expect(summary.total).toBe(5)
+    expect(summary.headline).not.toMatch(/fair|good|grade/i)
+    expect(summary.sub).toContain('4 of 5 journey steps')
+    expect(summary.sub).toContain('not conclusive')
+  })
+
+  test('keeps the normal verdict for a fully completed journey', () => {
     expect(
-      getReportSummary('B', 1, steps(['reached', 'observed', 'skipped']))
+      getReportSummary('B', 1, steps(['reached', 'observed', 'reached']))
         .limited,
     ).toBe(false)
   })

@@ -15,6 +15,7 @@ import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
 import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
+import { capturePageState } from './browser/page-state'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
 import { ScanIncompleteError } from './scan-incomplete-error'
@@ -73,7 +74,10 @@ export class TrustenEngine {
       process.env.HOME ??
       executionDir ??
       process.cwd()
-    this.reportsDir = reportsDir ?? `${home}/Desktop/trusten-reports`
+    this.reportsDir =
+      reportsDir ??
+      process.env.TRUSTEN_REPORTS_DIR ??
+      `${home}/Desktop/trusten-reports`
   }
 
   /**
@@ -92,21 +96,7 @@ export class TrustenEngine {
       await this.waitForPageLoad(pageId)
 
       const context = await this.captureContext(pageId)
-      if (
-        !/^https?:\/\//i.test(context.url) ||
-        isAccessChallengeUrl(context.url) ||
-        !/<body[\s>]/i.test(context.domSnapshot) ||
-        !context.visibleText.trim() ||
-        !context.screenshotBase64 ||
-        (context.visibleText.length < 2500 &&
-          /^(just a moment|access denied|security check|verify (you are|you're) human|captcha|robot check)/i.test(
-            context.pageTitle.trim(),
-          ))
-      ) {
-        throw new ScanIncompleteError(
-          'Could not capture a usable page for this quick check. Please try again or check a different URL.',
-        )
-      }
+      this.assertUsableContext(context)
 
       const [fs, path] = await Promise.all([
         import('node:fs'),
@@ -159,8 +149,16 @@ export class TrustenEngine {
         ],
       }
 
+      const report = await this.generateReport(
+        result,
+        'Quick website check',
+        pageId,
+      )
+      result.pdfPath = report.pdfPath
+      result.htmlPath = report.htmlPath
+
       // A quick result is only complete when the result page can load it.
-      await this.store.saveScan(result)
+      await this.persistScan(result)
 
       logger.info('Trusten quick scan complete', {
         url,
@@ -220,17 +218,13 @@ export class TrustenEngine {
       })
       const pid = pageId
       await this.waitForPageLoad(pid)
+      this.assertUsableContext(await this.captureContext(pid))
 
-      // ── Pre-flight: dismiss cookie banners and interfering modals ──────
       const fakeProfile = generateFakeProfile()
-      const cookieStatus = await dismissCookieBanners(this.browser, pid)
-      if (cookieStatus !== 'no-banner') await sleep(600)
-      const modalsDismissed = await dismissInterferingModals(this.browser, pid)
-      if (modalsDismissed > 0) await sleep(600)
-      logger.info('Trusten pre-flight complete', {
-        cookieStatus,
-        modalsDismissed,
-      })
+      // Consent workflows must inspect the original banner and preference path.
+      // Other journeys clear obstructions only when navigation begins.
+      const preserveConsent = workflow.id === 'cookie_consent'
+      let obstructionsCleared = false
 
       // Navigation strategy: deterministic Puppeteer actions first (fast); the
       // LLM navigator is only a fallback when a step does not advance. Where
@@ -270,15 +264,50 @@ export class TrustenEngine {
           })
         }
 
-        const beforeUrl =
-          (await this.browser.listPages()).find((p) => p.pageId === pid)?.url ??
-          url
+        if (
+          expectsNav &&
+          !funnelBroken &&
+          !preserveConsent &&
+          !obstructionsCleared
+        ) {
+          const context = await this.captureContext(pid)
+          this.assertUsableContext(context)
+          const preflightPatterns = await this.runAllAnalyzers(context)
+          allPatterns.push(...preflightPatterns)
+          if (preflightPatterns.length > 0) {
+            const evidence = await this.captureStepScreenshot(
+              pid,
+              screenshotDir,
+              0,
+              workflow.steps.length,
+              'Inspect the initial page before clearing overlays',
+              preflightPatterns,
+            )
+            workflowSteps.push({
+              stepNumber: 0,
+              action: 'Inspect the initial page before clearing overlays',
+              url: context.url,
+              screenshot: '',
+              screenshotPath: evidence.screenshotPath,
+              patternsFound: preflightPatterns,
+              timestamp: new Date().toISOString(),
+              status: 'observed',
+              navAdvanced: false,
+            })
+          }
+          await dismissCookieBanners(this.browser, pid)
+          await dismissInterferingModals(this.browser, pid)
+          obstructionsCleared = true
+        }
+        const before = await capturePageState(this.browser, pid)
+        const beforeUrl = before.url || url
 
         let status: WorkflowStepStatus | undefined
         let navAdvanced = false
+        let deterministicActionPerformed = false
         let navReason = ''
 
-        if (funnelBroken && expectsNav) {
+        if (funnelBroken && !stepDef.navigate) {
           // A prior funnel step never advanced — running this dependent step
           // would just re-analyze the same (earlier) page. Skip it honestly.
           status = 'skipped'
@@ -296,18 +325,23 @@ export class TrustenEngine {
           // Funnel step: try the FAST deterministic path first; only fall back
           // to the LLM navigator if the deterministic action did not advance.
           let advancedNow = false
+          if (stepDef.navigate) funnelBroken = false
           if (hasDeterministic) {
-            await this.executeStepNavigation(pid, stepDef, url)
+            deterministicActionPerformed = await this.executeStepNavigation(
+              pid,
+              stepDef,
+              url,
+            )
             if (this.browser.waitForIdle) {
               await this.browser
                 .waitForIdle(pid, { timeout: 5000 })
                 .catch(() => undefined)
             }
             await sleep(400)
-            const midUrl =
-              (await this.browser.listPages()).find((p) => p.pageId === pid)
-                ?.url ?? beforeUrl
-            advancedNow = normalizeUrlKey(midUrl) !== normalizeUrlKey(beforeUrl)
+            const midState = await capturePageState(this.browser, pid)
+            advancedNow =
+              deterministicActionPerformed &&
+              midState.signature !== before.signature
             navReason = advancedNow
               ? 'Deterministic navigation'
               : 'Deterministic action did not advance'
@@ -326,7 +360,11 @@ export class TrustenEngine {
               Math.min(Math.floor(stepDef.timeout / 6), 6),
               journeyLog,
             )
-            navAdvanced = navResult.advanced
+            navAdvanced = navResult.success && navResult.advanced
+            if (!navResult.success) {
+              status = 'not-reached'
+              funnelBroken = true
+            }
             navReason = `LLM fallback: ${navResult.reason}`
             journeyLog.push(
               `Step ${stepNumber} (${stepDef.id}): ${navResult.reason.slice(0, 100)}`,
@@ -362,11 +400,14 @@ export class TrustenEngine {
         }
         await sleep(800)
 
-        const pages = await this.browser.listPages()
-        const currentUrl = pages.find((p) => p.pageId === pid)?.url ?? beforeUrl
-        const urlChanged =
-          normalizeUrlKey(currentUrl) !== normalizeUrlKey(beforeUrl)
-        const advanced = navAdvanced || urlChanged
+        const currentState = await capturePageState(this.browser, pid)
+        const currentUrl = currentState.url || beforeUrl
+        const advanced =
+          expectsNav &&
+          status === undefined &&
+          (navAdvanced ||
+            (deterministicActionPerformed &&
+              currentState.signature !== before.signature))
 
         // Resolve the step's outcome status if not already decided.
         if (status === undefined) {
@@ -384,19 +425,29 @@ export class TrustenEngine {
         // current page). Skipped / no-navigation steps would just re-analyze an
         // already-covered page and inflate duplicate findings.
         let stepPatterns: DetectedPattern[] = []
-        if (status !== 'skipped' && status !== 'no-navigation') {
-          const urlKey = normalizeUrlKey(currentUrl)
+        let visualCheckAvailable = false
+        if (status === 'reached' || status === 'observed') {
+          const urlKey = currentState.signature
           const isNewPage = !analyzedUrls.has(urlKey)
           analyzedUrls.add(urlKey)
 
           const context = await this.captureContext(pid)
+          this.assertUsableContext(context)
           // Run the costly LLM-backed visual pass only the first time we see a
           // page; on repeats, deterministic analyzers only.
           const names = isNewPage
             ? stepDef.analyzersToRun
             : stepDef.analyzersToRun.filter((n) => n !== 'VisualAnalyzer')
           const targetAnalyzers = getAnalyzers(names)
-          stepPatterns = await this.runAnalyzers(targetAnalyzers, context)
+          stepPatterns = await this.runAnalyzers(
+            targetAnalyzers,
+            context,
+            (analyzer, result) => {
+              if (analyzer.name === 'VisualAnalyzer')
+                visualCheckAvailable =
+                  result.metadata?.visualCheckAvailable === true
+            },
+          )
           allPatterns.push(...stepPatterns)
         }
 
@@ -427,14 +478,16 @@ export class TrustenEngine {
 
         // ── Screenshot: annotate, capture, save ──────────────────────────
         const { screenshotB64, screenshotPath } =
-          await this.captureStepScreenshot(
-            pid,
-            screenshotDir,
-            stepNumber,
-            workflow.steps.length,
-            stepDef.instruction,
-            stepPatterns,
-          )
+          status === 'skipped' || status === 'no-navigation'
+            ? { screenshotB64: '', screenshotPath: '' }
+            : await this.captureStepScreenshot(
+                pid,
+                screenshotDir,
+                stepNumber,
+                workflow.steps.length,
+                stepDef.instruction,
+                stepPatterns,
+              )
 
         workflowSteps.push({
           stepNumber,
@@ -447,6 +500,7 @@ export class TrustenEngine {
           status,
           navAdvanced: advanced,
           navReason,
+          visualCheckAvailable,
         } as WorkflowStep & { screenshotPath: string })
 
         logger.info(`Trusten step ${stepNumber} done`, {
@@ -485,6 +539,10 @@ export class TrustenEngine {
         /* video recording is best-effort */
       }
 
+      // Flush recorded evidence before making the result available to readers.
+      await this.browser.closePage(pid)
+      pageId = null
+
       // Generate HTML + PDF report, persist to DB
       const { pdfPath, htmlPath } = await this.generateReport(
         result,
@@ -510,6 +568,43 @@ export class TrustenEngine {
         await this.browser.closePage(pageId).catch(() => undefined)
       }
     }
+  }
+
+  /**
+   * Publish one result covering all audited journeys, with their original proof.
+   */
+  async summarizeAudit(
+    url: string,
+    scans: ScanResult[],
+    failedSteps: WorkflowStep[] = [],
+  ): Promise<ScanResult> {
+    if (scans.length === 0)
+      throw new ScanIncompleteError('No pages could be checked.')
+    const patterns = dedupePatterns(scans.flatMap((scan) => scan.patterns))
+    const workflowSteps = [
+      ...scans.flatMap((scan) => scan.workflowSteps ?? []),
+      ...failedSteps,
+    ].map((step, index) => ({
+      ...step,
+      stepNumber: index + 1,
+    }))
+    const result: ScanResult = {
+      id: `scan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      url,
+      domain: new URL(url).hostname,
+      scanType: 'deep',
+      startedAt: scans[0].startedAt,
+      completedAt: new Date().toISOString(),
+      patterns,
+      score: calculateScore(patterns),
+      workflowSteps,
+      videoPath: scans.find((scan) => scan.videoPath)?.videoPath,
+    }
+    const report = await this.generateReport(result, 'Full website check', 0)
+    result.pdfPath = report.pdfPath
+    result.htmlPath = report.htmlPath
+    await this.persistScan(result, 'full-audit')
+    return result
   }
 
   /**
@@ -653,6 +748,10 @@ export class TrustenEngine {
   private async captureContext(pageId: number): Promise<AnalyzerContext> {
     const pages = await this.browser.listPages()
     const pageInfo = pages.find((p) => p.pageId === pageId)
+    if (pageInfo?.httpStatus && pageInfo.httpStatus >= 400)
+      throw new ScanIncompleteError(
+        `Target page returned HTTP ${pageInfo.httpStatus}`,
+      )
     const url = pageInfo?.url ?? ''
     const pageTitle = pageInfo?.title ?? ''
 
@@ -741,6 +840,23 @@ export class TrustenEngine {
     }
   }
 
+  private assertUsableContext(context: AnalyzerContext): void {
+    if (
+      !/^https?:\/\//i.test(context.url) ||
+      isAccessChallengeUrl(context.url) ||
+      !/<body[\s>]/i.test(context.domSnapshot) ||
+      !context.visibleText.trim() ||
+      !context.screenshotBase64 ||
+      (context.visibleText.length < 2500 &&
+        /^(just a moment|access denied|security check|verify (you are|you're) human|captcha|robot check)/i.test(
+          context.pageTitle.trim(),
+        ))
+    )
+      throw new ScanIncompleteError(
+        'Could not capture a usable page for this check. Please try again or check a different URL.',
+      )
+  }
+
   private async runAllAnalyzers(
     context: AnalyzerContext,
   ): Promise<DetectedPattern[]> {
@@ -764,7 +880,45 @@ export class TrustenEngine {
       const key = (p: DetectedPattern) =>
         `${p.category}|${p.element?.selector ?? ''}|${p.description}`
       const seen = new Set(live.map(key))
-      const extra = cached.patterns
+      // Older advertising detectors matched ordinary classes such as
+      // "page-header". Require the current detector to support each cached
+      // ad's saved evidence, rather than undoing a clean live scan with an
+      // obsolete claim. Other deep-journey findings keep their usual cache path.
+      const adAnalyzer = getAnalyzers(['NaggingAnalyzer'])[0]
+      const validated = await Promise.all(
+        cached.patterns.map(async (pattern) => {
+          if (pattern.category !== 'disguised_ads') return pattern
+          const elementHtml = pattern.element?.html?.trim() || ''
+          const html = [pattern.evidence?.domSnapshot, elementHtml].find(
+            (source) =>
+              typeof source === 'string' && /<[a-z][^>]*>/i.test(source),
+          )
+          if (!html || !adAnalyzer) return null
+          const result = await adAnalyzer.analyze({
+            url: pattern.url || url,
+            pageTitle: pattern.pageTitle || '',
+            domSnapshot: html,
+            visibleText: '',
+            screenshotBase64: '',
+            networkRequests: [],
+            cookies: [],
+          })
+          return result.patterns.some(
+            (candidate) =>
+              candidate.category === 'disguised_ads' &&
+              (!elementHtml ||
+                (
+                  candidate.evidence?.domSnapshot ||
+                  candidate.element?.html ||
+                  ''
+                ).includes(elementHtml)),
+          )
+            ? pattern
+            : null
+        }),
+      )
+      const extra = validated
+        .filter((p): p is DetectedPattern => p !== null)
         .filter((p) => !seen.has(key(p)))
         .map((p) => ({
           ...p,
@@ -835,7 +989,25 @@ export class TrustenEngine {
     const pdfPath = path.join(this.reportsDir, `${slug}.pdf`)
 
     // Write the HTML report
-    const html = generateReportHtml(result, workflowName)
+    const reportSteps = result.workflowSteps?.map((step) => {
+      if (!step.screenshotPath) return step
+      try {
+        return {
+          ...step,
+          screenshot: fs.readFileSync(step.screenshotPath).toString('base64'),
+        }
+      } catch (err) {
+        logger.warn('Trusten: report screenshot unavailable', {
+          path: step.screenshotPath,
+          error: String(err),
+        })
+        return { ...step, screenshot: '' }
+      }
+    })
+    const html = generateReportHtml(
+      { ...result, workflowSteps: reportSteps },
+      workflowName,
+    )
     fs.writeFileSync(htmlPath, html, 'utf8')
 
     // Generate PDF by opening the HTML file in a hidden page and printing
@@ -870,18 +1042,12 @@ export class TrustenEngine {
     result: ScanResult,
     workflowId?: string,
   ): Promise<void> {
-    try {
-      await this.store.saveScan(result, {
-        workflowId,
-        pdfPath: result.pdfPath ?? undefined,
-        htmlPath: result.htmlPath ?? undefined,
-        videoPath: result.videoPath ?? undefined,
-      })
-    } catch (err) {
-      logger.warn('Trusten: failed to persist scan', {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
+    await this.store.saveScan(result, {
+      workflowId,
+      pdfPath: result.pdfPath ?? undefined,
+      htmlPath: result.htmlPath ?? undefined,
+      videoPath: result.videoPath ?? undefined,
+    })
   }
 
   /**
@@ -944,14 +1110,17 @@ export class TrustenEngine {
     pageId: number,
     stepDef: import('./types').WorkflowStepDefinition,
     baseUrl: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let actionPerformed = false
     // 1. Navigate to explicit URL
     if (stepDef.navigate) {
-      const target = stepDef.navigate.startsWith('http')
-        ? stepDef.navigate
-        : stepDef.navigate.replace('{baseUrl}', baseUrl)
+      const target = new URL(
+        stepDef.navigate.replace('{baseUrl}', baseUrl),
+        baseUrl,
+      ).href
       try {
         await this.browser.goto(pageId, target)
+        actionPerformed = true
         await this.waitForPageLoad(pageId)
       } catch (err) {
         logger.warn('Trusten: navigate failed', { target, error: String(err) })
@@ -960,9 +1129,7 @@ export class TrustenEngine {
 
     // 2. Fill the main search box
     if (stepDef.fillSearch) {
-      const query = stepDef.fillSearch
-        .replace(/'/g, "\\'")
-        .replace(/\\/g, '\\\\')
+      const query = JSON.stringify(stepDef.fillSearch)
       // Step 1: try to reveal a hidden search input by clicking search icons/buttons
       const revealScript = `(function() {
         const triggers = [...document.querySelectorAll(
@@ -1001,16 +1168,16 @@ export class TrustenEngine {
             el.focus();
             try {
               const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-              if (nativeSet && nativeSet.set) nativeSet.set.call(el, '${query}');
-              else el.value = '${query}';
-            } catch(_) { el.value = '${query}'; }
+              if (nativeSet && nativeSet.set) nativeSet.set.call(el, ${query});
+              else el.value = ${query};
+            } catch(_) { el.value = ${query}; }
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
             el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
             el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, bubbles: true }));
             el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
             const form = el.closest('form');
-            if (form) { try { form.submit(); } catch(_) {} }
+            if (form) { try { form.requestSubmit(); } catch(_) {} }
             return true;
           }
         }
@@ -1019,6 +1186,7 @@ export class TrustenEngine {
       try {
         const fillResult = await this.browser.evaluate(pageId, fillScript)
         if (fillResult.value === true) {
+          actionPerformed = true
           logger.info('Trusten: filled search', { query: stepDef.fillSearch })
         } else {
           logger.warn('Trusten: no search input found', {
@@ -1044,6 +1212,7 @@ export class TrustenEngine {
           if(r.width<8||r.height<8) return false;
           var href=a.getAttribute('href')||'';
           if(!href||href.charAt(0)==='#'||href.indexOf('javascript')===0||href.indexOf('mailto')===0) return false;
+          try { var target = new URL(href, location.href); if(target.origin !== location.origin) return false; } catch(_) { return false; }
           return !inChrome(a);
         });
         var scored = links.map(function(a){
@@ -1056,12 +1225,13 @@ export class TrustenEngine {
         });
         scored.sort(function(x,y){ return (y.s-x.s)||(x.top-y.top); });
         var pick = scored[0];
-        if(pick && pick.a){ pick.a.click(); return (pick.a.textContent||'').trim().slice(0,60) || (pick.a.getAttribute('href')||true); }
+        if(pick && pick.a){ pick.a.removeAttribute('target'); pick.a.click(); return (pick.a.textContent||'').trim().slice(0,60) || (pick.a.getAttribute('href')||true); }
         return false;
       })()`
       try {
         const result = await this.browser.evaluate(pageId, clickFirstScript)
-        if (result.value !== false && result.value !== null) {
+        if (result.value === true || typeof result.value === 'string') {
+          actionPerformed = true
           logger.info('Trusten: clicked first result', {
             matched: result.value,
           })
@@ -1082,26 +1252,32 @@ export class TrustenEngine {
       !stepDef.navigate &&
       !stepDef.clickFirst
     )
-      return
-    if (candidates.length === 0) return
+      return actionPerformed
+    if (candidates.length === 0) return actionPerformed
 
     for (const text of candidates) {
-      const escaped = text.replace(/'/g, "\\'").replace(/\\/g, '\\\\')
+      const escaped = JSON.stringify(text.toLowerCase())
       const script = `(function() {
-        const lc = '${escaped}'.toLowerCase();
+        const lc = ${escaped};
         const all = [...document.querySelectorAll('a, button, [role="button"], input[type="submit"], input[type="button"], label')];
         // Prefer visible, clickable elements
         const visible = all.filter(el => {
           const rect = el.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         });
-        const match = visible.find(el => (el.textContent?.toLowerCase().trim().includes(lc)) || (el.value?.toLowerCase().includes(lc)));
-        if (match) { match.click(); return match.textContent?.trim().slice(0, 60) || true; }
+        const label = el => (el.getAttribute('aria-label') || el.textContent || el.value || '').toLowerCase().trim();
+        const matches = visible.filter(el => !el.disabled && label(el).includes(lc));
+        matches.sort((a, b) => Number(label(b) === lc) - Number(label(a) === lc) || label(a).length - label(b).length);
+        const match = matches[0];
+        if (match && /place order|pay now|confirm (purchase|payment|cancellation|deletion)|complete purchase|delete account|cancel subscription|cancel membership/i.test(label(match))) return false;
+        if (match && match.closest('form') && match.closest('form').querySelector('input[autocomplete^="cc-"],input[name*="card" i],input[type="password"]')) return false;
+        if (match) { match.removeAttribute('target'); match.click(); return match.textContent?.trim().slice(0, 60) || true; }
         return false;
       })()`
       try {
         const result = await this.browser.evaluate(pageId, script)
-        if (result.value !== false && result.value !== null) {
+        if (result.value === true || typeof result.value === 'string') {
+          actionPerformed = true
           logger.info('Trusten: clicked element', {
             text,
             matched: result.value,
@@ -1113,6 +1289,7 @@ export class TrustenEngine {
         logger.warn('Trusten: click failed', { text, error: String(err) })
       }
     }
+    return actionPerformed
   }
 
   private async waitForPageLoad(pageId: number): Promise<void> {

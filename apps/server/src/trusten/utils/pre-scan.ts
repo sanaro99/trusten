@@ -225,7 +225,7 @@ export async function dismissInterferingModals(
             if (btn) { btn.click(); dismissed++; break; }
           }
           const aria = modal.querySelector('[aria-label="close" i], [aria-label="dismiss" i], [title="close" i]');
-          if (aria && isVisible(aria)) { (aria as HTMLElement).click(); dismissed++; }
+          if (aria && isVisible(aria)) { aria.click(); dismissed++; }
         }
       } catch {}
     }
