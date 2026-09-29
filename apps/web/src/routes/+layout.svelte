@@ -25,7 +25,8 @@ function isCurrent(path: string) {
 			<nav class="navbar-center hidden lg:flex" aria-label="Main navigation">
 				<ul class="menu menu-horizontal gap-1 px-1 font-semibold">
 					<li><a href="/" aria-current={isCurrent('/') ? 'page' : undefined}>Home</a></li>
-					<li><a href="/explore" aria-current={isCurrent('/explore') ? 'page' : undefined}>Explore results</a></li>
+						<li><a href="/explore" aria-current={isCurrent('/explore') ? 'page' : undefined}>Explore results</a></li>
+						<li><a href="/extension" aria-current={isCurrent('/extension') ? 'page' : undefined}>Chrome extension</a></li>
 					<li><a href="/#common-tricks">Common tricks</a></li>
 					<li><a href="/#how-it-works">How it works</a></li>
 				</ul>
@@ -40,6 +41,7 @@ function isCurrent(path: string) {
 					<ul class="menu neo-floating dropdown-content z-40 mt-3 w-64 gap-1 rounded-box p-3 font-semibold" aria-label="Mobile navigation">
 						<li><a href="/" aria-current={isCurrent('/') ? 'page' : undefined} onclick={() => menuOpen = false}>Home</a></li>
 						<li><a href="/explore" aria-current={isCurrent('/explore') ? 'page' : undefined} onclick={() => menuOpen = false}>Explore results</a></li>
+						<li><a href="/extension" aria-current={isCurrent('/extension') ? 'page' : undefined} onclick={() => menuOpen = false}>Chrome extension</a></li>
 						<li><a href="/#common-tricks" onclick={() => menuOpen = false}>Common tricks</a></li>
 						<li><a href="/#how-it-works" onclick={() => menuOpen = false}>How it works</a></li>
 						<li class="mt-2 sm:hidden"><a class="bg-primary text-primary-content" href="/audit" onclick={() => menuOpen = false}>Check a site</a></li>
@@ -66,6 +68,7 @@ function isCurrent(path: string) {
 				<h2 class="mb-1 text-sm font-bold uppercase tracking-wider text-base-content">Check</h2>
 				<a class="link link-hover" href="/explore">Explore results</a>
 				<a class="link link-hover" href="/audit">Run a full check</a>
+				<a class="link link-hover" href="/extension">Install the Chrome extension</a>
 			</nav>
 		</div>
 		<p class="footer-note mt-10 border-t border-base-300 pt-6 text-sm">Trusten shows what it could verify and says clearly when a check could not be completed.</p>

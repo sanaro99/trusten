@@ -36,7 +36,7 @@ import {
   PublicScanAdmissionError,
   type PublicScanAdmissionGrant,
 } from '../security/public-scan-admission'
-import type { ScanWorkflow } from '../types'
+import type { ScanResult, ScanWorkflow, WorkflowStep } from '../types'
 import { checkRateLimit, isAllowedByRobots } from '../utils/guardrails'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
 import { parseBody } from './validate'
@@ -162,7 +162,9 @@ export function createTrustenDashboardRoutes(config: Config) {
     if (!filePath) {
       // Try standard path pattern as fallback
       const home = process.env.USERPROFILE ?? process.env.HOME ?? ''
-      const guessPath = `${home}/Desktop/trusten-reports/screenshots/${id}/step-${step}.jpg`
+      const reportsDir =
+        process.env.TRUSTEN_REPORTS_DIR ?? `${home}/Desktop/trusten-reports`
+      const guessPath = `${reportsDir}/screenshots/${id}/step-${step}.jpg`
       try {
         const fs = await import('node:fs')
         const data = fs.readFileSync(guessPath)
@@ -493,6 +495,7 @@ async function runAuditJob(
   opts: { watch: boolean; mode: 'fixed' | 'discover' },
 ): Promise<void> {
   const scanIds: string[] = []
+  const failedSteps: WorkflowStep[] = []
   const progress = runningJobs.get(jobId)!
 
   await updateAuditJob(jobId, { status: 'running' })
@@ -532,6 +535,7 @@ async function runAuditJob(
     progress.currentStep = 'quick scan'
     publish(jobId, { type: 'progress', action: 'Quick scan of homepage…' })
     const quickResult = await engine.quickScan(url)
+    const results: ScanResult[] = [quickResult]
     scanIds.push(quickResult.id)
 
     for (const workflow of wfList) {
@@ -547,6 +551,7 @@ async function runAuditJob(
           watch: opts.watch,
         })
         scanIds.push(result.id)
+        results.push(result)
         progress.completedWorkflows.push(workflow.id)
         await updateAuditJob(jobId, { scanIds })
         const steps = result.workflowSteps ?? []
@@ -577,9 +582,35 @@ async function runAuditJob(
           workflowId: workflow.id,
           error: String(err),
         })
+        failedSteps.push(
+          ...workflow.steps.map(
+            (step, index): WorkflowStep => ({
+              stepNumber: index + 1,
+              action: step.instruction,
+              url,
+              screenshot: '',
+              patternsFound: [],
+              timestamp: new Date().toISOString(),
+              status: index === 0 ? 'not-reached' : 'skipped',
+              navAdvanced: false,
+              navReason:
+                index === 0
+                  ? 'This journey could not be completed.'
+                  : 'Skipped because an earlier part of this journey failed.',
+            }),
+          ),
+        )
         // Continue with remaining workflows
       }
     }
+
+    if (progress.completedWorkflows.length === 0)
+      throw new ScanIncompleteError(
+        'The website stopped every requested journey. Only the first page could be checked.',
+      )
+    progress.currentStep = 'preparing the complete report'
+    const summary = await engine.summarizeAudit(url, results, failedSteps)
+    scanIds.push(summary.id)
 
     await updateAuditJob(jobId, {
       status: 'done',

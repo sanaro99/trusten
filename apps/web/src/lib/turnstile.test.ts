@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { publicScanErrorMessage } from './api'
 
 const publicEnv: { PUBLIC_TURNSTILE_SITE_KEY?: string } = {}
 mock.module('$env/dynamic/public', () => ({ env: publicEnv }))
@@ -119,6 +120,24 @@ afterEach(() => {
 })
 
 describe('getTurnstileToken', () => {
+  test('reports a failed visitor check separately from a checking-service connection failure', async () => {
+    let options: WidgetOptions | undefined
+    window.turnstile = {
+      render: (_container, nextOptions) => {
+        options = nextOptions
+        return 'failed-widget'
+      },
+      execute: () => {},
+      remove: () => {},
+    }
+    const attempt = getTurnstileToken({} as HTMLElement, 'quick_scan')
+    await flushMicrotasks()
+    options?.['error-callback']()
+    const error = await attempt.catch((error: unknown) => error)
+
+    expect(publicScanErrorMessage(error)).toContain('visitor check')
+  })
+
   test('times out a stalled script, removes it, and permits a later retry', async () => {
     const firstAttempt = getTurnstileToken({} as HTMLElement, 'quick_scan')
     expect(document.scripts).toHaveLength(1)

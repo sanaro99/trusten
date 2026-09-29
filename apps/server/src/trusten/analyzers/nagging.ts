@@ -39,9 +39,45 @@ const DISGUISED_AD_LABELS = [
   /\bnative\s+ad(?:vertisement)?\b/i,
 ]
 
-// Common class patterns used for ad containers that don't make ads obvious
-const AD_CONTAINER_PATTERN =
-  /<(?:div|article|section|aside)[^>]+(?:class|id)="[^"]*(?:ad|ads|advert|banner|dfp|gpt|adsense|sponsored)[^"]*"[^>]*>/gi
+// Match advertising tokens, not substrings such as "ad" inside "header".
+const AD_CONTAINER_TOKEN =
+  /(?:^|[\s_-])(?:ads?|advert|advertisement|advertising|adsense|sponsored|dfp|adslot|adunit)(?=$|[\s_-])/i
+
+function advertisingContainers(
+  html: string,
+): Array<{ html: string; selector: string }> {
+  const source = html.replace(
+    /<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    '',
+  )
+  const containers: Array<{ html: string; selector: string }> = []
+  let coveredUntil = 0
+  for (const opening of source.matchAll(
+    /<(div|article|section|aside)\b[^>]*>/gi,
+  )) {
+    if (opening.index < coveredUntil) continue
+    const attribute = [
+      ...opening[0].matchAll(/\s(class|id)\s*=\s*(["'])(.*?)\2/gi),
+    ].find((match) => AD_CONTAINER_TOKEN.test(match[3]))
+    if (!attribute) continue
+    const tags = new RegExp(`<(/?)${opening[1]}\\b[^>]*>`, 'gi')
+    tags.lastIndex = opening.index + opening[0].length
+    let depth = 1
+    let closing: RegExpExecArray | null
+    while ((closing = tags.exec(source))) {
+      depth += closing[1] ? -1 : 1
+      if (depth !== 0) continue
+      // A disclosure belongs to the complete ad unit, including its children.
+      coveredUntil = tags.lastIndex
+      containers.push({
+        html: source.slice(opening.index, tags.lastIndex),
+        selector: `[${attribute[1]}=${JSON.stringify(attribute[3])}]`,
+      })
+      break
+    }
+  }
+  return containers
+}
 
 // Pop-up/overlay DOM patterns
 const POPUP_PATTERN =
@@ -61,7 +97,7 @@ export class NaggingAnalyzer extends BaseAnalyzer {
 
     patterns.push(
       ...this.detectNagging(text, context.domSnapshot, context),
-      ...this.detectDisguisedAds(text, context.domSnapshot, context),
+      ...this.detectDisguisedAds(context.domSnapshot, context),
       ...this.detectTinyFontSponsored(context.domSnapshot, context),
     )
 
@@ -163,49 +199,23 @@ export class NaggingAnalyzer extends BaseAnalyzer {
       }
     }
 
-    // Also check for CSS class-based tiny font patterns (no inline style, but class name suggests small label)
-    const smallLabelPattern =
-      /<[^>]+class="[^"]*(?:sponsored-tag|ad-label|ad-badge|promo-tag|native-tag)[^"]*"[^>]*>([^<]{1,60})<\/[^>]+>/gi
-    const classMatches = [...html.matchAll(smallLabelPattern)]
-    for (const m of classMatches) {
-      const text = m[1] ?? ''
-      if (AD_WORDS.test(text) || text.trim().length < 20) {
-        return [
-          this.buildPattern({
-            category: DarkPatternCategory.DISGUISED_ADS,
-            severity: 'medium',
-            confidence: 0.75,
-            description: `Ad disclosure label styled to blend in: "${text.trim()}". The disclosure uses a class name designed to minimize visual prominence, making it easy for users to miss that the content is paid/sponsored.`,
-            url: context.url,
-            pageTitle: context.pageTitle,
-            element: {
-              text: text.trim(),
-              html: m[0].slice(0, 200),
-              selector:
-                '[class*=sponsored-tag],[class*=ad-label],[class*=ad-badge],[class*=promo-tag]',
-            },
-            evidence: { domSnapshot: m[0].slice(0, 300) },
-          }),
-        ]
-      }
-    }
-
     return []
   }
 
   private detectDisguisedAds(
-    text: string,
     html: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
     const patterns: DetectedPattern[] = []
 
     // Look for ad containers with labels
-    const adContainers = this.findElements(html, AD_CONTAINER_PATTERN)
+    const adContainers = advertisingContainers(html)
 
     if (adContainers.length > 0) {
-      for (const container of adContainers.slice(0, 2)) {
-        const containerText = container.text
+      for (const container of adContainers) {
+        const containerText = this.extractVisibleText(container.html)
+        if (!containerText && !/<(?:img|iframe|video)\b/i.test(container.html))
+          continue
         const hasAdLabel = DISGUISED_AD_LABELS.some((p) =>
           p.test(containerText),
         )
@@ -217,37 +227,20 @@ export class NaggingAnalyzer extends BaseAnalyzer {
               category: DarkPatternCategory.DISGUISED_ADS,
               severity: 'high',
               confidence: 0.72,
-              description: `Disguised ad detected: an advertising container was found without a clear "Ad", "Sponsored", or "Advertisement" label visible to users. This violates FTC native advertising guidelines.`,
+              description: `Possible unlabeled advertising: a populated advertising container has no clear "Ad", "Sponsored", or "Advertisement" disclosure in its content.`,
               url: context.url,
               pageTitle: context.pageTitle,
               element: {
                 text: containerText.slice(0, 150),
                 html: container.html.slice(0, 300),
-                selector: '[class*=ad],[class*=ads],[class*=sponsored]',
+                selector: container.selector,
               },
               evidence: { domSnapshot: container.html.slice(0, 500) },
             }),
           )
+          if (patterns.length >= 2) break
         }
       }
-    }
-
-    // Check for ad labels in text that suggest ads are present
-    const adLabelMatches = this.findKeywordMatches(text, DISGUISED_AD_LABELS)
-    if (adLabelMatches.length > 0) {
-      // Ads are labeled — lower severity but flag for review
-      patterns.push(
-        this.buildPattern({
-          category: DarkPatternCategory.DISGUISED_ADS,
-          severity: 'low',
-          confidence: 0.6,
-          description: `Advertising content detected (labeled). Verify that ad labels are visually distinct from editorial content and not styled to blend in.`,
-          url: context.url,
-          pageTitle: context.pageTitle,
-          element: { text: adLabelMatches[0].context, html: '', selector: '' },
-          evidence: { domSnapshot: adLabelMatches[0].context },
-        }),
-      )
     }
 
     return patterns

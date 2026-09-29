@@ -394,7 +394,7 @@ export const PRICING_WORKFLOW: ScanWorkflow = {
 
 /**
  * Comprehensive workflow: full end-to-end audit that handles cookie banners,
- * clears interfering modals, registers with fake credentials, then traces
+ * clears interfering modals, inspects public signup forms, then traces
  * the complete shopping journey from search through checkout.
  *
  * aiGoal strings may contain {{placeholder}} variables (firstName, lastName,
@@ -405,7 +405,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
   id: 'comprehensive',
   name: 'Comprehensive Dark Pattern Audit',
   description:
-    'Full end-to-end audit: documents cookie consent design, clears interfering popups, registers with fake credentials, then traces the complete shopping journey (search → product → cart → checkout). Captures dark patterns at every stage.',
+    'Full audit: documents cookie consent design, inspects signup forms, then traces the shopping journey (search → product → cart → checkout) without submitting accounts or payments. Captures dark patterns at every stage.',
   steps: [
     {
       id: 'cookie-banner',
@@ -442,10 +442,17 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'signup-form',
       expectsNavigation: true,
+      clickText: [
+        'sign up',
+        'register',
+        'create account',
+        'join',
+        'get started',
+      ],
       instruction:
-        'Find the signup or registration page and fill in the form using generated fake test credentials.',
+        'Find the public signup or registration form and inspect its required fields and consent choices.',
       aiGoal:
-        'Find and click "Sign Up", "Register", "Create Account", "Join", or "Get started". On the registration form, fill in required fields using these test credentials — First name: {{firstName}}, Last name: {{lastName}}, Email: {{email}}, Password: {{password}}, Phone (if asked): {{phone}}. For any other required fields (date of birth, username, address), use realistic fake values. Do NOT check any marketing consent checkboxes — leave them unchecked. After filling all required fields, submit the form by clicking "Create Account", "Sign Up", or equivalent. If a CAPTCHA, SMS verification, or email confirmation gate appears, stop and mark done — that is the friction point we are documenting.',
+        'Navigate to the public registration form using a Sign Up, Register, Create Account, Join, or Get started link. Inspect required versus optional fields, preselected marketing consent, and subscription terms. Do not fill or submit the form, create an account, or pass verification gates. Mark done when the form or access gate is visible.',
       analyzersToRun: [
         'ForcedActionAnalyzer',
         'PreselectionAnalyzer',
@@ -460,9 +467,9 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'post-signup',
       instruction:
-        'Handle post-registration screens — onboarding flows, email prompts, upsell offers, or forced app installs.',
+        'Inspect signup disclosures, upsell offers, and any visible access gates without submitting registration.',
       aiGoal:
-        'After signup you may land on: an onboarding wizard (skip optional steps), a "verify your email" screen (mark done — note as friction), an upsell or upgrade prompt (note it as a dark pattern if it is the very first post-signup screen), or the main dashboard. Skip any optional onboarding steps. If an upgrade/premium prompt blocks the page, note it and mark done.',
+        'Review the visible signup form for disclosures, upsell prompts, required app installation, or access gates. Do not create an account or submit registration. Mark done after inspecting the visible state.',
       analyzersToRun: [
         'NaggingAnalyzer',
         'ForcedActionAnalyzer',
@@ -477,6 +484,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'search-product',
       expectsNavigation: true,
+      navigate: '{baseUrl}',
       fillSearch: 'shirt',
       instruction:
         "Use the site's main search or browse to find a relevant product or service.",

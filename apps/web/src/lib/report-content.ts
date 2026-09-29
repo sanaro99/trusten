@@ -19,7 +19,7 @@ export function getReportSummary(
 ): ReportSummary {
   const completed = completedJourneySteps(steps)
   const total = steps.length
-  const limited = total > 0 && completed / total < 0.5
+  const limited = total > 0 && completed < total
   if (limited) {
     return {
       limited,

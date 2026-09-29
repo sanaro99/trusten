@@ -1,12 +1,16 @@
 <script lang="ts">
 import type { ScanDetail } from '@trusten/shared/api'
-import { gradeHeadline } from '@trusten/ui/content'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
 import { onDestroy } from 'svelte'
-import { api, publicScanErrorMessage } from '$lib/api'
+import { ApiError, api, publicScanErrorMessage } from '$lib/api'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
 import { splitFindings } from '$lib/findings'
-import { completedAuditResultId, createLiveScan } from '$lib/live.svelte'
+import {
+  completedAuditResultId,
+  createLiveScan,
+  pollAuditStatus,
+} from '$lib/live.svelte'
+import { getReportSummary } from '$lib/report-content'
 import { getTurnstileToken } from '$lib/turnstile'
 
 let url = $state('')
@@ -109,22 +113,17 @@ async function start(event: SubmitEvent) {
 }
 
 async function waitForResult(jobId: string, capabilityToken: string) {
-  while (true) {
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    const status = await api
-      .getAuditStatus(jobId, capabilityToken)
-      .catch(() => null)
-    if (!status) continue
-    if (status.status === 'done' && status.scanIds.length > 0) {
-      const resultId = completedAuditResultId(status.scanIds)
-      if (resultId) result = await api.getScan(resultId)
-      return
-    }
-    if (status.status === 'failed') {
-      problem = 'The website stopped the check before it could finish.'
-      live.fail(problem)
-      return
-    }
+  const status = await pollAuditStatus(
+    () => api.getAuditStatus(jobId, capabilityToken),
+    (status) => live.update(status),
+  )
+  if (status.status === 'done') {
+    const resultId = completedAuditResultId(status.scanIds)
+    if (!resultId) throw new ApiError(422, 'SCAN_INCOMPLETE')
+    result = await api.getScan(resultId)
+  } else {
+    problem = 'The website stopped the check before it could finish.'
+    live.fail(problem)
   }
 }
 </script>
@@ -242,7 +241,7 @@ async function waitForResult(jobId: string, capabilityToken: string) {
         {#if live.state.error || problem}
           <div class="alert alert-error mt-6" role="alert">
             <div>
-              <strong class="block">The website may have blocked the check.</strong>
+              <strong class="block">{problem || live.state.error}</strong>
               <span>Nothing was submitted or purchased. You can try again now.</span>
             </div>
           </div>
@@ -253,12 +252,22 @@ async function waitForResult(jobId: string, capabilityToken: string) {
   {/if}
 
   {#if result && split}
-    {@const heading = gradeHeadline(result.score.grade, split.main.length)}
+    {@const heading = getReportSummary(result.score.grade, split.main.length, result.workflowSteps ?? [])}
     <section class="mt-16">
       <header class="card mb-8 border border-base-300 bg-base-100">
         <div class="card-body flex-row flex-wrap items-center gap-6">
-          <GradeBadge grade={result.score.grade} />
+          {#if heading.limited}
+            <div class="grid size-24 shrink-0 place-items-center rounded-full border border-warning/35 bg-warning/10 text-center shadow-inner">
+              <span class="text-3xl" aria-hidden="true">!</span>
+              <span class="sr-only">Limited check</span>
+            </div>
+          {:else}
+            <GradeBadge grade={result.score.grade} />
+          {/if}
           <div>
+            {#if heading.limited}
+              <div class="badge badge-warning mb-3">{heading.eyebrow}</div>
+            {/if}
             <h2 class="m-0 font-bold text-3xl">{heading.headline}</h2>
             <p class="mt-2 mb-0 text-base-content/65">{heading.sub}</p>
           </div>

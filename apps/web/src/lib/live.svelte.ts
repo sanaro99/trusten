@@ -6,8 +6,66 @@
  * WebSocket's events into. It always carried progress/frame/done/error; this
  * is the model. Polling survives only as a reconnect fallback.
  */
-import { type LiveEvent, LiveEventSchema } from '@trusten/shared/api'
-import { api } from './api'
+import {
+  type AuditStatus,
+  type LiveEvent,
+  LiveEventSchema,
+} from '@trusten/shared/api'
+import { ApiError, api } from './api'
+
+/** Live video is optional: HTTP polling remains authoritative for the result. */
+export async function openLiveSocket(
+  url: string,
+  getTicket: () => Promise<string>,
+  onEvent: (event: LiveEvent) => void,
+): Promise<WebSocket | null> {
+  try {
+    const ticket = await getTicket()
+    const endpoint = new URL(url)
+    endpoint.searchParams.set('ticket', ticket)
+    const socket = new WebSocket(endpoint)
+    socket.onerror = () => socket.close()
+    socket.onmessage = (message) => {
+      try {
+        const parsed = LiveEventSchema.safeParse(JSON.parse(message.data))
+        if (parsed.success) onEvent(parsed.data)
+      } catch {
+        // A malformed optional frame must not interrupt result polling.
+      }
+    }
+    return socket
+  } catch {
+    return null
+  }
+}
+
+export async function pollAuditStatus(
+  getStatus: () => Promise<AuditStatus>,
+  onStatus: (status: AuditStatus) => void,
+  pause = () => new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+): Promise<AuditStatus> {
+  let consecutiveErrors = 0
+  while (true) {
+    await pause()
+    let status: AuditStatus
+    try {
+      status = await getStatus()
+      consecutiveErrors = 0
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status >= 400 &&
+        error.status < 500
+      )
+        throw error
+      consecutiveErrors++
+      if (consecutiveErrors >= 5) throw error
+      continue
+    }
+    onStatus(status)
+    if (status.status === 'done' || status.status === 'failed') return status
+  }
+}
 
 export interface LiveStep {
   step: number
@@ -79,15 +137,14 @@ export function createLiveScan() {
   let socket: WebSocket | null = null
 
   async function connect(jobId: string, capabilityToken: string) {
-    const { ticket } = await api.createLiveTicket(jobId, capabilityToken)
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    socket = new WebSocket(
-      `${proto}://${location.host}/trusten/api/jobs/${encodeURIComponent(jobId)}/live?ticket=${encodeURIComponent(ticket)}`,
+    socket = await openLiveSocket(
+      `${proto}://${location.host}/trusten/api/jobs/${encodeURIComponent(jobId)}/live`,
+      async () => (await api.createLiveTicket(jobId, capabilityToken)).ticket,
+      (event) => {
+        state = reduceLiveEvent(state, event)
+      },
     )
-    socket.onmessage = (message) => {
-      const parsed = LiveEventSchema.safeParse(JSON.parse(message.data))
-      if (parsed.success) state = reduceLiveEvent(state, parsed.data)
-    }
   }
 
   return {
@@ -95,6 +152,20 @@ export function createLiveScan() {
       return state
     },
     connect,
+    update(status: AuditStatus) {
+      if (status.status === 'done') {
+        state = reduceLiveEvent(state, { type: 'done' })
+      } else if (
+        status.status === 'running' &&
+        status.currentStep &&
+        state.steps[state.steps.length - 1]?.action !== status.currentStep
+      ) {
+        state = reduceLiveEvent(state, {
+          type: 'progress',
+          action: status.currentStep,
+        })
+      }
+    },
     fail(message: string) {
       state = { ...state, status: 'failed', error: message }
     },
