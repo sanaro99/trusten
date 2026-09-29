@@ -1,11 +1,34 @@
 import { z } from 'zod'
 import { GradeSchema } from '../domain'
 
-const trimmedUrl = z.string().trim().min(1, 'url is required')
+function normalizeWebsiteUrl(input: string): string {
+  // Preserve schemes for the server's target policy. A numeric port after
+  // a hostname is the one colon prefix that belongs to a bare address.
+  if (/^[a-z][a-z\d+.-]*:(?!\d+(?:[/?#]|$))/i.test(input)) return input
+
+  const authority = input.split(/[/?#]/, 1)[0]
+  if (!authority || /[@\s\\]/.test(authority)) return input
+
+  try {
+    const target = new URL(`https://${input}`)
+    if (!target.hostname.includes('.') && !target.hostname.startsWith('[')) {
+      return input
+    }
+    return `https://${input}`
+  } catch {
+    return input
+  }
+}
+
+const websiteUrl = z
+  .string()
+  .trim()
+  .min(1, 'url is required')
+  .transform(normalizeWebsiteUrl)
 const turnstileToken = z.string().trim().min(1).optional()
 
 export const QuickScanRequestSchema = z.object({
-  url: trimmedUrl,
+  url: websiteUrl,
   turnstileToken,
 })
 export type QuickScanRequest = z.infer<typeof QuickScanRequestSchema>
@@ -25,7 +48,7 @@ export const QuickScanResponseSchema = z.object({
 export type QuickScanResponse = z.infer<typeof QuickScanResponseSchema>
 
 export const AuditRequestSchema = z.object({
-  url: trimmedUrl,
+  url: websiteUrl,
   turnstileToken,
   workflows: z.array(z.string()).optional(),
   watch: z.boolean().default(false),

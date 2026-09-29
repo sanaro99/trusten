@@ -23,7 +23,11 @@ const ROBOTS_TTL_MS = 60 * 60 * 1000
 const robotsCache = new Map<string, RobotsEntry>()
 
 const RATE_WINDOW_MS = Number(process.env.TRUSTEN_RATE_WINDOW_MS ?? 60_000)
-const lastScanAt = new Map<string, number>()
+const lastScanAt = new Map<string, { at: number }>()
+
+export type RateLimitReservation =
+  | { allowed: true; cancel: () => void }
+  | { allowed: false; retryAfterSeconds: number }
 
 function parseRobots(text: string): RobotsEntry {
   // Collect Disallow rules from groups that apply to `*` or our UA token.
@@ -102,9 +106,27 @@ export async function isAllowedByRobots(url: string): Promise<boolean> {
 
 /** Returns false (and does not record) when the domain was scanned too recently. */
 export function checkRateLimit(domain: string): boolean {
+  return reserveRateLimit(domain).allowed
+}
+
+/** Failed checks can cancel only the rate reservation they themselves made. */
+export function reserveRateLimit(domain: string): RateLimitReservation {
   const now = Date.now()
-  const last = lastScanAt.get(domain) ?? 0
-  if (now - last < RATE_WINDOW_MS) return false
-  lastScanAt.set(domain, now)
-  return true
+  const last = lastScanAt.get(domain)
+  if (last && now - last.at < RATE_WINDOW_MS)
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(
+        1,
+        Math.ceil((last.at + RATE_WINDOW_MS - now) / 1000),
+      ),
+    }
+  const reservation = { at: now }
+  lastScanAt.set(domain, reservation)
+  return {
+    allowed: true,
+    cancel: () => {
+      if (lastScanAt.get(domain) === reservation) lastScanAt.delete(domain)
+    },
+  }
 }

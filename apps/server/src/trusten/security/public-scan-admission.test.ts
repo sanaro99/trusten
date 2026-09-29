@@ -162,6 +162,52 @@ describe('PublicScanAdmission', () => {
     now += 5_000
     await expect(gate.admit(request)).resolves.toHaveProperty('id')
   })
+
+  test('bounds repeated failed attempts without spending the successful-scan allowance', async () => {
+    let now = 1000
+    const gate = admission({ now: () => now })
+    for (let index = 0; index < 10; index++) {
+      const grant = await gate.admit(request)
+      await gate.cancel(grant.id)
+    }
+    const error = await expectCode(gate.admit(request), 'SCAN_RETRY_LIMITED')
+    expect(error.retryAfterSeconds).toBe(60)
+    now += 60000
+    await expect(gate.admit(request)).resolves.toHaveProperty('id')
+  })
+
+  test('refunds a failed scan after its execution lease expires without refunding a completed scan', async () => {
+    let now = 1000
+    const gate = admission({
+      sessionQuota: { limit: 1, windowMs: 60000 },
+      maxOutstanding: 1,
+      leaseDurationMs: 1000,
+      now: () => now,
+    })
+    const failed = await gate.admit(request)
+    now += 1000
+    const unrelated = await gate.admit({ ...request, clientIp: '203.0.113.11' })
+    await gate.release(unrelated.id)
+    expect(await gate.cancel(failed.id)).toBe(true)
+    expect(await gate.cancel(failed.id)).toBe(false)
+    const retry = await gate.admit({
+      ...request,
+      anonymousSession: failed.sessionId,
+    })
+    expect(retry.sessionId).toBe(failed.sessionId)
+    now += 1000
+    const triggerCleanup = await gate.admit({
+      ...request,
+      clientIp: '203.0.113.12',
+    })
+    await gate.cancel(triggerCleanup.id)
+    expect(await gate.release(retry.id)).toBe(true)
+    expect(await gate.cancel(retry.id)).toBe(false)
+    await expectCode(
+      gate.admit({ ...request, anonymousSession: failed.sessionId }),
+      'SESSION_QUOTA_EXCEEDED',
+    )
+  })
 })
 
 function gate() {

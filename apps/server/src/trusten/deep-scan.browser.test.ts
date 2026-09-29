@@ -79,6 +79,13 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
         } else if (url.pathname === '/challenge') {
           html =
             '<html><head><title>Just a moment...</title></head><body>Verify you are human.</body></html>'
+        } else if (url.pathname === '/bgn_verification.html') {
+          html =
+            '<html><head><title></title></head><body>\u200b\u200b\u200b</body></html>'
+        } else if (url.pathname === '/slow') {
+          html = page(
+            '<div id="app"></div><script>setTimeout(()=>document.getElementById("app").innerHTML="<h1>Shop</h1><p>Our catalog is ready.</p>",4000)</script>',
+          )
         } else {
           return new Response('Page missing', { status: 404 })
         }
@@ -102,6 +109,21 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
       throw new Error('Unsafe cleanup path')
     rmSync(resolved, { recursive: true, force: true })
   })
+
+  test('identifies a storefront verification redirect instead of blaming page loading', async () => {
+    const count = saved.length
+    const error = await engine
+      .quickScan(`${baseUrl}/bgn_verification.html`)
+      .catch((error) => error)
+    expect(error.code).toBe('SITE_BLOCKED')
+    expect(saved.length).toBe(count)
+  })
+
+  test('waits for a client-rendered storefront before deciding that its page is empty', async () => {
+    const result = await engine.quickScan(`${baseUrl}/slow`)
+    expect(result.workflowSteps?.[0].status).toBe('observed')
+    expect(saved.some((scan) => scan.id === result.id)).toBe(true)
+  }, 20000)
 
   test('captures consent before dismissal and reaches preferences at the same URL', async () => {
     const result = await engine.deepScan(

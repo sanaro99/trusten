@@ -37,7 +37,7 @@ import {
   type PublicScanAdmissionGrant,
 } from '../security/public-scan-admission'
 import type { ScanResult, ScanWorkflow, WorkflowStep } from '../types'
-import { checkRateLimit, isAllowedByRobots } from '../utils/guardrails'
+import { isAllowedByRobots, reserveRateLimit } from '../utils/guardrails'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
 import { parseBody } from './validate'
 
@@ -100,7 +100,8 @@ function admissionResponse(c: Context, error: PublicScanAdmissionError) {
   const quota = error.code.endsWith('QUOTA_EXCEEDED')
   if (error.retryAfterSeconds)
     c.header('Retry-After', String(error.retryAfterSeconds))
-  if (quota) return c.json({ error: error.message, code: error.code }, 429)
+  if (quota || error.code === 'SCAN_RETRY_LIMITED')
+    return c.json({ error: error.message, code: error.code }, 429)
   if (error.code === 'DEMO_BUSY' || error.code === 'BOT_UNAVAILABLE')
     return c.json({ error: error.message, code: error.code }, 503)
   return c.json({ error: error.message, code: error.code }, 403)
@@ -125,23 +126,38 @@ function parseHostname(url: string): string | null {
 async function preScanGuard(
   url: string,
   domain: string,
-): Promise<{ error: string; status: 403 | 429 } | null> {
+): Promise<
+  | {
+      allowed: false
+      error: string
+      status: 403 | 429
+      code: string
+      retryAfterSeconds?: number
+    }
+  | { allowed: true; cancel: () => void }
+> {
   if (process.env.TRUSTEN_IGNORE_ROBOTS !== '1') {
     const allowed = await isAllowedByRobots(url).catch(() => true)
     if (!allowed) {
       return {
+        allowed: false,
         error: "Scanning this URL is disallowed by the site's robots.txt",
         status: 403,
+        code: 'SITE_DISALLOWED',
       }
     }
   }
-  if (!checkRateLimit(domain)) {
+  const reservation = reserveRateLimit(domain)
+  if (!reservation.allowed) {
     return {
+      allowed: false,
       error: 'Rate limit: max 1 scan per domain per minute — try again shortly',
       status: 429,
+      code: 'RATE_LIMITED',
+      retryAfterSeconds: reservation.retryAfterSeconds,
     }
   }
-  return null
+  return reservation
 }
 
 export function createTrustenDashboardRoutes(config: Config) {
@@ -267,6 +283,8 @@ export function createTrustenDashboardRoutes(config: Config) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error('Trusten analyze-page failed', { url, error: msg })
+      if (err instanceof ScanIncompleteError)
+        return c.json({ code: err.code, error: msg }, 422)
       return c.json({ error: msg }, 500)
     }
   })
@@ -299,19 +317,19 @@ export function createTrustenDashboardRoutes(config: Config) {
       throw error
     }
 
-    const qsGuard = await preScanGuard(
-      admitted.target.url,
-      admitted.target.hostname,
-    )
-    if (qsGuard) {
-      config.admission.release(admitted.id)
-      return c.json({ error: qsGuard.error }, qsGuard.status)
-    }
-
+    let guard: Awaited<ReturnType<typeof preScanGuard>> | undefined
+    let completed = false
+    setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
     try {
+      guard = await preScanGuard(admitted.target.url, admitted.target.hostname)
+      if (!guard.allowed) {
+        if (guard.retryAfterSeconds)
+          c.header('Retry-After', String(guard.retryAfterSeconds))
+        return c.json({ error: guard.error, code: guard.code }, guard.status)
+      }
       const engine = new TrustenEngine(config.browser, config.executionDir)
       const result = await engine.quickScan(admitted.target.url)
-      setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
+      completed = true
       return c.json({
         scanId: result.id,
         domain: result.domain,
@@ -323,11 +341,15 @@ export function createTrustenDashboardRoutes(config: Config) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error('Trusten dashboard quick-scan failed', { url, error: msg })
       if (err instanceof ScanIncompleteError) {
-        return c.json({ code: 'SCAN_INCOMPLETE', error: msg }, 422)
+        return c.json({ code: err.code, error: msg }, 422)
       }
       return c.json({ error: msg }, 500)
     } finally {
-      config.admission.release(admitted.id)
+      if (completed) await config.admission.release(admitted.id)
+      else {
+        if (guard?.allowed) guard.cancel()
+        await config.admission.cancel(admitted.id)
+      }
     }
   })
 
@@ -368,13 +390,18 @@ export function createTrustenDashboardRoutes(config: Config) {
       throw error
     }
 
-    const guard = await preScanGuard(
-      admitted.target.url,
-      admitted.target.hostname,
-    )
-    if (guard) {
-      config.admission.release(admitted.id)
-      return c.json({ error: guard.error }, guard.status)
+    let guard: Awaited<ReturnType<typeof preScanGuard>>
+    try {
+      guard = await preScanGuard(admitted.target.url, admitted.target.hostname)
+    } catch (error) {
+      await config.admission.cancel(admitted.id)
+      throw error
+    }
+    if (!guard.allowed) {
+      await config.admission.cancel(admitted.id)
+      if (guard.retryAfterSeconds)
+        c.header('Retry-After', String(guard.retryAfterSeconds))
+      return c.json({ error: guard.error, code: guard.code }, guard.status)
     }
 
     let jobId: string
@@ -387,7 +414,8 @@ export function createTrustenDashboardRoutes(config: Config) {
       )
       capability = await config.capabilities.issue(jobId)
     } catch (error) {
-      config.admission.release(admitted.id)
+      guard.cancel()
+      await config.admission.cancel(admitted.id)
       throw error
     }
     runningJobs.set(jobId, { currentStep: 'queued', completedWorkflows: [] })
@@ -402,12 +430,20 @@ export function createTrustenDashboardRoutes(config: Config) {
       {
         watch,
         mode,
+        onFailure: async () => {
+          guard.cancel()
+          await config.admission.cancel(admitted.id)
+        },
       },
     )
-      .catch((err) => {
-        logger.error('Trusten audit job crashed', { jobId, error: String(err) })
+      .then(async (completed) => {
+        if (completed) await config.admission.release(admitted.id)
       })
-      .finally(() => config.admission.release(admitted.id))
+      .catch(async (err) => {
+        logger.error('Trusten audit job crashed', { jobId, error: String(err) })
+        guard.cancel()
+        await config.admission.cancel(admitted.id)
+      })
 
     setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
     return c.json({
@@ -492,8 +528,12 @@ async function runAuditJob(
   domain: string,
   workflows: string[],
   config: Config,
-  opts: { watch: boolean; mode: 'fixed' | 'discover' },
-): Promise<void> {
+  opts: {
+    watch: boolean
+    mode: 'fixed' | 'discover'
+    onFailure: () => Promise<void>
+  },
+): Promise<boolean> {
   const scanIds: string[] = []
   const failedSteps: WorkflowStep[] = []
   const progress = runningJobs.get(jobId)!
@@ -625,8 +665,11 @@ async function runAuditJob(
       domain,
       workflows: progress.completedWorkflows.length,
     })
+    return true
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    // A visible failure must allow an immediate retry with the same session.
+    await opts.onFailure()
     await updateAuditJob(jobId, {
       status: 'failed',
       error: msg,
@@ -635,5 +678,6 @@ async function runAuditJob(
     publish(jobId, { type: 'error', message: msg })
     closeChannel(jobId)
     logger.error('Trusten audit job failed', { jobId, error: msg })
+    return false
   }
 }

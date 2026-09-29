@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { closeDb, getDb, initializeDb } from '../../lib/db'
+import type { BrowserDriver } from '../browser/driver'
 import { PuppeteerDriver } from '../browser/puppeteer-driver'
 import { ensureTrustenSchema } from '../db'
 import { FakeBotVerifier } from '../security/bot-verifier'
@@ -9,6 +10,7 @@ import {
   InMemoryCapabilityStore,
   JobCapabilityAccess,
 } from '../security/job-capability'
+import { PostgresPublicScanAdmissionPersistence } from '../security/postgres-public-scan-admission'
 import { PublicScanAdmission } from '../security/public-scan-admission'
 import type { ScanResult } from '../types'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
@@ -21,6 +23,7 @@ const reportsDir = path.resolve('.trusten-local', 'audit-regression-reports')
 describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
   let fixture: ReturnType<typeof Bun.serve>
   let driver: PuppeteerDriver
+  let browser: BrowserDriver
   let previousReportsDir: string | undefined
   let failDeep = false
   let blockedPricing = false
@@ -73,7 +76,7 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
     driver = new PuppeteerDriver()
     // Admission is tested against a public test hostname. Only this fixture
     // driver maps it to loopback; the application target policy is unchanged.
-    const browser = new Proxy(driver, {
+    browser = new Proxy(driver, {
       get(target, key) {
         if (key === 'newPage')
           return (
@@ -111,6 +114,82 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
       }),
     })
   })
+
+  test('a failed audit refunds its PostgreSQL allowance and permits the same visitor to retry', async () => {
+    const target = `https://fixture.example/${crypto.randomUUID()}`
+    const ip = crypto.randomUUID()
+    targets.push(target)
+    const persistence = new PostgresPublicScanAdmissionPersistence(getDb())
+    const release = persistence.release.bind(persistence)
+    persistence.release = async (id, refundQuota) => {
+      // Model a slow commit: a visible failed status must already be refunded.
+      if (refundQuota) await Bun.sleep(250)
+      return release(id, refundQuota)
+    }
+    const admission = new PublicScanAdmission({
+      botVerifier: new FakeBotVerifier(),
+      sessionQuota: { limit: 1, windowMs: 60000 },
+      ipQuota: { limit: 1, windowMs: 60000 },
+      domainQuota: { limit: 1, windowMs: 60000 },
+      maxOutstanding: 2,
+      persistence,
+      targetPolicy: { resolver: async () => ['93.184.216.34'] },
+    })
+    const retryApp = createTrustenDashboardRoutes({
+      browser,
+      admission,
+      executionDir: process.cwd(),
+      secureCookies: false,
+      capabilities: new JobCapabilityAccess({
+        store: new InMemoryCapabilityStore(),
+        hashKey: 'test-capability-hash-key-at-least-32-bytes',
+      }),
+    })
+    let cookie = ''
+    failDeep = true
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const started = await retryApp.request('/api/audit', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-trusten-client-ip': ip,
+            cookie,
+          },
+          body: JSON.stringify({
+            url: target,
+            mode: 'fixed',
+            workflows: ['fixture-overview'],
+          }),
+        })
+        expect(started.status).toBe(200)
+        cookie = started.headers.get('set-cookie')?.split(';')[0] ?? ''
+        const { jobId, capabilityToken } = await started.json()
+        let state = ''
+        const deadline = Date.now() + 20000
+        while (Date.now() < deadline) {
+          const status = await retryApp.request(`/api/audit/${jobId}`, {
+            headers: { authorization: `Bearer ${capabilityToken}` },
+          })
+          state = (await status.json()).status
+          if (state === 'failed') break
+          await Bun.sleep(50)
+        }
+        expect(state).toBe('failed')
+        const [reserved] = await getDb()`
+          SELECT COUNT(*)::integer AS count FROM trusten_public_scan_quota_events
+          WHERE quota_key = ${ip} OR quota_key = ${cookie.split('=')[1]}
+        `
+        expect(reserved.count).toBe(0)
+      }
+    } finally {
+      failDeep = false
+      await getDb()`DELETE FROM trusten_public_scan_attempts WHERE client_ip = ${ip}`
+      const session = cookie.split('=')[1]
+      if (session)
+        await getDb()`DELETE FROM trusten_public_scan_sessions WHERE id = ${session}`
+    }
+  }, 45000)
 
   afterAll(async () => {
     for (const target of targets) {
