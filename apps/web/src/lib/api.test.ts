@@ -160,6 +160,39 @@ describe('API failures', () => {
 })
 
 describe('scan request payloads', () => {
+  test('keeps the saved-result time for a reused quick check', async () => {
+    const result = await api.quickScan({ url: 'example.com' }, async () =>
+      Response.json({
+        scanId: 'scan-saved',
+        domain: 'example.com',
+        grade: 'B',
+        score: 82,
+        patterns: 2,
+        cached: true,
+        checkedAt: '2026-09-29T12:00:00.000Z',
+      }),
+    )
+    expect(result.cached).toBe(true)
+    expect(result.checkedAt).toBe('2026-09-29T12:00:00.000Z')
+  })
+
+  test('keeps the saved-result time for a reused full check', async () => {
+    const result = await api.startAudit(
+      { url: 'example.com', mode: 'discover', watch: true },
+      async () =>
+        Response.json({
+          jobId: 'audit-saved',
+          domain: 'example.com',
+          capabilityToken: 'new-capability',
+          capabilityExpiresAt: 123456,
+          cached: true,
+          checkedAt: '2026-09-29T12:00:00.000Z',
+        }),
+    )
+    expect(result.cached).toBe(true)
+    expect(result.checkedAt).toBe('2026-09-29T12:00:00.000Z')
+  })
+
   test('sends the shared normalized URL for a quick scan', async () => {
     let body: unknown
     const fetcher = async (_input: RequestInfo | URL, init?: RequestInit) => {

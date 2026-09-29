@@ -34,7 +34,7 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
   },
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-v4-flash',
+    defaultModel: 'deepseek-flash',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
   },
   openrouter: {
@@ -231,6 +231,8 @@ export interface LLMCompletionOptions {
   messages: LLMMessage[]
   temperature?: number
   maxTokens?: number
+  /** A screenshot check must fail rather than silently retry without the image. */
+  requireImage?: boolean
   /** Override the provider for this specific call */
   provider?: TrustenLLMProvider
   /**
@@ -283,6 +285,7 @@ export class TrustenLLMClient {
    * to report honestly when no LLM is available at all.
    */
   isConfigured(): boolean {
+    if (this.config.apiKey || this.config.provider === 'ollama') return true
     const explicit = process.env.TRUSTEN_LLM_PROVIDER as
       | TrustenLLMProvider
       | undefined
@@ -302,17 +305,16 @@ export class TrustenLLMClient {
    * Override with TRUSTEN_LLM_VISION=1/0; otherwise inferred from the model name.
    */
   supportsImages(): boolean {
-    const env = process.env.TRUSTEN_LLM_VISION?.toLowerCase()
-    if (env === '1' || env === 'true') return true
-    if (env === '0' || env === 'false') return false
     const model = (
       this.config.model ?? PROVIDER_DEFAULTS[this.config.provider].defaultModel
     ).toLowerCase()
-    // Learned at runtime that this model rejects images → don't send them again.
     if (textOnlyModels.has(model)) return false
+    const env = process.env.TRUSTEN_LLM_VISION?.toLowerCase()
+    if (env === '1' || env === 'true') return true
+    if (env === '0' || env === 'false') return false
     // Attempt vision for known/likely multimodal models. DeepSeek V4 is included
     // optimistically; if it rejects the image we cache it and fall back to text.
-    return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|qwen.*vl|multimodal|deepseek-v4/.test(
+    return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|qwen.*vl|multimodal|deepseek-v4|deepseek-flash/.test(
       model,
     )
   }
@@ -391,6 +393,8 @@ export class TrustenLLMClient {
     const provider = options.provider ?? this.config.provider
 
     if (isUnreachable(provider)) {
+      if (options.requireImage)
+        throw new Error(`Trusten vision provider ${provider} is unavailable`)
       const next = this.nextInChain(provider)
       if (next) return this.tryFallback(options, next)
       throw new Error(`Trusten LLM: ${provider} unreachable`)
@@ -417,6 +421,13 @@ export class TrustenLLMClient {
       // retry text-only once on the same provider (it is reachable, just text).
       if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
         textOnlyModels.add(model.toLowerCase())
+        if (options.requireImage) {
+          logger.warn('Trusten vision model rejected image input', {
+            provider,
+            model,
+          })
+          throw new Error(`Trusten vision model ${model} rejected image input`)
+        }
         logger.warn(
           'Trusten LLM: model rejected image input, retrying text-only',
           { provider, model },
@@ -427,6 +438,14 @@ export class TrustenLLMClient {
         })
       }
       markUnreachable(provider)
+      if (options.requireImage) {
+        logger.error('Trusten vision request failed', {
+          provider,
+          model,
+          error: msg,
+        })
+        throw error
+      }
       const next = this.nextInChain(provider)
       if (next) return this.tryFallback(options, next)
       logger.error('Trusten LLM request failed (all providers)', { error: msg })
@@ -443,6 +462,7 @@ export class TrustenLLMClient {
     analysisType: string
     domFragment?: string
     screenshotBase64?: string
+    requireImage?: boolean
   }): Promise<string> {
     const systemPrompt = `You are a dark pattern detection expert. Analyze web page content and screenshots to identify manipulative UI/UX patterns.
 
@@ -493,6 +513,8 @@ Analyze the above content and return your findings as JSON.`
     // Include the screenshot only when the model can actually accept images —
     // otherwise the request 400s and we lose the (still useful) text analysis.
     const useImage = !!params.screenshotBase64 && this.supportsImages()
+    if (params.requireImage && !useImage)
+      throw new Error('No screenshot-capable model is configured')
     const userContent: LLMContentPart[] | string = useImage
       ? [
           { type: 'text', text: textContent },
@@ -516,6 +538,7 @@ Analyze the above content and return your findings as JSON.`
       ],
       temperature: 0.1,
       maxTokens: 2048,
+      requireImage: params.requireImage,
     })
   }
 

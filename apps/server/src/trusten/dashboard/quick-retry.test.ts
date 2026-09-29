@@ -42,6 +42,7 @@ describe('retrying an unsuccessful quick check', () => {
       const app = createTrustenDashboardRoutes({
         browser,
         admission,
+        recentQuickScan: async () => null,
         executionDir: process.cwd(),
         secureCookies: false,
         capabilities: new JobCapabilityAccess({
@@ -78,6 +79,7 @@ describe('retrying an unsuccessful quick check', () => {
           throw new Error('Unexpected browser launch')
         },
       } as unknown as BrowserDriver,
+      recentQuickScan: async () => null,
       executionDir: process.cwd(),
       admission: new PublicScanAdmission({
         botVerifier: new FakeBotVerifier(),

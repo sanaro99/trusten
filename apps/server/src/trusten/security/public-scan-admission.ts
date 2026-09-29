@@ -49,6 +49,7 @@ export interface WindowQuota {
 }
 export interface PublicScanAdmissionReservation {
   id: string
+  kind: PublicScanKind
   anonymousSession?: string
   generatedSessionId: string
   clientIp: string
@@ -125,7 +126,7 @@ export class InMemoryPublicScanAdmissionPersistence
     const checks = [
       this.checkQuota('session', sessionId, r.sessionQuota, r.now),
       this.checkQuota('ip', r.clientIp, r.ipQuota, r.now),
-      this.checkQuota('domain', r.domain, r.domainQuota, r.now),
+      this.checkQuota('domain', `${r.kind}:${r.domain}`, r.domainQuota, r.now),
     ] as const
     for (const check of checks) {
       if (!check.allowed)
@@ -165,7 +166,11 @@ export class InMemoryPublicScanAdmissionPersistence
           r.ipQuota.windowMs,
           r.domainQuota.windowMs,
         ),
-      keys: { session: sessionId, ip: r.clientIp, domain: r.domain },
+      keys: {
+        session: sessionId,
+        ip: r.clientIp,
+        domain: `${r.kind}:${r.domain}`,
+      },
     })
     return { allowed: true, sessionId }
   }
@@ -299,6 +304,7 @@ export class PublicScanAdmission {
     const id = randomUUID()
     const result = await this.persistence.reserve({
       id,
+      kind: request.kind,
       anonymousSession: request.anonymousSession,
       generatedSessionId: randomBytes(32).toString('base64url'),
       clientIp: request.clientIp,

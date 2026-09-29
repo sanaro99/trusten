@@ -3,7 +3,7 @@
  *
  * Compliance/safety before we hit a real site:
  *   - robots.txt: honor Disallow rules for our UA (or `*`)
- *   - per-domain rate limiting: at most 1 scan / domain / window
+ *   - per-kind, per-domain rate limiting: at most 1 scan / window
  *
  * Both are best-effort and in-memory (single process). `TRUSTEN_IGNORE_ROBOTS=1`
  * disables the robots check for local testing.
@@ -105,14 +105,21 @@ export async function isAllowedByRobots(url: string): Promise<boolean> {
 }
 
 /** Returns false (and does not record) when the domain was scanned too recently. */
-export function checkRateLimit(domain: string): boolean {
-  return reserveRateLimit(domain).allowed
+export function checkRateLimit(
+  domain: string,
+  kind: 'quick' | 'audit' = 'quick',
+): boolean {
+  return reserveRateLimit(domain, kind).allowed
 }
 
 /** Failed checks can cancel only the rate reservation they themselves made. */
-export function reserveRateLimit(domain: string): RateLimitReservation {
+export function reserveRateLimit(
+  domain: string,
+  kind: 'quick' | 'audit' = 'quick',
+): RateLimitReservation {
+  const key = `${kind}:${domain}`
   const now = Date.now()
-  const last = lastScanAt.get(domain)
+  const last = lastScanAt.get(key)
   if (last && now - last.at < RATE_WINDOW_MS)
     return {
       allowed: false,
@@ -122,11 +129,11 @@ export function reserveRateLimit(domain: string): RateLimitReservation {
       ),
     }
   const reservation = { at: now }
-  lastScanAt.set(domain, reservation)
+  lastScanAt.set(key, reservation)
   return {
     allowed: true,
     cancel: () => {
-      if (lastScanAt.get(domain) === reservation) lastScanAt.delete(domain)
+      if (lastScanAt.get(key) === reservation) lastScanAt.delete(key)
     },
   }
 }

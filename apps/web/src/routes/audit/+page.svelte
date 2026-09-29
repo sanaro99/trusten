@@ -17,6 +17,7 @@ let url = $state('')
 let started = $state(false)
 let problem = $state('')
 let result = $state<ScanDetail | null>(null)
+let reused = $state(false)
 let busy = $state(false)
 let turnstileContainer = $state<HTMLDivElement>()
 
@@ -76,6 +77,7 @@ function evidenceUrl(patternId: string): string | undefined {
 function startOver() {
   live.reset()
   result = null
+  reused = false
   problem = ''
   started = false
 }
@@ -95,14 +97,15 @@ async function start(event: SubmitEvent) {
       turnstileContainer,
       'audit_scan',
     )
-    const { jobId, capabilityToken } = await api.startAudit({
+    const { jobId, capabilityToken, cached } = await api.startAudit({
       url,
       watch: true,
       mode: 'discover',
       turnstileToken,
     })
+    reused = cached === true
     started = true
-    await live.connect(jobId, capabilityToken)
+    if (!reused) await live.connect(jobId, capabilityToken)
     await waitForResult(jobId, capabilityToken)
   } catch (error) {
     problem = publicScanErrorMessage(error)
@@ -188,6 +191,11 @@ async function waitForResult(jobId: string, capabilityToken: string) {
   {/if}
 
   {#if started}
+    {#if reused && result}
+      <div class="alert alert-info mt-10" role="status">
+        Saved full check from {new Date(result.completedAt).toLocaleString()}.
+      </div>
+    {/if}
     <section class="card mt-10 border border-base-300 bg-base-100" aria-live="polite" aria-labelledby="live-check-heading">
       <div class="card-body p-6 md:p-8">
         <div class="flex flex-wrap items-start justify-between gap-4">

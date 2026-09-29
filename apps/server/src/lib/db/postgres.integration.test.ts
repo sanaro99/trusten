@@ -116,6 +116,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
     const reserve = (id: string) =>
       persistence.reserve({
         id,
+        kind: 'quick',
         generatedSessionId: session,
         clientIp: key,
         domain: key,
@@ -135,7 +136,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
       expect(await persistence.release(completedId, true)).toBe(false)
       expect(await persistence.release(failedId, true)).toBe(false)
       const [row] =
-        await sql`SELECT COUNT(*)::integer AS count FROM trusten_public_scan_quota_events WHERE quota_key = ${key} OR quota_key = ${session}`
+        await sql`SELECT COUNT(*)::integer AS count FROM trusten_public_scan_quota_events WHERE reservation_id = ${completedId}`
       expect(row.count).toBe(3)
       const retry = await reserve(crypto.randomUUID())
       expect(retry.allowed).toBe(false)
@@ -143,7 +144,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
     } finally {
       await sql`DELETE FROM trusten_public_scan_leases WHERE id = ${completedId} OR id = ${failedId}`
       await sql`DELETE FROM trusten_public_scan_attempts WHERE client_ip = ${key}`
-      await sql`DELETE FROM trusten_public_scan_quota_events WHERE quota_key = ${key} OR quota_key = ${session}`
+      await sql`DELETE FROM trusten_public_scan_quota_events WHERE reservation_id IN (${completedId}, ${failedId})`
       await sql`DELETE FROM trusten_public_scan_sessions WHERE id = ${session}`
     }
   })
@@ -159,6 +160,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
     const reserve = (id: string, quotaKey = key) =>
       persistence.reserve({
         id,
+        kind: 'quick',
         generatedSessionId: quotaKey,
         clientIp: quotaKey,
         domain: quotaKey,
@@ -187,7 +189,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
     } finally {
       await sql`DELETE FROM trusten_public_scan_leases WHERE id IN (${failedId}, ${completedId}, ${unrelatedId}, ${cleanupTriggerId})`
       await sql`DELETE FROM trusten_public_scan_attempts WHERE client_ip IN (${key}, ${`${key}-other`})`
-      await sql`DELETE FROM trusten_public_scan_quota_events WHERE quota_key IN (${key}, ${`${key}-other`})`
+      await sql`DELETE FROM trusten_public_scan_quota_events WHERE reservation_id IN (${failedId}, ${completedId}, ${unrelatedId}, ${cleanupTriggerId})`
       await sql`DELETE FROM trusten_public_scan_sessions WHERE id IN (${key}, ${`${key}-other`})`
     }
   })
