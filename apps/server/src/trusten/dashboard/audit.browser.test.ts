@@ -311,6 +311,62 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
     ).toBe(200)
   }, 20_000)
 
+  test('reuses a quick result and still starts the first deep audit for that website', async () => {
+    const url = `https://quick-then-deep-${crypto.randomUUID()}.example/`
+    targets.push(url)
+    const submitQuick = (cookie = '') =>
+      app.request('/api/quick-scan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ url }),
+      })
+    const quick = await submitQuick()
+    expect(quick.status).toBe(200)
+    const first = (await quick.json()) as { scanId: string }
+    const cookie = quick.headers.get('set-cookie')?.split(';')[0] ?? ''
+    const repeated = await submitQuick(cookie)
+    expect(repeated.status).toBe(200)
+    expect(await repeated.json()).toMatchObject({
+      scanId: first.scanId,
+      cached: true,
+    })
+
+    const started = await app.request('/api/audit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        url,
+        mode: 'fixed',
+        workflows: ['fixture-overview'],
+      }),
+    })
+    expect(started.status).toBe(200)
+    const { jobId, capabilityToken } = (await started.json()) as {
+      jobId: string
+      capabilityToken: string
+    }
+    const deadline = Date.now() + 35_000
+    while (Date.now() < deadline) {
+      const response = await app.request(`/api/audit/${jobId}`, {
+        headers: { authorization: `Bearer ${capabilityToken}` },
+      })
+      const status = (await response.json()) as {
+        status: string
+        scanIds: string[]
+      }
+      if (status.status === 'done') {
+        expect(status.scanIds).toHaveLength(3)
+        const report = await app.request(`/api/scan/${status.scanIds.at(-1)}`)
+        expect(report.status).toBe(200)
+        return
+      }
+      if (status.status === 'failed')
+        throw new Error('The first deep audit failed')
+      await Bun.sleep(100)
+    }
+    throw new Error('The first deep audit did not complete')
+  }, 45_000)
+
   test('returns a persisted combined result with downloadable page and report evidence', async () => {
     const status = await audit(['pricing'])
     expect(status.status).toBe('done')

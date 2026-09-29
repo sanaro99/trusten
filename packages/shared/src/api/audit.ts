@@ -44,6 +44,8 @@ export const QuickScanResponseSchema = z.object({
   grade: GradeSchema,
   score: z.number(),
   patterns: z.number(),
+  cached: z.boolean().optional(),
+  checkedAt: z.string().datetime().optional(),
 })
 export type QuickScanResponse = z.infer<typeof QuickScanResponseSchema>
 
@@ -61,6 +63,8 @@ export const AuditStartResponseSchema = z.object({
   domain: z.string(),
   capabilityToken: z.string(),
   capabilityExpiresAt: z.number(),
+  cached: z.boolean().optional(),
+  checkedAt: z.string().datetime().optional(),
 })
 export type AuditStartResponse = z.infer<typeof AuditStartResponseSchema>
 

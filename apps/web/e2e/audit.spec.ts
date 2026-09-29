@@ -1,5 +1,150 @@
 import { expect, test } from '@playwright/test'
 
+test('a repeat quick check opens its saved result and labels the check time', async ({
+  page,
+}) => {
+  await page.route('**/trusten/api/quick-scan', (route) =>
+    route.fulfill({
+      json: {
+        scanId: 'saved-quick',
+        domain: 'example.com',
+        grade: 'B',
+        score: 82,
+        patterns: 0,
+        cached: true,
+        checkedAt: '2026-09-29T12:00:00.000Z',
+      },
+    }),
+  )
+  await page.route('**/trusten/api/scan/saved-quick', (route) =>
+    route.fulfill({
+      json: {
+        id: 'saved-quick',
+        url: 'https://example.com/',
+        domain: 'example.com',
+        scanType: 'quick',
+        startedAt: '2026-09-29T11:59:00.000Z',
+        completedAt: '2026-09-29T12:00:00.000Z',
+        patterns: [],
+        score: {
+          numeric: 82,
+          grade: 'B',
+          summary: 'Saved result',
+          categoryBreakdown: {},
+        },
+        workflowSteps: [
+          {
+            stepNumber: 1,
+            action: 'Inspect the initial page',
+            url: 'https://example.com/',
+            screenshot: '',
+            screenshotPath: 'saved-evidence.jpg',
+            patternsFound: [],
+            timestamp: '2026-09-29T12:00:00.000Z',
+            status: 'observed',
+            visualCheckAvailable: false,
+          },
+        ],
+      },
+    }),
+  )
+  await page.goto('/')
+  await page.waitForLoadState('networkidle')
+  await page.getByLabel('Website address').fill('example.com')
+  await page
+    .getByRole('button', { name: 'Check this site', exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/scan\/saved-quick\?cached=1$/)
+  await expect(page.getByRole('status')).toContainText('Saved result from')
+})
+
+test('a repeat full check shows its saved report without starting live video', async ({
+  page,
+}) => {
+  let liveTicketRequests = 0
+  await page.route('**/trusten/api/audit', (route) =>
+    route.fulfill({
+      json: {
+        jobId: 'saved-job',
+        domain: 'example.com',
+        capabilityToken: 'saved-capability',
+        capabilityExpiresAt: Date.now() + 60_000,
+        cached: true,
+        checkedAt: '2026-09-29T12:00:00.000Z',
+      },
+    }),
+  )
+  await page.route('**/trusten/api/audit/saved-job/live-ticket', (route) => {
+    liveTicketRequests++
+    return route.fulfill({ status: 503 })
+  })
+  await page.route('**/trusten/api/audit/saved-job', (route) =>
+    route.fulfill({
+      json: {
+        jobId: 'saved-job',
+        status: 'done',
+        domain: 'example.com',
+        workflows: [],
+        completedWorkflows: ['overview'],
+        currentStep: 'done',
+        scanIds: ['saved-deep'],
+        error: null,
+        plan: [
+          {
+            id: 'overview',
+            name: 'Overview',
+            description: 'Inspect the page',
+            steps: 1,
+          },
+        ],
+        createdAt: '2026-09-29T11:59:00.000Z',
+        completedAt: '2026-09-29T12:00:00.000Z',
+      },
+    }),
+  )
+  await page.route('**/trusten/api/scan/saved-deep', (route) =>
+    route.fulfill({
+      json: {
+        id: 'saved-deep',
+        url: 'https://example.com/',
+        domain: 'example.com',
+        scanType: 'deep',
+        startedAt: '2026-09-29T11:59:00.000Z',
+        completedAt: '2026-09-29T12:00:00.000Z',
+        patterns: [],
+        score: {
+          numeric: 91,
+          grade: 'A',
+          summary: 'Saved report',
+          categoryBreakdown: {},
+        },
+        workflowSteps: [
+          {
+            stepNumber: 1,
+            action: 'Inspect the page',
+            url: 'https://example.com/',
+            screenshot: '',
+            patternsFound: [],
+            timestamp: '2026-09-29T12:00:00.000Z',
+            status: 'observed',
+          },
+        ],
+      },
+    }),
+  )
+
+  await page.goto('/audit')
+  await page.getByLabel('Website address').fill('example.com')
+  await page
+    .getByRole('button', { name: 'Start full check', exact: true })
+    .click()
+  await expect(page.getByRole('status')).toContainText('Saved full check from')
+  await expect(
+    page.getByRole('heading', { name: 'What we found', exact: true }),
+  ).toBeVisible()
+  expect(liveTicketRequests).toBe(0)
+})
+
 test('a blocked quick check accepts a bare address, explains the block, and offers the extension', async ({
   page,
 }) => {

@@ -132,6 +132,27 @@ describe('PublicScanAdmission', () => {
     )
   })
 
+  test('a completed quick check does not use the first deep-check domain allowance', async () => {
+    const gate = admission({
+      domainQuota: { limit: 1, windowMs: 600_000 },
+    })
+    const quick = await gate.admit(request)
+    await gate.release(quick.id)
+
+    const deep = await gate.admit({
+      ...request,
+      kind: 'audit',
+      anonymousSession: quick.sessionId,
+    })
+    expect(deep.target.url).toBe('https://example.com/path')
+    await gate.release(deep.id)
+
+    await expectCode(
+      gate.admit({ ...request, anonymousSession: quick.sessionId }),
+      'DOMAIN_QUOTA_EXCEEDED',
+    )
+  })
+
   test('reserves global capacity atomically and release is idempotent', async () => {
     const gate = admission({ maxOutstanding: 1 })
     const first = await gate.admit(request)

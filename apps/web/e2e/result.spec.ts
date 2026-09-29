@@ -15,7 +15,7 @@ test('a result page reads plainly and is accessible', async ({ page }) => {
 
   await page.goto(`/scan/${scans[0].id}`)
 
-  const body = await page.textContent('body')
+  const body = await page.locator('main').innerText()
   expect(body).not.toMatch(/confidence/i)
   expect(body).not.toMatch(/\b0\.\d\d\b/)
   expect(body).not.toMatch(/roach motel|zuckering|confirmshaming/i)

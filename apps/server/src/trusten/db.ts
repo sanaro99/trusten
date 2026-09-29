@@ -120,6 +120,24 @@ export async function getTrustenScanById(
   const rows = await getDb()`SELECT * FROM trusten_scans WHERE id=${id} LIMIT 1`
   return rows[0] ? mapScanRow(rows[0]) : null
 }
+
+/** Reuse only headless, public-page checks; extension captures may be private. */
+export async function getRecentPublicQuickScan(
+  url: string,
+  maxAgeMs?: number,
+): Promise<ScanResult | null> {
+  const cutoff = new Date(maxAgeMs === undefined ? 0 : Date.now() - maxAgeMs)
+  const rows = await getDb()`
+    SELECT * FROM trusten_scans
+    WHERE url = ${url}
+      AND scan_type = 'quick'
+      AND completed_at >= ${cutoff}
+      AND workflow_steps #>> '{0,action}' = 'Inspect the initial page'
+      AND workflow_steps #>> '{0,screenshotPath}' IS NOT NULL
+    ORDER BY completed_at DESC LIMIT 1
+  `
+  return rows[0] ? mapScanRow(rows[0]) : null
+}
 export async function getGlobalStats(): Promise<GlobalStats> {
   const [r] =
     await getDb()`SELECT COUNT(*)::int total_scans,COUNT(DISTINCT domain)::int total_domains,COALESCE(SUM(pattern_count),0)::int total_patterns,COALESCE(AVG(score_numeric),0)::float8 avg_score,COUNT(*) FILTER(WHERE score_grade='A')::int clean_sites,COUNT(*) FILTER(WHERE score_grade IN('D','F'))::int dirty_sites FROM trusten_scans`
@@ -192,6 +210,23 @@ export async function updateAuditJob(
 export async function getAuditJob(id: string): Promise<AuditJob | null> {
   const rows =
     await getDb()`SELECT * FROM trusten_audit_jobs WHERE id=${id} LIMIT 1`
+  return rows[0] ? mapAuditJobRow(rows[0]) : null
+}
+export async function getRecentCompletedAuditJob(
+  url: string,
+  workflows: string[],
+  maxAgeMs?: number,
+): Promise<AuditJob | null> {
+  const cutoff = new Date(maxAgeMs === undefined ? 0 : Date.now() - maxAgeMs)
+  const rows = await getDb()`
+    SELECT * FROM trusten_audit_jobs
+    WHERE url = ${url}
+      AND workflows = ${workflows}::jsonb
+      AND status = 'done'
+      AND completed_at >= ${cutoff}
+      AND jsonb_array_length(scan_ids) > 0
+    ORDER BY completed_at DESC LIMIT 1
+  `
   return rows[0] ? mapAuditJobRow(rows[0]) : null
 }
 export async function getRecentAuditJobs(limit = 20): Promise<AuditJob[]> {

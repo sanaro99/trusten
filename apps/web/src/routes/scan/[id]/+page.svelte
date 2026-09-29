@@ -111,6 +111,12 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
     <ul><li><a href="/">Dashboard</a></li><li><a href="/explore">Results</a></li><li>{data.scan.domain}</li></ul>
   </div>
 
+  {#if data.cached}
+    <div class="alert alert-info mt-5" role="status">
+      Saved result from {new Date(data.scan.completedAt).toLocaleString()}.
+    </div>
+  {/if}
+
   <header class="report-summary card mt-5 overflow-hidden">
     <div class="card-body gap-6 p-7 md:flex-row md:items-center md:p-10">
       {#if summary.limited}

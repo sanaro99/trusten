@@ -39,6 +39,7 @@ function reservation(
 ): PublicScanAdmissionReservation {
   return {
     id: 'lease-1',
+    kind: 'quick',
     generatedSessionId: 'session-1',
     clientIp: '203.0.113.10',
     domain: 'example.com',

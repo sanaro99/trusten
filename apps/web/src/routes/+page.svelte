@@ -43,7 +43,10 @@ async function check(event: SubmitEvent) {
       'quick_scan',
     )
     const result = await api.quickScan({ url, turnstileToken })
-    if (result.scanId) await goto(`/scan/${result.scanId}`)
+    if (result.scanId)
+      await goto(
+        `/scan/${encodeURIComponent(result.scanId)}${result.cached ? '?cached=1' : ''}`,
+      )
     else problem = 'We could not check that website. Please try again.'
   } catch (error) {
     problem = publicScanErrorMessage(error)

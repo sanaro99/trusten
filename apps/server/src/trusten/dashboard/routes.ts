@@ -19,6 +19,8 @@ import {
   getAuditJob,
   getDomainSummary,
   getGlobalStats,
+  getRecentCompletedAuditJob,
+  getRecentPublicQuickScan,
   getTrustenScanById,
   getTrustenScanHistory,
   getTrustenScansByDomain,
@@ -47,9 +49,20 @@ interface Config {
   admission: PublicScanAdmission
   capabilities: JobCapabilityAccess
   secureCookies?: boolean
+  recentQuickScan?: typeof getRecentPublicQuickScan
+  recentAuditJob?: typeof getRecentCompletedAuditJob
 }
 
 const DEMO_SESSION_COOKIE = 'trusten_demo'
+const RECENT_RESULT_MS = 10 * 60_000
+
+function canReuseAfterAdmissionError(error: PublicScanAdmissionError): boolean {
+  return (
+    error.code.endsWith('QUOTA_EXCEEDED') ||
+    error.code === 'SCAN_RETRY_LIMITED' ||
+    error.code === 'DEMO_BUSY'
+  )
+}
 
 function bearerToken(header: string | undefined): string | undefined {
   const match = /^Bearer\s+([^\s]+)$/i.exec(header ?? '')
@@ -126,6 +139,7 @@ function parseHostname(url: string): string | null {
 async function preScanGuard(
   url: string,
   domain: string,
+  kind: 'quick' | 'audit',
 ): Promise<
   | {
       allowed: false
@@ -147,7 +161,7 @@ async function preScanGuard(
       }
     }
   }
-  const reservation = reserveRateLimit(domain)
+  const reservation = reserveRateLimit(domain, kind)
   if (!reservation.allowed) {
     return {
       allowed: false,
@@ -162,6 +176,8 @@ async function preScanGuard(
 
 export function createTrustenDashboardRoutes(config: Config) {
   const app = new Hono()
+  const findQuickScan = config.recentQuickScan ?? getRecentPublicQuickScan
+  const findAuditJob = config.recentAuditJob ?? getRecentCompletedAuditJob
 
   // Step screenshot — served directly from the saved file
   app.get('/report/:id/screenshot/:step', async (c) => {
@@ -312,8 +328,22 @@ export function createTrustenDashboardRoutes(config: Config) {
         clientIp: clientIp(c.req.raw.headers),
       })
     } catch (error) {
-      if (error instanceof PublicScanAdmissionError)
+      if (error instanceof PublicScanAdmissionError) {
+        if (canReuseAfterAdmissionError(error)) {
+          const cached = await findQuickScan(url)
+          if (cached)
+            return c.json({
+              scanId: cached.id,
+              domain: cached.domain,
+              grade: cached.score.grade,
+              score: cached.score.numeric,
+              patterns: cached.patterns.length,
+              cached: true,
+              checkedAt: cached.completedAt,
+            })
+        }
         return admissionResponse(c, error)
+      }
       throw error
     }
 
@@ -321,7 +351,22 @@ export function createTrustenDashboardRoutes(config: Config) {
     let completed = false
     setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
     try {
-      guard = await preScanGuard(admitted.target.url, admitted.target.hostname)
+      const cached = await findQuickScan(admitted.target.url, RECENT_RESULT_MS)
+      if (cached)
+        return c.json({
+          scanId: cached.id,
+          domain: cached.domain,
+          grade: cached.score.grade,
+          score: cached.score.numeric,
+          patterns: cached.patterns.length,
+          cached: true,
+          checkedAt: cached.completedAt,
+        })
+      guard = await preScanGuard(
+        admitted.target.url,
+        admitted.target.hostname,
+        'quick',
+      )
       if (!guard.allowed) {
         if (guard.retryAfterSeconds)
           c.header('Retry-After', String(guard.retryAfterSeconds))
@@ -385,14 +430,58 @@ export function createTrustenDashboardRoutes(config: Config) {
         clientIp: clientIp(c.req.raw.headers),
       })
     } catch (error) {
-      if (error instanceof PublicScanAdmissionError)
+      if (error instanceof PublicScanAdmissionError) {
+        if (canReuseAfterAdmissionError(error)) {
+          const cached = await findAuditJob(url, validWorkflows)
+          if (cached) {
+            const capability = await config.capabilities.issue(cached.id)
+            return c.json({
+              jobId: cached.id,
+              domain: cached.domain,
+              capabilityToken: capability.token,
+              capabilityExpiresAt: capability.expiresAt,
+              cached: true,
+              checkedAt: cached.completedAt ?? cached.createdAt,
+            })
+          }
+        }
         return admissionResponse(c, error)
+      }
       throw error
+    }
+
+    let cached: Awaited<ReturnType<typeof getRecentCompletedAuditJob>>
+    try {
+      cached = await findAuditJob(
+        admitted.target.url,
+        validWorkflows,
+        RECENT_RESULT_MS,
+      )
+    } catch (error) {
+      await config.admission.cancel(admitted.id)
+      throw error
+    }
+    if (cached) {
+      await config.admission.cancel(admitted.id)
+      const capability = await config.capabilities.issue(cached.id)
+      setDemoSession(c, admitted.sessionId, config.secureCookies ?? true)
+      return c.json({
+        jobId: cached.id,
+        domain: cached.domain,
+        capabilityToken: capability.token,
+        capabilityExpiresAt: capability.expiresAt,
+        cached: true,
+        checkedAt: cached.completedAt ?? cached.createdAt,
+      })
     }
 
     let guard: Awaited<ReturnType<typeof preScanGuard>>
     try {
-      guard = await preScanGuard(admitted.target.url, admitted.target.hostname)
+      guard = await preScanGuard(
+        admitted.target.url,
+        admitted.target.hostname,
+        'audit',
+      )
     } catch (error) {
       await config.admission.cancel(admitted.id)
       throw error

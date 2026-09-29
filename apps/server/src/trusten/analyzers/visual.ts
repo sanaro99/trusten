@@ -16,7 +16,7 @@
  * defense against visual patterns that text-only analyzers miss.
  */
 
-import { getTrustenLLM } from '../llm/client'
+import { getTrustenLLM, type TrustenLLMClient } from '../llm/client'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
@@ -45,26 +45,36 @@ export class VisualAnalyzer extends BaseAnalyzer {
   name = 'VisualAnalyzer'
   categories = Object.values(DarkPatternCategory)
 
+  constructor(private readonly client?: TrustenLLMClient) {
+    super()
+  }
+
   async analyze(context: AnalyzerContext): Promise<AnalyzerResult> {
-    // Need at least some text or a screenshot to analyze
-    if (!context.visibleText && !context.screenshotBase64) {
-      return { patterns: [] }
-    }
+    // A text response alone is not evidence that the screenshot was checked.
+    if (!context.screenshotBase64)
+      return { patterns: [], metadata: { visualCheckAvailable: false } }
 
     const text =
       context.visibleText || this.extractVisibleText(context.domSnapshot)
 
     try {
-      const llm = getTrustenLLM()
+      const llm = this.client ?? getTrustenLLM()
+      if (!llm.isConfigured() || !llm.supportsImages())
+        return { patterns: [], metadata: { visualCheckAvailable: false } }
       const raw = await llm.analyzeForPatterns({
         analysisType:
           'comprehensive visual dark pattern scan — examine ALL categories including visual design manipulation, countdown timers, fake social proof, asymmetric button styling, price inflation, and consent dark patterns',
         context: text.slice(0, 4000),
         screenshotBase64: context.screenshotBase64 || undefined,
+        requireImage: true,
       })
 
+      const patterns = this.parseLLMResponse(raw, context)
+      if (!patterns)
+        return { patterns: [], metadata: { visualCheckAvailable: false } }
+
       return {
-        patterns: this.parseLLMResponse(raw, context),
+        patterns,
         metadata: { visualCheckAvailable: true },
       }
     } catch {
@@ -75,9 +85,11 @@ export class VisualAnalyzer extends BaseAnalyzer {
   private parseLLMResponse(
     raw: string,
     context: AnalyzerContext,
-  ): DetectedPattern[] {
+  ): DetectedPattern[] | null {
     try {
-      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
+      const matched = raw.match(/\{[\s\S]*\}/)?.[0]
+      if (!matched) return null
+      const json = JSON.parse(matched) as {
         patterns?: Array<{
           category: string
           severity: string
@@ -87,7 +99,7 @@ export class VisualAnalyzer extends BaseAnalyzer {
         }>
       }
 
-      if (!Array.isArray(json.patterns)) return []
+      if (!Array.isArray(json.patterns)) return null
 
       return json.patterns
         .filter((p) => p.confidence >= 0.65)
@@ -115,7 +127,7 @@ export class VisualAnalyzer extends BaseAnalyzer {
           })
         })
     } catch {
-      return []
+      return null
     }
   }
 }

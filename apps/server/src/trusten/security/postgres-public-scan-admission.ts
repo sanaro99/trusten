@@ -49,7 +49,11 @@ export class PostgresPublicScanAdmissionPersistence
       const dimensions = [
         ['session', sessionId, reservation.sessionQuota],
         ['ip', reservation.clientIp, reservation.ipQuota],
-        ['domain', reservation.domain, reservation.domainQuota],
+        [
+          'domain',
+          `${reservation.kind}:${reservation.domain}`,
+          reservation.domainQuota,
+        ],
       ] as const
       for (const [dimension, key, quota] of dimensions) {
         const blocked = await this.quotaBlocked(tx, dimension, key, quota, now)
