@@ -2,7 +2,8 @@
  * Trusten LLM Client
  *
  * Lightweight LLM utility for semantic analysis in Trusten analyzers.
- * Supports: Nvidia NIM, Google Gemini, DeepSeek, OpenRouter, Ollama (local).
+ * Supports: Cloudflare Workers AI, Groq, Gemini, Nvidia NIM, DeepSeek,
+ * OpenRouter, and Ollama (local).
  *
  * All providers expose an OpenAI-compatible chat completions API,
  * so we use a single fetch-based implementation with provider-specific
@@ -22,6 +23,16 @@ interface ProviderDefaults {
 }
 
 const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
+  cloudflare: {
+    baseUrl: '', // The endpoint includes the configured Cloudflare account ID.
+    defaultModel: '@cf/meta/llama-4-scout-17b-16e-instruct',
+    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
+  },
+  groq: {
+    baseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'qwen/qwen3.8-27b',
+    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
+  },
   'nvidia-nim': {
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     defaultModel: 'meta/llama-3.1-70b-instruct',
@@ -29,7 +40,7 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
   },
   gemini: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel: 'gemini-2.0-flash',
+    defaultModel: 'gemini-2.5-flash',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
   },
   deepseek: {
@@ -55,9 +66,11 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
 
 /** Auto-detect + fallback order when TRUSTEN_LLM_PROVIDER is not set */
 const FALLBACK_CHAIN: TrustenLLMProvider[] = [
-  'deepseek',
-  'nvidia-nim',
+  'cloudflare',
+  'groq',
   'gemini',
+  'nvidia-nim',
+  'deepseek',
   'openrouter',
   'ollama',
 ]
@@ -73,42 +86,7 @@ const LLM_TIMEOUT_MS = Number(process.env.TRUSTEN_LLM_TIMEOUT_MS ?? 8000)
  * each eat a full timeout against the same dead endpoint.
  */
 const UNREACHABLE_TTL_MS = 60_000
-const unreachableUntil = new Map<TrustenLLMProvider, number>()
-
-/**
- * A single transient failure (e.g. one slow call during the ~11 parallel
- * analyzer requests) must NOT disable a provider for a full minute — that
- * would poison the deep scan that runs moments later. Only circuit-break a
- * provider after this many consecutive failures; any success resets the count.
- */
 const STRIKE_THRESHOLD = Number(process.env.TRUSTEN_LLM_STRIKES ?? 3)
-const failureStrikes = new Map<TrustenLLMProvider, number>()
-
-function isUnreachable(p: TrustenLLMProvider): boolean {
-  const until = unreachableUntil.get(p)
-  return until !== undefined && Date.now() < until
-}
-
-function markUnreachable(p: TrustenLLMProvider): void {
-  const strikes = (failureStrikes.get(p) ?? 0) + 1
-  failureStrikes.set(p, strikes)
-  if (strikes >= STRIKE_THRESHOLD) {
-    unreachableUntil.set(p, Date.now() + UNREACHABLE_TTL_MS)
-  }
-}
-
-/** A successful call clears the circuit breaker and strike count. */
-function markReachable(p: TrustenLLMProvider): void {
-  failureStrikes.delete(p)
-  unreachableUntil.delete(p)
-}
-
-/**
- * Models that have rejected image input at runtime (learned the first time a
- * screenshot call 400s with a "not multimodal" error). Lets us attempt vision
- * on e.g. deepseek-v4-flash once, then fall back to text-only for the session.
- */
-const textOnlyModels = new Set<string>()
 
 function messagesHaveImage(messages: LLMMessage[]): boolean {
   return messages.some(
@@ -139,11 +117,18 @@ function isImageRejection(errorText: string): boolean {
 
 function getApiKey(provider: TrustenLLMProvider): string {
   switch (provider) {
+    case 'cloudflare':
+      return process.env.CLOUDFLARE_API_TOKEN ?? ''
+    case 'groq':
+      return process.env.GROQ_API_KEY ?? ''
     case 'nvidia-nim':
       return process.env.NVIDIA_NIM_API_KEY ?? ''
     case 'gemini':
       return (
-        process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
+        process.env.TRUSTEN_GEMINI_API_KEY ||
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        ''
       )
     case 'deepseek':
       return process.env.DEEPSEEK_API_KEY ?? ''
@@ -155,13 +140,53 @@ function getApiKey(provider: TrustenLLMProvider): string {
 }
 
 function hasCredentials(provider: TrustenLLMProvider): boolean {
-  return provider === 'ollama' || getApiKey(provider).length > 0
+  return isUsableConfig(resolveExplicitConfig(provider))
+}
+
+function isUsableConfig(config: TrustenLLMConfig): boolean {
+  if (config.provider === 'ollama') return true
+  if (!config.apiKey?.trim()) return false
+  return (
+    config.provider !== 'cloudflare' ||
+    Boolean(config.accountId?.trim() || config.baseUrl)
+  )
+}
+
+function modelSupportsImages(
+  config: TrustenLLMConfig,
+  textOnlyModels: Set<string>,
+): boolean {
+  const model = (
+    config.model ?? PROVIDER_DEFAULTS[config.provider].defaultModel
+  ).toLowerCase()
+  if (textOnlyModels.has(model)) return false
+  const env = process.env.TRUSTEN_LLM_VISION?.toLowerCase()
+  if (env === '1' || env === 'true') return true
+  if (env === '0' || env === 'false') return false
+  return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|llama-4-(scout|maverick)|qwen.*(vl|3\.8)|multimodal|deepseek-v4|deepseek-flash/.test(
+    model,
+  )
 }
 
 // ─── Environment-based config resolution ───
 
 function resolveExplicitConfig(provider: TrustenLLMProvider): TrustenLLMConfig {
   switch (provider) {
+    case 'cloudflare':
+      return {
+        provider,
+        apiKey: getApiKey(provider),
+        accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+        baseUrl: process.env.CLOUDFLARE_BASE_URL,
+        model: process.env.CLOUDFLARE_MODEL,
+      }
+    case 'groq':
+      return {
+        provider,
+        apiKey: getApiKey(provider),
+        baseUrl: process.env.GROQ_BASE_URL,
+        model: process.env.GROQ_MODEL,
+      }
     case 'nvidia-nim':
       return {
         provider,
@@ -172,8 +197,7 @@ function resolveExplicitConfig(provider: TrustenLLMProvider): TrustenLLMConfig {
     case 'gemini':
       return {
         provider,
-        apiKey:
-          process.env.TRUSTEN_GEMINI_API_KEY || process.env.GEMINI_API_KEY,
+        apiKey: getApiKey(provider),
         baseUrl: process.env.GEMINI_BASE_URL,
         model: process.env.GEMINI_MODEL,
       }
@@ -261,9 +285,40 @@ interface ChatCompletionResponse {
 
 export class TrustenLLMClient {
   private config: TrustenLLMConfig
+  // The production singleton shares these across parallel analyzers. Separate
+  // clients/accounts do not inherit another configuration's failures.
+  private readonly unreachableUntil = new Map<TrustenLLMProvider, number>()
+  private readonly failureStrikes = new Map<TrustenLLMProvider, number>()
+  private readonly textOnlyModels = new Set<string>()
+
+  private isUnreachable(provider: TrustenLLMProvider): boolean {
+    const until = this.unreachableUntil.get(provider)
+    return until !== undefined && Date.now() < until
+  }
+
+  private markUnreachable(provider: TrustenLLMProvider): void {
+    const strikes = (this.failureStrikes.get(provider) ?? 0) + 1
+    this.failureStrikes.set(provider, strikes)
+    if (strikes >= STRIKE_THRESHOLD)
+      this.unreachableUntil.set(provider, Date.now() + UNREACHABLE_TTL_MS)
+  }
+
+  private markReachable(provider: TrustenLLMProvider): void {
+    this.failureStrikes.delete(provider)
+    this.unreachableUntil.delete(provider)
+  }
 
   constructor(config?: TrustenLLMConfig) {
-    this.config = config ?? resolveConfig()
+    const environment = config
+      ? resolveExplicitConfig(config.provider)
+      : resolveConfig()
+    this.config = {
+      provider: environment.provider,
+      apiKey: config?.apiKey ?? environment.apiKey,
+      accountId: config?.accountId ?? environment.accountId,
+      baseUrl: config?.baseUrl ?? environment.baseUrl,
+      model: config?.model ?? environment.model,
+    }
     logger.info('Trusten LLM client initialized', {
       provider: this.config.provider,
       model:
@@ -276,85 +331,83 @@ export class TrustenLLMClient {
     return this.config.provider
   }
 
-  /**
-   * Whether a usable LLM is configured: an explicitly-selected provider with
-   * credentials (or Ollama), or — in auto-detect mode — any cloud provider key.
-   * Note this reflects *configuration*, not live reachability; transient
-   * outages are handled by retries + the circuit breaker. The engine uses this
-   * to decide between AI-driven navigation and the deterministic fallback, and
-   * to report honestly when no LLM is available at all.
-   */
+  /** Whether the primary or a cloud fallback has the required credentials. */
   isConfigured(): boolean {
-    if (this.config.apiKey || this.config.provider === 'ollama') return true
-    const explicit = process.env.TRUSTEN_LLM_PROVIDER as
-      | TrustenLLMProvider
-      | undefined
-    if (explicit && explicit in PROVIDER_DEFAULTS) {
-      return explicit === 'ollama' || hasCredentials(explicit)
-    }
-    // Auto-detect: only count a real cloud key as "configured". Falling back to
-    // local Ollama when nothing is set should NOT read as configured, since it
-    // usually is not running.
-    return FALLBACK_CHAIN.some((p) => p !== 'ollama' && hasCredentials(p))
-  }
-
-  /**
-   * Whether the configured model can accept images. Sending a screenshot to a
-   * text-only model (e.g. `meta/llama-3.1-70b-instruct`) returns a 400
-   * "not a multimodal model" — so visual analysis must fall back to text-only.
-   * Override with TRUSTEN_LLM_VISION=1/0; otherwise inferred from the model name.
-   */
-  supportsImages(): boolean {
-    const model = (
-      this.config.model ?? PROVIDER_DEFAULTS[this.config.provider].defaultModel
-    ).toLowerCase()
-    if (textOnlyModels.has(model)) return false
-    const env = process.env.TRUSTEN_LLM_VISION?.toLowerCase()
-    if (env === '1' || env === 'true') return true
-    if (env === '0' || env === 'false') return false
-    // Attempt vision for known/likely multimodal models. DeepSeek V4 is included
-    // optimistically; if it rejects the image we cache it and fall back to text.
-    return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|qwen.*vl|multimodal|deepseek-v4|deepseek-flash/.test(
-      model,
+    return (
+      isUsableConfig(this.config) ||
+      FALLBACK_CHAIN.some(
+        (provider) => provider !== 'ollama' && hasCredentials(provider),
+      )
     )
   }
 
-  /**
-   * Build the OpenAI-compatible request for `provider`. Only the primary
-   * provider honors explicit config overrides (baseUrl/model/apiKey); fallback
-   * providers always use their defaults.
-   */
+  /** Includes configured vision fallbacks when the primary is text-only. */
+  supportsImages(): boolean {
+    return this.availableConfigs().some((config) =>
+      modelSupportsImages(config, this.textOnlyModels),
+    )
+  }
+
+  private configFor(provider: TrustenLLMProvider): TrustenLLMConfig {
+    return provider === this.config.provider
+      ? this.config
+      : resolveExplicitConfig(provider)
+  }
+
+  /** Try an explicitly pinned provider first, then each configured alternative once. */
+  private availableConfigs(primary = this.config.provider): TrustenLLMConfig[] {
+    return [
+      primary,
+      ...FALLBACK_CHAIN.filter((provider) => provider !== primary),
+    ]
+      .map((provider) => this.configFor(provider))
+      .filter(isUsableConfig)
+  }
+
   private buildRequest(
-    provider: TrustenLLMProvider,
+    config: TrustenLLMConfig,
     options: LLMCompletionOptions,
-    useOverrides: boolean,
   ): {
     url: string
     headers: Record<string, string>
-    body: unknown
+    body: Record<string, unknown>
     model: string
   } {
+    const { provider } = config
     const defaults = PROVIDER_DEFAULTS[provider]
     const baseUrl =
-      (useOverrides ? this.config.baseUrl : undefined) ?? defaults.baseUrl
-    const model =
-      (useOverrides ? this.config.model : undefined) ?? defaults.defaultModel
-    const apiKey =
-      (useOverrides ? this.config.apiKey : undefined) ?? getApiKey(provider)
-
+      config.baseUrl ??
+      (provider === 'cloudflare'
+        ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.accountId?.trim() ?? '')}/ai/v1`
+        : defaults.baseUrl)
+    const model = config.model ?? defaults.defaultModel
+    const body: Record<string, unknown> = {
+      model,
+      messages: options.messages,
+      ...(provider === 'groq'
+        ? { max_completion_tokens: options.maxTokens ?? 1024 }
+        : { max_tokens: options.maxTokens ?? 1024 }),
+    }
+    // Match Applination's Gemini 3 handling: omit unsupported sampling controls.
+    if (provider === 'gemini' && model.startsWith('gemini-3')) {
+      body.reasoning_effort = 'low'
+    } else {
+      body.temperature = options.temperature ?? 0.1
+      if (
+        provider === 'gemini' &&
+        /^gemini-2\.5-flash(?:$|-lite$)/.test(model)
+      ) {
+        body.reasoning_effort = 'none'
+      }
+    }
     return {
       url: `${baseUrl.replace(/\/$/, '')}/chat/completions`,
       headers: {
         'Content-Type': 'application/json',
         ...(defaults.extraHeaders ?? {}),
-        ...(apiKey ? defaults.authHeader(apiKey) : {}),
+        ...(config.apiKey ? defaults.authHeader(config.apiKey) : {}),
       },
-      body: {
-        model,
-        messages: options.messages,
-        temperature: options.temperature ?? 0.1,
-        max_tokens: options.maxTokens ?? 1024,
-      },
+      body,
       model,
     }
   }
@@ -385,72 +438,79 @@ export class TrustenLLMClient {
     return data.choices[0].message.content
   }
 
-  /**
-   * Send a chat completion request.
-   * Returns the assistant's response text.
-   */
-  async complete(options: LLMCompletionOptions): Promise<string> {
-    const provider = options.provider ?? this.config.provider
-
-    if (isUnreachable(provider)) {
-      if (options.requireImage)
-        throw new Error(`Trusten vision provider ${provider} is unavailable`)
-      const next = this.nextInChain(provider)
-      if (next) return this.tryFallback(options, next)
-      throw new Error(`Trusten LLM: ${provider} unreachable`)
-    }
-
-    const { url, headers, body, model } = this.buildRequest(
-      provider,
-      options,
-      true,
-    )
-
+  private async completeWithProvider(
+    config: TrustenLLMConfig,
+    options: LLMCompletionOptions,
+  ): Promise<string> {
+    const request = this.buildRequest(config, options)
+    const timeout = options.timeoutMs ?? LLM_TIMEOUT_MS
     try {
-      const content = await this.sendRequest(
-        url,
-        headers,
-        body,
-        options.timeoutMs ?? LLM_TIMEOUT_MS,
+      return await this.sendRequest(
+        request.url,
+        request.headers,
+        request.body,
+        timeout,
       )
-      markReachable(provider)
-      return content
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
-      // The model can't accept images → cache that, drop the screenshot, and
-      // retry text-only once on the same provider (it is reachable, just text).
       if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
-        textOnlyModels.add(model.toLowerCase())
-        if (options.requireImage) {
-          logger.warn('Trusten vision model rejected image input', {
-            provider,
-            model,
-          })
-          throw new Error(`Trusten vision model ${model} rejected image input`)
-        }
-        logger.warn(
-          'Trusten LLM: model rejected image input, retrying text-only',
-          { provider, model },
-        )
-        return this.complete({
-          ...options,
-          messages: stripImages(options.messages),
+        this.textOnlyModels.add(request.model.toLowerCase())
+        logger.warn('Trusten LLM model rejected image input', {
+          provider: config.provider,
+          model: request.model,
         })
+        // Required screenshots stay attached when moving to the next provider.
+        if (!options.requireImage) {
+          const retry = this.buildRequest(config, {
+            ...options,
+            messages: stripImages(options.messages),
+          })
+          return this.sendRequest(retry.url, retry.headers, retry.body, timeout)
+        }
       }
-      markUnreachable(provider)
-      if (options.requireImage) {
-        logger.error('Trusten vision request failed', {
+      throw error
+    }
+  }
+
+  /** Try each usable provider once, preserving required screenshots on fallback. */
+  async complete(options: LLMCompletionOptions): Promise<string> {
+    if (options.requireImage && !messagesHaveImage(options.messages)) {
+      throw new Error('Trusten vision request requires a screenshot')
+    }
+    const primary = options.provider ?? this.config.provider
+    let lastError: unknown = new Error(
+      options.requireImage
+        ? 'No screenshot-capable provider is available'
+        : 'No usable LLM provider is configured',
+    )
+    for (const config of this.availableConfigs(primary)) {
+      const { provider } = config
+      if (this.isUnreachable(provider)) continue
+      if (
+        options.requireImage &&
+        !modelSupportsImages(config, this.textOnlyModels)
+      )
+        continue
+      if (provider !== primary)
+        logger.warn('Trusten LLM: trying fallback', { provider })
+      try {
+        const content = await this.completeWithProvider(config, options)
+        this.markReachable(provider)
+        return content
+      } catch (error) {
+        lastError = error
+        const msg = error instanceof Error ? error.message : String(error)
+        if (!isImageRejection(msg)) this.markUnreachable(provider)
+        logger.warn('Trusten LLM provider request failed', {
           provider,
-          model,
+          model: config.model ?? PROVIDER_DEFAULTS[provider].defaultModel,
           error: msg,
         })
-        throw error
       }
-      const next = this.nextInChain(provider)
-      if (next) return this.tryFallback(options, next)
-      logger.error('Trusten LLM request failed (all providers)', { error: msg })
-      throw new Error(`Trusten LLM failed: ${msg}`)
     }
+    const message =
+      lastError instanceof Error ? lastError.message : String(lastError)
+    throw new Error(`Trusten LLM failed: ${message}`)
   }
 
   /**
@@ -541,69 +601,7 @@ Analyze the above content and return your findings as JSON.`
       requireImage: params.requireImage,
     })
   }
-
-  /** Returns the next available provider after `current` in the fallback chain. */
-  private nextInChain(current: TrustenLLMProvider): TrustenLLMProvider | null {
-    const idx = FALLBACK_CHAIN.indexOf(current)
-    for (let i = idx + 1; i < FALLBACK_CHAIN.length; i++) {
-      const next = FALLBACK_CHAIN[i]
-      if (!isUnreachable(next) && hasCredentials(next)) return next
-    }
-    return null
-  }
-
-  private async tryFallback(
-    options: LLMCompletionOptions,
-    fallbackProvider: TrustenLLMProvider,
-  ): Promise<string> {
-    logger.warn(
-      `Trusten LLM: primary provider failed, trying fallback: ${fallbackProvider}`,
-    )
-
-    if (isUnreachable(fallbackProvider) || !hasCredentials(fallbackProvider)) {
-      const next = this.nextInChain(fallbackProvider)
-      if (next) return this.tryFallback(options, next)
-      throw new Error('Trusten LLM: all providers unreachable')
-    }
-
-    const { url, headers, body, model } = this.buildRequest(
-      fallbackProvider,
-      options,
-      false,
-    )
-
-    try {
-      const content = await this.sendRequest(
-        url,
-        headers,
-        body,
-        options.timeoutMs ?? LLM_TIMEOUT_MS,
-      )
-      markReachable(fallbackProvider)
-      return content
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error)
-      // Fallback model can't accept images → cache + retry text-only once.
-      if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
-        textOnlyModels.add(model.toLowerCase())
-        logger.warn(
-          'Trusten LLM: fallback model rejected image input, retrying text-only',
-          { provider: fallbackProvider, model },
-        )
-        return this.tryFallback(
-          { ...options, messages: stripImages(options.messages) },
-          fallbackProvider,
-        )
-      }
-      markUnreachable(fallbackProvider)
-      const next = this.nextInChain(fallbackProvider)
-      if (next) return this.tryFallback(options, next)
-      throw new Error(`All LLM providers failed. Last error: ${msg}`)
-    }
-  }
 }
-
-// ─── Singleton instance ───
 
 let _instance: TrustenLLMClient | null = null
 

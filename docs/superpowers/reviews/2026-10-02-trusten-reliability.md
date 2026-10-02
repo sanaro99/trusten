@@ -20,7 +20,13 @@ Verification:
 
 Operational limits:
 
-- Local service logs contain vision-provider HTTP 402 “Insufficient Balance”. Restoring that provider requires account funding or a configured replacement; this phase makes missing analysis explicit. No provider credentials or deployment configuration were changed.
-- Rechecked before opening the PR using the configured `deepseek-v4-flash` model and a small screenshot completion with image input required. The provider still returned HTTP 402 “Insufficient Balance”. PR preparation continued as requested.
+- The initial DeepSeek recheck returned HTTP 402 “Insufficient Balance”. After the requested provider replacement, the ignored local server environment selects Gemini 2.5 Flash with a 30-second timeout. The live Trusten client read “Trusten” from a screenshot; the full VisualAnalyzer returned valid scan JSON and `visualCheckAvailable: true` in 17.7 seconds. Gemini 3.8 timed out at 45 seconds and was not selected locally.
+- Cloudflare Workers AI and Groq integrations reuse Applination's endpoint/authentication conventions with current vision models. Their wire contracts are tested, but live calls were not verified because credentials were unavailable. Required-image fallback preserves screenshots and never counts a text retry as visual coverage. Deployment configuration remains unchanged.
 - The broad pre-existing Windows/Bun browser redirect-policy test can crash Bun. PDF and audit browser regressions were run separately. Default test skips remain opt-in integration suites, not assertions of complete browser coverage.
 - Changes are local and have not been deployed. Database migration 007 runs through the existing migration runner on deployment. Completed-result refresh recovery is implemented; an in-progress job is not resumed across reloads.
+
+Provider follow-up verification:
+
+- Provider client suite: 15 passed, including credential/endpoint isolation, partial configuration inheritance, payment/image rejection fallback, exhausted visual providers and circuit isolation. New regressions were observed failing before implementation.
+- Workspace TypeScript checks and changed-file Biome checks passed. The fresh full root suite after the provider extension reported 316 passed, 58 opt-in skipped, zero failures.
+- Independent review identified partial explicit configuration dropping environment credentials; the constructor now merges missing values from the provider environment and preserves explicit overrides.
