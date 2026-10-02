@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { closeDb, getDb, initializeDb } from '../../lib/db'
 import type { BrowserDriver } from '../browser/driver'
 import {
@@ -157,6 +159,34 @@ describe.skipIf(!databaseUrl)('saved public scan responses', () => {
       cached: true,
       checkedAt: saved.completedAt,
     })
+  })
+
+  test('downloads the saved HTML report when PDF rendering was unavailable', async () => {
+    const directory = path.resolve('.trusten-local', 'html-download-tests')
+    mkdirSync(directory, { recursive: true })
+    const htmlPath = path.join(directory, `${crypto.randomUUID()}.html`)
+    const html =
+      '<!doctype html><html><body><h1>Saved evidence</h1></body></html>'
+    writeFileSync(htmlPath, html)
+    try {
+      const saved = fixture(
+        `https://html-${crypto.randomUUID()}.example/`,
+        'quick',
+      )
+      await saveTrustenScan(saved, { htmlPath })
+      const response = await route().app.request(`/report/${saved.id}/html`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toContain('text/html')
+      expect(response.headers.get('content-disposition')).toContain(
+        'attachment;',
+      )
+      expect(response.headers.get('content-security-policy')).toContain(
+        'sandbox',
+      )
+      expect(await response.text()).toBe(html)
+    } finally {
+      unlinkSync(htmlPath)
+    }
   })
 
   test('does not offer extension-captured content as a public cached result', async () => {

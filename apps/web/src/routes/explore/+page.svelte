@@ -2,20 +2,21 @@
 import type { ScanHistoryRow } from '@trusten/shared/api'
 import type { Grade } from '@trusten/shared/domain'
 import { GradeBadge } from '@trusten/ui/domain'
+import {
+  canCompareChecks,
+  type DomainGroup,
+  groupHistory,
+  matchesWebsite,
+  historyTime as timeValue,
+} from '$lib/history-content'
 import { hasConclusiveGrade, historyCoverageLabel } from '$lib/history-coverage'
 import type { PageData } from './$types'
-
-type DomainGroup = {
-  domain: string
-  scans: ScanHistoryRow[]
-  latest: ScanHistoryRow
-  previous?: ScanHistoryRow
-}
 
 let { data }: { data: PageData } = $props()
 let query = $state('')
 let verdict = $state('all')
 let concern = $state('all')
+let coverage = $state('all')
 let sort = $state('newest')
 
 const dateFormatter = new Intl.DateTimeFormat('en', {
@@ -23,11 +24,6 @@ const dateFormatter = new Intl.DateTimeFormat('en', {
   month: 'short',
   year: 'numeric',
 })
-
-function timeValue(value: string): number {
-  const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
 
 function verdictText(grade: string): string {
   if (grade === 'A') return 'No clear concerns found'
@@ -38,8 +34,8 @@ function verdictText(grade: string): string {
 }
 
 function concernText(scan: ScanHistoryRow): string {
-  const limited = historyCoverageLabel(scan)
-  if (limited) return limited
+  if (!hasConclusiveGrade(scan))
+    return historyCoverageLabel(scan) ?? 'Limited check'
   const serious = scan.criticalCount + scan.highCount
   if (serious > 0)
     return `${serious} serious ${serious === 1 ? 'concern' : 'concerns'}`
@@ -52,37 +48,23 @@ function trendText(group: DomainGroup): string {
   if (!hasConclusiveGrade(group.latest))
     return 'Open the result to review the evidence'
   if (!group.previous) return 'First check'
-  if (!hasConclusiveGrade(group.previous)) return 'No comparable previous grade'
+  if (!canCompareChecks(group.latest, group.previous))
+    return 'No comparable previous check'
   const change = group.latest.scoreNumeric - group.previous.scoreNumeric
   if (change >= 5) return 'Improved since the previous check'
   if (change <= -5) return 'More concerning than the previous check'
   return 'Similar to the previous check'
 }
 
-const groups = $derived.by(() => {
-  const grouped = new Map<string, ScanHistoryRow[]>()
-  for (const scan of data.history.scans) {
-    const key = scan.domain.toLowerCase()
-    grouped.set(key, [...(grouped.get(key) ?? []), scan])
-  }
-
-  return Array.from(grouped.values()).map((scans): DomainGroup => {
-    const ordered = scans.toSorted(
-      (a, b) => timeValue(b.createdAt) - timeValue(a.createdAt),
-    )
-    return {
-      domain: ordered[0].domain,
-      scans: ordered,
-      latest: ordered[0],
-      previous: ordered[1],
-    }
-  })
-})
+const groups = $derived(groupHistory(data.history.scans))
 
 const results = $derived.by(() => {
   const search = query.trim().toLowerCase()
   const filtered = groups.filter((group) => {
-    if (search && !group.domain.toLowerCase().includes(search)) return false
+    if (!matchesWebsite(group.domain, search)) return false
+    if (coverage === 'complete' && !hasConclusiveGrade(group.latest))
+      return false
+    if (coverage === 'limited' && hasConclusiveGrade(group.latest)) return false
     if (
       verdict === 'clear' &&
       (!hasConclusiveGrade(group.latest) || group.latest.patternCount > 0)
@@ -115,6 +97,7 @@ function clearFilters() {
   query = ''
   verdict = 'all'
   concern = 'all'
+  coverage = 'all'
   sort = 'newest'
 }
 </script>
@@ -154,10 +137,10 @@ function clearFilters() {
         <button class="btn btn-ghost btn-sm" type="button" onclick={clearFilters}>Clear filters</button>
       </div>
 
-      <div class="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div class="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <label class="form-control md:col-span-2 lg:col-span-1">
-          <span class="mb-2 font-semibold">Website name</span>
-          <input class="input w-full shadow-inner" type="search" bind:value={query} placeholder="example.com" />
+          <span class="mb-2 font-semibold">Website name or URL</span>
+          <input class="input w-full shadow-inner" type="search" bind:value={query} placeholder="example.com or a URL" />
         </label>
         <label class="form-control">
           <span class="mb-2 font-semibold">Latest verdict</span>
@@ -173,6 +156,14 @@ function clearFilters() {
             <option value="all">Any concern</option>
             <option value="serious">Serious concerns</option>
             <option value="other">Other concerns</option>
+          </select>
+        </label>
+        <label class="form-control">
+          <span class="mb-2 font-semibold">Check coverage</span>
+          <select class="select w-full shadow-inner" bind:value={coverage}>
+            <option value="all">Any coverage</option>
+            <option value="complete">Complete for its scope</option>
+            <option value="limited">Limited or unavailable</option>
           </select>
         </label>
         <label class="form-control">

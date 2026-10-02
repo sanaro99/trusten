@@ -25,6 +25,22 @@ const websiteUrl = z
   .trim()
   .min(1, 'url is required')
   .transform(normalizeWebsiteUrl)
+
+/** Form preflight; the server still independently authorizes public targets. */
+export const WebsiteUrlSchema = websiteUrl.refine((value) => {
+  if (/[\s\\]/.test(value)) return false
+  try {
+    const target = new URL(value)
+    return (
+      (target.protocol === 'http:' || target.protocol === 'https:') &&
+      !!target.hostname &&
+      !target.username &&
+      !target.password
+    )
+  } catch {
+    return false
+  }
+}, 'Please enter a valid website address.')
 const turnstileToken = z.string().trim().min(1).optional()
 
 export const QuickScanRequestSchema = z.object({

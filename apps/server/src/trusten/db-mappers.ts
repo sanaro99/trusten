@@ -1,4 +1,4 @@
-import { isAccessChallengeUrl } from '@trusten/shared/domain'
+import { assessScanCoverage } from '@trusten/shared/domain'
 import type { AuditJob, AuditPlanItem, ScanHistoryRow } from './db'
 import type { DetectedPattern, ScanResult, WorkflowStep } from './types'
 
@@ -13,16 +13,21 @@ const json = <T>(value: unknown, fallback: T): T =>
       : (value as T)
 
 export function mapScanHistoryRow(r: Row): ScanHistoryRow {
-  const quickCoverage =
-    r.scan_type !== 'quick'
-      ? null
-      : !r.evidence_screenshot_path
-        ? 'missing'
-        : isAccessChallengeUrl(String(r.evidence_url ?? ''))
-          ? 'blocked'
-          : r.visual_check_available === 'true'
-            ? 'complete'
-            : 'partial'
+  const steps = json<WorkflowStep[]>(r.workflow_steps, [])
+  // Retain compatibility with older query projections during rolling upgrades.
+  if (steps.length === 0 && r.scan_type === 'quick' && r.evidence_url) {
+    steps.push({
+      url: String(r.evidence_url),
+      screenshotPath: r.evidence_screenshot_path
+        ? String(r.evidence_screenshot_path)
+        : undefined,
+      visualCheckAvailable:
+        r.visual_check_available === 'true' ||
+        r.visual_check_available === true,
+    } as WorkflowStep)
+  }
+  const coverage = assessScanCoverage(String(r.scan_type), steps)
+  const quickCoverage = r.scan_type === 'quick' ? coverage.status : null
   return {
     id: r.id as string,
     url: r.url as string,
@@ -34,6 +39,8 @@ export function mapScanHistoryRow(r: Row): ScanHistoryRow {
     scoreNumeric: Number(r.score_numeric),
     scoreGrade: r.score_grade as string,
     quickCoverage,
+    coverage: coverage.status,
+    coverageScope: coverage.scope,
     patternCount: Number(r.pattern_count),
     criticalCount: Number(r.critical_count),
     highCount: Number(r.high_count),
@@ -49,6 +56,7 @@ export function mapScanRow(r: Row): ScanResult {
     url: r.url as string,
     domain: r.domain as string,
     scanType: r.scan_type as 'quick' | 'deep',
+    parentAuditId: (r.parent_audit_id as string | null) ?? null,
     startedAt: iso(r.started_at),
     completedAt: iso(r.completed_at),
     patterns: json<DetectedPattern[]>(r.patterns, []),

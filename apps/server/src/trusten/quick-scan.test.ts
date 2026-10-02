@@ -51,6 +51,20 @@ function fixture(content: {
 }
 
 describe('quick scan evidence', () => {
+  test('keeps an audit homepage associated with its parent before persistence', async () => {
+    const { engine, saved } = fixture({
+      url: 'https://example.com/',
+      html: '<html><body><h1>Example page</h1><p>Visible content for analysis.</p></body></html>',
+      text: 'Example page. Visible content for analysis.',
+      screenshot: Buffer.from('captured image').toString('base64'),
+    })
+    const result = await engine.quickScan('https://example.com/', {
+      parentAuditId: 'audit-fixture',
+    })
+    expect(result).toMatchObject({ parentAuditId: 'audit-fixture' })
+    expect(saved[0]).toMatchObject({ parentAuditId: 'audit-fixture' })
+  })
+
   test('does not award a clean grade for an empty page', async () => {
     const { engine, saved, closed } = fixture({
       url: 'about:blank',

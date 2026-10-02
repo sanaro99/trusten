@@ -79,9 +79,61 @@ function advertisingContainers(
   return containers
 }
 
-// Pop-up/overlay DOM patterns
-const POPUP_PATTERN =
-  /<div[^>]+(?:class|id)="[^"]*(?:popup|modal|overlay|interstitial|lightbox|banner|toast|notification)[^"]*"[^>]*>/gi
+// Only real class/id tokens or dialog roles identify a prompt container.
+// A banner, toast, or data-section-id is not evidence of an interruption.
+const PROMPT_CONTAINER_TOKEN =
+  /(?:^|[\s_-])(?:popup|modal|overlay|interstitial|lightbox)(?=$|[\s_-])/i
+const EXIT_INTERRUPTION =
+  /\bare\s+you\s+sure\s+you\s+want\s+to\s+leave\b|\bwait[,!]\s+(?:before\s+you\s+go|don'?t\s+leave)\b|\bbefore\s+you\s+(?:leave|go|close)\b/i
+const RECORDED_REFUSAL =
+  /\b(?:notifications?|newsletter|subscription|prompts?)\s+(?:(?:was|were)\s+)?(?:declined|dismissed|blocked|refused)\b|\b(?:declined|dismissed|blocked|refused)\s+(?:the\s+)?(?:notifications?|newsletter|subscription|prompts?)\b/i
+
+function promptContainers(
+  html: string,
+): Array<{ html: string; selector: string }> {
+  const source = html.replace(
+    /<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    '',
+  )
+  const containers: Array<{ html: string; selector: string }> = []
+  let coveredUntil = 0
+  for (const opening of source.matchAll(
+    /<(div|section|aside|dialog)\b[^>]*>/gi,
+  )) {
+    if (opening.index < coveredUntil) continue
+    if (
+      /\shidden(?:\s|=|>)|\saria-hidden\s*=\s*["']true["']|\sstyle\s*=\s*["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(
+        opening[0],
+      )
+    )
+      continue
+    const attribute = [
+      ...opening[0].matchAll(/\s(class|id|role)\s*=\s*(["'])(.*?)\2/gi),
+    ].find((match) =>
+      match[1].toLowerCase() === 'role'
+        ? /^(?:alertdialog|dialog)$/i.test(match[3])
+        : PROMPT_CONTAINER_TOKEN.test(match[3]),
+    )
+    if (!attribute && opening[1].toLowerCase() !== 'dialog') continue
+    const tags = new RegExp(`<(/?)${opening[1]}\\b[^>]*>`, 'gi')
+    tags.lastIndex = opening.index + opening[0].length
+    let depth = 1
+    let closing: RegExpExecArray | null
+    while ((closing = tags.exec(source))) {
+      depth += closing[1] ? -1 : 1
+      if (depth !== 0) continue
+      coveredUntil = tags.lastIndex
+      containers.push({
+        html: source.slice(opening.index, tags.lastIndex),
+        selector: attribute
+          ? `[${attribute[1]}=${JSON.stringify(attribute[3])}]`
+          : 'dialog',
+      })
+      break
+    }
+  }
+  return containers
+}
 
 export class NaggingAnalyzer extends BaseAnalyzer {
   name = 'NaggingAnalyzer'
@@ -92,11 +144,8 @@ export class NaggingAnalyzer extends BaseAnalyzer {
 
   async analyze(context: AnalyzerContext): Promise<AnalyzerResult> {
     const patterns: DetectedPattern[] = []
-    const text =
-      context.visibleText || this.extractVisibleText(context.domSnapshot)
-
     patterns.push(
-      ...this.detectNagging(text, context.domSnapshot, context),
+      ...this.detectNagging(context.domSnapshot, context),
       ...this.detectDisguisedAds(context.domSnapshot, context),
       ...this.detectTinyFontSponsored(context.domSnapshot, context),
     )
@@ -107,49 +156,59 @@ export class NaggingAnalyzer extends BaseAnalyzer {
   }
 
   private detectNagging(
-    text: string,
     html: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
     const patterns: DetectedPattern[] = []
 
-    // Text-based nagging
-    const textMatches = this.findKeywordMatches(text, NAGGING_TEXT_PATTERNS)
-    for (const m of textMatches.slice(0, 2)) {
-      patterns.push(
-        this.buildPattern({
-          category: DarkPatternCategory.REPEATED_PROMPTS,
-          severity: 'medium',
-          confidence: 0.75,
-          description: `Nagging prompt detected: "${m.match}". Intrusive prompts to enable notifications, prevent page exit, or re-engage users are disruptive dark patterns that undermine user autonomy.`,
-          url: context.url,
-          pageTitle: context.pageTitle,
-          element: { text: m.context, html: '', selector: '' },
-          evidence: { domSnapshot: m.context },
-        }),
+    const previous = context.previousStepContext
+    const previousText = previous
+      ? previous.visibleText || this.extractVisibleText(previous.domSnapshot)
+      : ''
+    for (const container of promptContainers(html)) {
+      const popupText = this.extractVisibleText(container.html)
+      if (!popupText) continue
+      const promptMatches = this.findKeywordMatches(
+        popupText,
+        NAGGING_TEXT_PATTERNS,
       )
-    }
-
-    // DOM-based pop-up detection
-    const popupElements = this.findElements(html, POPUP_PATTERN)
-    if (popupElements.length > 0) {
-      const popupText = popupElements[0].text.slice(0, 150)
+      if (promptMatches.length === 0) continue
+      const interruptsExit = EXIT_INTERRUPTION.test(popupText)
+      const previousRefusal = previousText.match(RECORDED_REFUSAL)?.[0]
+      const refusedRequest = previousRefusal
+        ?.match(/\b(?:notifications?|newsletter|subscription|prompts?)\b/i)?.[0]
+        .replace(/s$/i, '')
+      // Refusal must concern the same request; a newsletter refusal does not
+      // establish that an unrelated notification request is repeated.
+      const afterRefusal =
+        !!refusedRequest &&
+        new RegExp(`\\b${this.escapeRegex(refusedRequest)}s?\\b`, 'i').test(
+          popupText,
+        )
+      if (!interruptsExit && !afterRefusal) continue
       patterns.push(
         this.buildPattern({
           category: DarkPatternCategory.REPEATED_PROMPTS,
           severity: 'medium',
-          confidence: 0.7,
-          description: `Pop-up/overlay element detected: "${popupText}". Modal overlays that interrupt the user experience without a clear and easy dismiss mechanism constitute nagging.`,
+          confidence: afterRefusal ? 0.85 : 0.75,
+          description: afterRefusal
+            ? `Possible repeated prompt: "${popupText.slice(0, 150)}". A prompt requests an action declined in the previous captured step.`
+            : `Possible intrusive exit prompt: "${popupText.slice(0, 150)}". A captured overlay asks the user to reconsider leaving. This snapshot alone does not establish repetition or whether dismissal is difficult.`,
           url: context.url,
           pageTitle: context.pageTitle,
           element: {
-            text: popupText,
-            html: popupElements[0].html.slice(0, 300),
-            selector: '[class*=popup],[class*=modal],[class*=overlay]',
+            text: popupText.slice(0, 150),
+            html: container.html.slice(0, 500),
+            selector: container.selector,
           },
-          evidence: { domSnapshot: popupElements[0].html.slice(0, 500) },
+          evidence: {
+            domSnapshot: afterRefusal
+              ? `${previousRefusal}\n${container.html.slice(0, 500)}`
+              : container.html.slice(0, 500),
+          },
         }),
       )
+      if (patterns.length >= 2) break
     }
 
     return patterns

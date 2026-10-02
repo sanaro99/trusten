@@ -1,10 +1,11 @@
 <script lang="ts">
 import {
+  assessScanCoverage,
   type DetectedPattern,
-  isAccessChallengeUrl,
 } from '@trusten/shared/domain'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
+import ReportAssets from '$lib/components/ReportAssets.svelte'
 import { splitFindings } from '$lib/findings'
 import { getReportSummary } from '$lib/report-content'
 import type { PageData } from './$types'
@@ -16,58 +17,24 @@ const workflowSteps = $derived(data.scan.workflowSteps ?? [])
 const quickEvidence = $derived(
   data.scan.scanType === 'quick' ? workflowSteps[0] : undefined,
 )
+const coverage = $derived(assessScanCoverage(data.scan.scanType, workflowSteps))
 const missingQuickEvidence = $derived(
-  data.scan.scanType === 'quick' && !quickEvidence?.screenshotPath,
+  data.scan.scanType === 'quick' && coverage.status === 'missing',
 )
 const blockedQuickEvidence = $derived(
-  data.scan.scanType === 'quick' &&
-    !!quickEvidence?.url &&
-    isAccessChallengeUrl(quickEvidence.url),
+  data.scan.scanType === 'quick' && coverage.status === 'blocked',
 )
 const limitedQuickEvidence = $derived(
-  data.scan.scanType === 'quick' &&
-    !!quickEvidence?.screenshotPath &&
-    quickEvidence.visualCheckAvailable === false,
+  data.scan.scanType === 'quick' && coverage.missingVisual,
 )
+const asideOnly = $derived(split.main.length === 0 && split.aside.length > 0)
 const summary = $derived(
-  data.scan.scanType === 'quick'
-    ? missingQuickEvidence
-      ? {
-          ...getReportSummary(data.scan.score.grade, split.main.length, []),
-          limited: true,
-          eyebrow: 'Evidence unavailable',
-          headline: 'We cannot verify this quick check',
-          sub: 'This result did not save a page capture. Run a new check to get a reviewable result.',
-        }
-      : blockedQuickEvidence
-        ? {
-            ...getReportSummary(data.scan.score.grade, split.main.length, []),
-            limited: true,
-            eyebrow: 'Check blocked',
-            headline: 'We could not inspect this website',
-            sub: 'The website sent our browser to a verification page. This result does not assess the requested site.',
-          }
-        : limitedQuickEvidence
-          ? {
-              ...getReportSummary(data.scan.score.grade, split.main.length, []),
-              limited: true,
-              eyebrow: 'Partial quick check',
-              headline:
-                data.scan.patterns.length === 0
-                  ? 'No concerns found in available checks'
-                  : `${data.scan.patterns.length} ${data.scan.patterns.length === 1 ? 'concern' : 'concerns'} found on this page`,
-              sub: 'We captured this page, but visual analysis was unavailable. The grade is not conclusive.',
-            }
-          : {
-              ...getReportSummary(data.scan.score.grade, split.main.length, []),
-              eyebrow: 'Quick check · one page',
-              headline:
-                data.scan.patterns.length === 0
-                  ? 'No concerns found on this page'
-                  : `${data.scan.patterns.length} ${data.scan.patterns.length === 1 ? 'concern' : 'concerns'} found on this page`,
-              sub: 'We checked the captured page for common patterns. Checkout and other journeys need a deeper check.',
-            }
-    : getReportSummary(data.scan.score.grade, split.main.length, workflowSteps),
+  getReportSummary(
+    data.scan.score.grade,
+    data.scan.patterns.length,
+    workflowSteps,
+    data.scan.scanType,
+  ),
 )
 const seriousCount = $derived(
   data.scan.patterns.filter(
@@ -124,13 +91,13 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
           <span class="text-3xl" aria-hidden="true">!</span>
           <span class="sr-only">Limited check</span>
         </div>
-      {:else}
+      {:else if !asideOnly}
         <GradeBadge grade={data.scan.score.grade} />
       {/if}
       <div class="min-w-0 flex-1">
         <div class="badge {summary.limited ? 'badge-warning' : 'badge-primary badge-outline'} mb-3">{summary.eyebrow}</div>
-        <h1 class="m-0 font-bold text-4xl md:text-5xl">{summary.headline}</h1>
-        <p class="mt-3 mb-0 max-w-2xl text-lg text-base-content/65">{summary.sub}</p>
+        <h1 class="m-0 font-bold text-4xl md:text-5xl">{asideOnly && !summary.limited ? 'Some findings need a closer look' : summary.headline}</h1>
+        <p class="mt-3 mb-0 max-w-2xl text-lg text-base-content/65">{asideOnly && !summary.limited ? 'The findings below are uncertain. Review their evidence before drawing a conclusion.' : summary.sub}</p>
         <p class="mt-2 mb-0 truncate text-sm text-base-content/70">Checked {data.scan.domain} · {checkedDate}</p>
       </div>
       <div class="stats stats-vertical bg-base-200 shadow-inner">
@@ -143,6 +110,11 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
       </div>
     </div>
   </header>
+
+  {#if summary.limited}
+    <a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>
+  {/if}
+  <ReportAssets scan={data.scan} />
 
   {#if quickEvidence?.screenshotPath}
     <section class="mt-12" aria-labelledby="page-evidence-heading">
@@ -170,9 +142,6 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
         <h2 id="findings-heading" class="mt-3 mb-0 font-bold text-3xl">What we found</h2>
         <p class="mt-2 mb-0 max-w-measure text-base-content/65">Start with the practical advice. Then review the words and page evidence behind each concern.</p>
       </div>
-      {#if data.scan.pdfPath}
-        <a class="btn btn-outline" href="/trusten/report/{data.scan.id}/pdf">Download report</a>
-      {/if}
     </div>
 
     {#if split.main.length === 0 && split.aside.length === 0}

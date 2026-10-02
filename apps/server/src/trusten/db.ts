@@ -14,6 +14,8 @@ export interface ScanHistoryRow {
   scoreNumeric: number
   scoreGrade: string
   quickCoverage: 'complete' | 'partial' | 'missing' | 'blocked' | null
+  coverage?: 'complete' | 'partial' | 'missing' | 'blocked'
+  coverageScope?: 'page' | 'journey'
   patternCount: number
   criticalCount: number
   highCount: number
@@ -94,16 +96,16 @@ export async function saveTrustenScan(
       }))
     : null
   await getDb()`INSERT INTO trusten_scans
-    (id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,patterns,workflow_steps,pdf_path,html_path,video_path)
-    VALUES (${result.id},${result.url},${result.domain},${result.scanType},${opts.workflowId ?? null},${result.startedAt},${result.completedAt},${result.score.numeric},${result.score.grade},${result.patterns.length},${critical},${high},${result.patterns}::jsonb,${steps}::jsonb,${opts.pdfPath ?? null},${opts.htmlPath ?? null},${opts.videoPath ?? null})
-    ON CONFLICT (id) DO UPDATE SET url=EXCLUDED.url,domain=EXCLUDED.domain,scan_type=EXCLUDED.scan_type,workflow_id=EXCLUDED.workflow_id,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,score_numeric=EXCLUDED.score_numeric,score_grade=EXCLUDED.score_grade,pattern_count=EXCLUDED.pattern_count,critical_count=EXCLUDED.critical_count,high_count=EXCLUDED.high_count,patterns=EXCLUDED.patterns,workflow_steps=EXCLUDED.workflow_steps,pdf_path=EXCLUDED.pdf_path,html_path=EXCLUDED.html_path,video_path=EXCLUDED.video_path`
+    (id,url,domain,scan_type,workflow_id,parent_audit_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,patterns,workflow_steps,pdf_path,html_path,video_path)
+    VALUES (${result.id},${result.url},${result.domain},${result.scanType},${opts.workflowId ?? null},${result.parentAuditId ?? null},${result.startedAt},${result.completedAt},${result.score.numeric},${result.score.grade},${result.patterns.length},${critical},${high},${result.patterns}::jsonb,${steps}::jsonb,${opts.pdfPath ?? null},${opts.htmlPath ?? null},${opts.videoPath ?? null})
+    ON CONFLICT (id) DO UPDATE SET url=EXCLUDED.url,domain=EXCLUDED.domain,scan_type=EXCLUDED.scan_type,workflow_id=EXCLUDED.workflow_id,parent_audit_id=COALESCE(EXCLUDED.parent_audit_id,trusten_scans.parent_audit_id),started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,score_numeric=EXCLUDED.score_numeric,score_grade=EXCLUDED.score_grade,pattern_count=EXCLUDED.pattern_count,critical_count=EXCLUDED.critical_count,high_count=EXCLUDED.high_count,patterns=EXCLUDED.patterns,workflow_steps=EXCLUDED.workflow_steps,pdf_path=EXCLUDED.pdf_path,html_path=EXCLUDED.html_path,video_path=EXCLUDED.video_path`
 }
 
 export async function getTrustenScanHistory(
   limit = 20,
 ): Promise<ScanHistoryRow[]> {
   const rows =
-    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_scans ORDER BY created_at DESC LIMIT ${limit}`
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_public_scans ORDER BY created_at DESC LIMIT ${limit}`
   return rows.map(mapScanHistoryRow)
 }
 export async function getTrustenScansByDomain(
@@ -111,7 +113,7 @@ export async function getTrustenScansByDomain(
   limit = 50,
 ): Promise<ScanHistoryRow[]> {
   const rows =
-    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_scans WHERE domain=${domain} ORDER BY created_at DESC LIMIT ${limit}`
+    await getDb()`SELECT id,url,domain,scan_type,workflow_id,started_at,completed_at,score_numeric,score_grade,pattern_count,critical_count,high_count,pdf_path,html_path,created_at,workflow_steps,workflow_steps #>> '{0,url}' AS evidence_url,workflow_steps #>> '{0,screenshotPath}' AS evidence_screenshot_path,workflow_steps #>> '{0,visualCheckAvailable}' AS visual_check_available FROM trusten_public_scans WHERE canonical_domain=${domain.toLowerCase().replace(/^www\./, '')} ORDER BY created_at DESC LIMIT ${limit}`
   return rows.map(mapScanHistoryRow)
 }
 export async function getTrustenScanById(
@@ -128,7 +130,7 @@ export async function getRecentPublicQuickScan(
 ): Promise<ScanResult | null> {
   const cutoff = new Date(maxAgeMs === undefined ? 0 : Date.now() - maxAgeMs)
   const rows = await getDb()`
-    SELECT * FROM trusten_scans
+    SELECT * FROM trusten_public_scans
     WHERE url = ${url}
       AND scan_type = 'quick'
       AND completed_at >= ${cutoff}
@@ -140,7 +142,7 @@ export async function getRecentPublicQuickScan(
 }
 export async function getGlobalStats(): Promise<GlobalStats> {
   const [r] =
-    await getDb()`SELECT COUNT(*)::int total_scans,COUNT(DISTINCT domain)::int total_domains,COALESCE(SUM(pattern_count),0)::int total_patterns,COALESCE(AVG(score_numeric),0)::float8 avg_score,COUNT(*) FILTER(WHERE score_grade='A')::int clean_sites,COUNT(*) FILTER(WHERE score_grade IN('D','F'))::int dirty_sites FROM trusten_scans`
+    await getDb()`SELECT COUNT(*)::int total_scans,COUNT(DISTINCT canonical_domain)::int total_domains,COALESCE(SUM(pattern_count),0)::int total_patterns,COALESCE(AVG(score_numeric),0)::float8 avg_score,COUNT(*) FILTER(WHERE score_grade='A')::int clean_sites,COUNT(*) FILTER(WHERE score_grade IN('D','F'))::int dirty_sites FROM trusten_public_scans`
   return {
     totalScans: Number(r.total_scans),
     totalDomains: Number(r.total_domains),
@@ -151,7 +153,7 @@ export async function getGlobalStats(): Promise<GlobalStats> {
   }
 }
 
-const DOMAIN_SQL = `SELECT domain,COUNT(*)::int scan_count,MAX(created_at) latest_scan_at,AVG(score_numeric)::float8 avg_score,SUM(pattern_count)::int total_patterns,SUM(critical_count)::int critical_count,SUM(high_count)::int high_count,(array_agg(score_grade ORDER BY created_at DESC))[1] latest_grade,(array_agg(score_numeric ORDER BY created_at DESC))[1]::float8 latest_score FROM trusten_scans`
+const DOMAIN_SQL = `SELECT canonical_domain AS domain,COUNT(*)::int scan_count,MAX(created_at) latest_scan_at,AVG(score_numeric)::float8 avg_score,SUM(pattern_count)::int total_patterns,SUM(critical_count)::int critical_count,SUM(high_count)::int high_count,(array_agg(score_grade ORDER BY created_at DESC))[1] latest_grade,(array_agg(score_numeric ORDER BY created_at DESC))[1]::float8 latest_score FROM trusten_public_scans`
 function mapDomain(r: Record<string, unknown>): DomainSummary {
   return {
     domain: r.domain as string,
@@ -171,7 +173,7 @@ function mapDomain(r: Record<string, unknown>): DomainSummary {
 export async function getDomainSummaries(limit = 50): Promise<DomainSummary[]> {
   return (
     await getDb().unsafe(
-      `${DOMAIN_SQL} GROUP BY domain ORDER BY latest_scan_at DESC LIMIT $1`,
+      `${DOMAIN_SQL} GROUP BY canonical_domain ORDER BY latest_scan_at DESC LIMIT $1`,
       [limit],
     )
   ).map(mapDomain)
@@ -180,8 +182,8 @@ export async function getDomainSummary(
   domain: string,
 ): Promise<DomainSummary | null> {
   const rows = await getDb().unsafe(
-    `${DOMAIN_SQL} WHERE domain=$1 GROUP BY domain`,
-    [domain],
+    `${DOMAIN_SQL} WHERE canonical_domain=$1 GROUP BY canonical_domain`,
+    [domain.toLowerCase().replace(/^www\./, '')],
   )
   return rows[0] ? mapDomain(rows[0]) : null
 }

@@ -83,7 +83,10 @@ export class TrustenEngine {
   /**
    * Quick scan: navigate to URL, capture context, run all 10 analyzers in parallel.
    */
-  async quickScan(url: string): Promise<ScanResult> {
+  async quickScan(
+    url: string,
+    opts: { parentAuditId?: string } = {},
+  ): Promise<ScanResult> {
     const startedAt = new Date().toISOString()
     const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
@@ -128,6 +131,7 @@ export class TrustenEngine {
         url,
         domain: new URL(url).hostname,
         scanType: 'quick',
+        ...(opts.parentAuditId ? { parentAuditId: opts.parentAuditId } : {}),
         startedAt,
         completedAt: new Date().toISOString(),
         patterns,
@@ -180,7 +184,7 @@ export class TrustenEngine {
   async deepScan(
     url: string,
     workflow: ScanWorkflow,
-    opts: { jobKey?: string; watch?: boolean } = {},
+    opts: { jobKey?: string; watch?: boolean; parentAuditId?: string } = {},
   ): Promise<ScanResult> {
     const startedAt = new Date().toISOString()
     const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -522,6 +526,7 @@ export class TrustenEngine {
         url,
         domain: new URL(url).hostname,
         scanType: 'deep',
+        ...(opts.parentAuditId ? { parentAuditId: opts.parentAuditId } : {}),
         startedAt,
         completedAt,
         patterns: dedupedPatterns,
@@ -1056,9 +1061,15 @@ export class TrustenEngine {
     // Generate PDF by opening the HTML file in a hidden page and printing
     let pdfPageId: number | null = null
     try {
-      const fileUrl = `file:///${htmlPath.replace(/\\/g, '/')}`
-      pdfPageId = await this.browser.newPage(fileUrl, { background: true })
-      await sleep(1500) // Let the page render
+      if (this.browser.newReportPage) {
+        pdfPageId = await this.browser.newReportPage(html)
+      } else {
+        const { pathToFileURL } = await import('node:url')
+        pdfPageId = await this.browser.newPage(pathToFileURL(htmlPath).href, {
+          background: true,
+        })
+        await sleep(1500)
+      }
 
       const pdfResult = await this.browser.printToPDF(pdfPageId, {
         landscape: false,

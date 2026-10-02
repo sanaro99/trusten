@@ -2,6 +2,7 @@
 import type { ScanHistoryRow } from '@trusten/shared/api'
 import type { Grade } from '@trusten/shared/domain'
 import { GradeBadge } from '@trusten/ui/domain'
+import { canCompareChecks } from '$lib/history-content'
 import { hasConclusiveGrade, historyCoverageLabel } from '$lib/history-coverage'
 import type { PageData } from './$types'
 
@@ -35,8 +36,8 @@ function verdictText(grade: string): string {
 }
 
 function findingText(scan: ScanHistoryRow): string {
-  const limited = historyCoverageLabel(scan)
-  if (limited) return 'This check cannot establish a website grade'
+  if (!hasConclusiveGrade(scan))
+    return 'This check cannot establish a website grade'
   const serious = scan.criticalCount + scan.highCount
   if (serious > 0)
     return `${serious} serious ${serious === 1 ? 'concern' : 'concerns'} among ${scan.patternCount} found`
@@ -50,7 +51,7 @@ function comparisonText(
   older?: ScanHistoryRow,
 ): string {
   if (!older) return 'This is the first check shared for this website.'
-  if (!hasConclusiveGrade(current) || !hasConclusiveGrade(older))
+  if (!canCompareChecks(current, older))
     return 'A grade comparison is unavailable for these checks.'
   const change = current.scoreNumeric - older.scoreNumeric
   const findingChange = current.patternCount - older.patternCount

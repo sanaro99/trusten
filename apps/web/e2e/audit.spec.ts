@@ -376,6 +376,8 @@ test('the audit result limits its verdict when the overview succeeded but a link
           {
             stepNumber: 1,
             action: 'Inspect the overview.',
+            screenshotPath: 'overview.jpg',
+            visualCheckAvailable: true,
             url: 'https://example.com',
             screenshot: '',
             patternsFound: [],

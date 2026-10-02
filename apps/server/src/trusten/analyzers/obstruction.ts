@@ -25,7 +25,6 @@ const FORCED_CONTINUITY_PATTERNS = [
   /\byou'?ll\s+be\s+(?:charged|billed)\s+\$[\d,.]+\s+(?:per|every|each)\b/i,
   /\btrial\s+ends?.*(?:charged|billed|converted)/i,
   /\bfree\s+trial.*(?:credit\s+card|payment\s+method)\b/i,
-  /\bno\s+commitment.*cancel\s+any\s+time\b/i, // "no commitment" often paired with hard cancel
 ]
 
 // ─── Roach motel: hard-to-cancel signals ───
@@ -42,13 +41,16 @@ const HARD_TO_CANCEL_SIGNALS = [
   /\bno\s+refund\s+on\s+(?:cancel|cancell)/i,
 ]
 
+const SELF_SERVICE_CANCEL =
+  /(?:^|[.!?]\s*|\b(?:or|can|may)\s+)cancel\s+(?:online|in\s+your\s+account)\b/i
+
 // ─── Subscription page patterns ───
 
 const SUBSCRIPTION_INDICATORS = [
-  /\b(?:subscribe|subscription|membership|plan)\b/i,
-  /\b(?:monthly|annual|yearly)\s+(?:plan|subscription|billing)\b/i,
-  /\brenew(?:al)?\b/i,
-  /\bcontinue\s+(?:my\s+)?membership\b/i,
+  /\b(?:monthly|annual|yearly|paid)\s+(?:plan|subscription|membership|billing)\b/i,
+  /[$£€]\s*[\d,.]+\s*(?:\/\s*|per\s+|every\s+|each\s+)(?:month|year|week|day)\b/i,
+  /\brecurring\s+(?:charge|billing|payment)\b/i,
+  /\bsubscription\s+(?:will\s+)?(?:auto[\s-]?renew|continue|roll\s+over)\b/i,
 ]
 
 // ─── Absence of cancel signal ───
@@ -84,15 +86,16 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
       patterns.push(...roachMotelPatterns)
     }
 
-    // LLM for subscription pages with ambiguous cancel terms
+    // Missing cancellation copy alone cannot establish obstruction.
     if (
       isSubscriptionPage &&
+      this.findCancellationFriction(text).length > 0 &&
       patterns.length < 2 &&
       this.hasAmbiguousCancelTerms(text)
     ) {
       const llmPatterns = await this.runLLMAnalysis({
         analysisType:
-          'roach_motel, forced_continuity, hard_to_cancel — look for hidden auto-renewal, obscured cancellation process, phone-only cancel, cancellation fees',
+          'roach_motel, forced_continuity, hard_to_cancel — require observed cancellation friction or recurring billing evidence; missing cancellation copy alone is insufficient. Do not infer phone-only cancellation from a phone option.',
         context,
         text,
         categoryMap: {
@@ -112,6 +115,15 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
   }
 
   // ─── Deterministic Detectors ───
+
+  private findCancellationFriction(text: string) {
+    return this.findKeywordMatches(text, HARD_TO_CANCEL_SIGNALS).filter((m) => {
+      const supportOption = /\b(?:call|chat|contact|phone|calling)\b/i.test(
+        m.match,
+      )
+      return !supportOption || !SELF_SERVICE_CANCEL.test(m.context)
+    })
+  }
 
   private detectForcedContinuity(
     text: string,
@@ -150,23 +162,23 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
     text: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
-    const matches = this.findKeywordMatches(text, HARD_TO_CANCEL_SIGNALS)
+    const matches = this.findCancellationFriction(text)
     if (matches.length === 0) return []
 
-    const isPhoneOnly = /\bcall\s+(?:us\s+)?to\s+cancel\b/i.test(text)
+    const hasPhoneInstruction = /\bcall\s+(?:us\s+)?to\s+cancel\b/i.test(text)
     const hasFee = /cancell?ation\s+fee\b/i.test(text)
 
     return matches.slice(0, 2).map((m) =>
       this.buildPattern({
         category: DarkPatternCategory.HARD_TO_CANCEL,
-        severity: isPhoneOnly || hasFee ? 'critical' : 'high',
+        severity: hasFee ? 'critical' : 'high',
         confidence: 0.9,
         description: `Hard-to-cancel detected: "${m.match}". ${
-          isPhoneOnly
-            ? 'Cancellation requires a phone call — a deliberate friction mechanism to reduce cancellations.'
+          hasPhoneInstruction
+            ? 'The page directs users to call to cancel. This may add friction; the snapshot does not establish whether other cancellation options exist.'
             : hasFee
-              ? 'Cancellation incurs a fee, trapping users in subscriptions against their interest.'
-              : 'Cancellation requires contacting support rather than self-service, creating deliberate friction.'
+              ? 'The page mentions a cancellation fee that may add cost to ending the service.'
+              : 'The page describes a cancellation restriction or support-mediated process that may add friction.'
         }`,
         url: context.url,
         pageTitle: context.pageTitle,
@@ -180,23 +192,22 @@ export class ObstructionAnalyzer extends BaseAnalyzer {
     text: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
-    // Roach motel = subscription page that makes it easy to subscribe
-    // but does NOT clearly explain how to cancel
+    // Signup plus observed cancellation friction can support a concern.
+    // A missing cancel link on a landing page cannot prove a difficult exit.
     const hasEasySignup =
       /\b(?:sign\s+up|subscribe|join|start\s+(?:free\s+)?trial)\b/i.test(text)
-    const hasCancelInfo = CANCEL_PRESENT_PATTERNS.some((p) => p.test(text))
-    const hasCancelMechanism = HARD_TO_CANCEL_SIGNALS.some((p) => p.test(text))
+    const hasCancelMechanism = this.findCancellationFriction(text).length > 0
 
     if (!hasEasySignup) return []
 
-    if (!hasCancelInfo && !hasCancelMechanism) {
+    if (hasCancelMechanism) {
       return [
         this.buildPattern({
           category: DarkPatternCategory.ROACH_MOTEL,
           severity: 'high',
           confidence: 0.72,
           description:
-            'Roach motel pattern: this subscription page promotes easy sign-up but contains no visible information about how to cancel. Users may not discover cancellation difficulty until after subscribing.',
+            'Possible roach motel pattern: this paid subscription page promotes sign-up and describes cancellation friction. The observed restriction should be checked against the complete cancellation flow.',
           url: context.url,
           pageTitle: context.pageTitle,
           evidence: { domSnapshot: text.slice(0, 300) },

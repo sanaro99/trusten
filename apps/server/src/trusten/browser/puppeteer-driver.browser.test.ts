@@ -168,4 +168,24 @@ describe.skipIf(!enabled)('Puppeteer driver browser lifecycle', () => {
     expect(failure).toMatchObject({ code: 'PAGE_LOAD_FAILED' })
     expect(await driver.listPages()).toEqual([])
   }, 15_000)
+
+  test('prints a trusted report without running scripts or requesting external resources', async () => {
+    let authorized = 0
+    driver = new PuppeteerDriver(async () => {
+      authorized++
+      throw new Error('Report must not use target authorization')
+    })
+    const pageId = await driver.newReportPage(
+      `<!doctype html><html><head><title>Saved report</title></head><body><h1>Trusten evidence</h1><script>document.title='Executed'</script><img src="${baseUrl}/forbidden"></body></html>`,
+    )
+    expect(await driver.evaluate(pageId, 'document.title')).toEqual({
+      value: 'Saved report',
+    })
+    const pdf = await driver.printToPDF(pageId)
+    expect(Buffer.from(pdf.data, 'base64').subarray(0, 5).toString()).toBe(
+      '%PDF-',
+    )
+    expect(authorized).toBe(0)
+    expect(forbiddenRequests).toBe(0)
+  }, 15_000)
 })

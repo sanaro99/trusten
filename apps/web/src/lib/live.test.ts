@@ -33,6 +33,29 @@ const running: AuditStatus = {
 const noDelay = async () => {}
 
 describe('audit polling fallback', () => {
+  test('cancels a pending poll without publishing stale progress', async () => {
+    const controller = new AbortController()
+    let published = false
+    let requests = 0
+    await expect(
+      pollAuditStatus(
+        async () => {
+          requests++
+          return { ...running, status: 'done' }
+        },
+        () => {
+          published = true
+        },
+        async () => {
+          controller.abort()
+        },
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requests).toBe(0)
+    expect(published).toBe(false)
+  })
+
   test('stops on authorization or expired-job errors instead of polling forever', async () => {
     for (const status of [403, 404]) {
       let attempts = 0
@@ -149,6 +172,19 @@ describe('optional live connection', () => {
 })
 
 describe('reduceLiveEvent', () => {
+  test('activity transitions and completion never imply successful journey evidence', () => {
+    const first = reduceLiveEvent(empty, {
+      type: 'progress',
+      action: 'Planning the check',
+    })
+    const next = reduceLiveEvent(first, {
+      type: 'progress',
+      action: 'Generating the report',
+    })
+    const complete = reduceLiveEvent(next, { type: 'done' })
+    expect(complete.steps.every((step) => !step.done)).toBe(true)
+    expect(complete.status).toBe('done')
+  })
   test('adds a step when progress arrives', () => {
     const next = reduceLiveEvent(empty, {
       type: 'progress',
@@ -172,6 +208,23 @@ describe('reduceLiveEvent', () => {
       action: 'Looking at the home page',
     })
     expect(twice.steps).toHaveLength(1)
+  })
+
+  test('keeps a new activity when journey step numbers restart', () => {
+    const planned = reduceLiveEvent(empty, {
+      type: 'progress',
+      step: 1,
+      action: 'Planning the route',
+    })
+    const journey = reduceLiveEvent(planned, {
+      type: 'progress',
+      step: 1,
+      action: 'Review the basket',
+    })
+    expect(journey.steps.map((step) => step.action)).toEqual([
+      'Planning the route',
+      'Review the basket',
+    ])
   })
 
   test('stores the newest frame without touching steps', () => {

@@ -43,10 +43,13 @@ export async function pollAuditStatus(
   getStatus: () => Promise<AuditStatus>,
   onStatus: (status: AuditStatus) => void,
   pause = () => new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+  signal?: AbortSignal,
 ): Promise<AuditStatus> {
   let consecutiveErrors = 0
   while (true) {
+    signal?.throwIfAborted()
     await pause()
+    signal?.throwIfAborted()
     let status: AuditStatus
     try {
       status = await getStatus()
@@ -62,6 +65,7 @@ export async function pollAuditStatus(
       if (consecutiveErrors >= 5) throw error
       continue
     }
+    signal?.throwIfAborted()
     onStatus(status)
     if (status.status === 'done' || status.status === 'failed') return status
   }
@@ -69,6 +73,7 @@ export async function pollAuditStatus(
 
 export interface LiveStep {
   step: number
+  sourceStep?: number
   action: string
   done: boolean
 }
@@ -97,13 +102,16 @@ export function reduceLiveEvent(state: LiveState, event: LiveEvent): LiveState {
       return { ...state, frame: `data:image/jpeg;base64,${event.data}` }
 
     case 'progress': {
-      const step = event.step ?? state.steps.length + 1
-      if (state.steps.some((s) => s.step === step)) return state
+      const action = event.action ?? 'Working…'
+      const previous = state.steps.at(-1)
+      if (previous?.sourceStep === event.step && previous?.action === action)
+        return state
+      const step = state.steps.length + 1
       return {
         ...state,
         steps: [
-          ...state.steps.map((s) => ({ ...s, done: true })),
-          { step, action: event.action ?? 'Working…', done: false },
+          ...state.steps,
+          { step, sourceStep: event.step, action, done: false },
         ],
       }
     }
@@ -112,7 +120,6 @@ export function reduceLiveEvent(state: LiveState, event: LiveEvent): LiveState {
       return {
         ...state,
         status: 'done',
-        steps: state.steps.map((s) => ({ ...s, done: true })),
       }
 
     case 'error':
@@ -135,16 +142,21 @@ export function createLiveScan() {
   let state = $state<LiveState>(initialState())
 
   let socket: WebSocket | null = null
+  let generation = 0
 
   async function connect(jobId: string, capabilityToken: string) {
+    const currentGeneration = generation
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    socket = await openLiveSocket(
+    const nextSocket = await openLiveSocket(
       `${proto}://${location.host}/trusten/api/jobs/${encodeURIComponent(jobId)}/live`,
       async () => (await api.createLiveTicket(jobId, capabilityToken)).ticket,
       (event) => {
-        state = reduceLiveEvent(state, event)
+        if (currentGeneration === generation)
+          state = reduceLiveEvent(state, event)
       },
     )
+    if (currentGeneration !== generation) nextSocket?.close()
+    else socket = nextSocket
   }
 
   return {
@@ -170,11 +182,13 @@ export function createLiveScan() {
       state = { ...state, status: 'failed', error: message }
     },
     reset() {
+      generation++
       socket?.close()
       socket = null
       state = initialState()
     },
     destroy() {
+      generation++
       socket?.close()
       socket = null
     },

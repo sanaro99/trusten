@@ -358,6 +358,41 @@ export class PuppeteerDriver implements BrowserDriver {
     return pageId
   }
 
+  async newReportPage(html: string): Promise<number> {
+    const browser = await this.getBrowser()
+    const context = await browser.createBrowserContext()
+    try {
+      const page = await context.newPage()
+      await page.setViewport(DEFAULT_VIEWPORT)
+      await page.setJavaScriptEnabled(false)
+      await page.setRequestInterception(true)
+      page.on('request', (request) => {
+        // Reports embed evidence as data URLs; no remote/local file reads.
+        const allowed = request.url().startsWith('data:')
+        void (allowed ? request.continue() : request.abort()).catch(
+          () => undefined,
+        )
+      })
+      await page.setContent(html, { waitUntil: 'load', timeout: 30_000 })
+      const pageId = this.nextPageId++
+      this.pages.set(pageId, {
+        context,
+        page,
+        recorder: null,
+        videoFile: null,
+        network: [],
+        liveClient: null,
+        frameDir: null,
+        frameCount: 0,
+        policyViolation: null,
+      })
+      return pageId
+    } catch (error) {
+      await context.close().catch(() => undefined)
+      throw error
+    }
+  }
+
   async closePage(pageId: number): Promise<void> {
     const e = this.pages.get(pageId)
     if (!e) return

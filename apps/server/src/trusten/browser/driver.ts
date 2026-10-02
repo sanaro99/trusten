@@ -52,6 +52,8 @@ export interface NewPageOptions {
 }
 
 export interface BrowserDriver {
+  /** Render an application-generated report in an isolated, non-networked page. */
+  newReportPage?(html: string): Promise<number>
   newPage(url: string, opts?: NewPageOptions): Promise<number>
   closePage(pageId: number): Promise<void>
   goto(pageId: number, url: string): Promise<void>

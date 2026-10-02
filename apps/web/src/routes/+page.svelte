@@ -1,7 +1,9 @@
 <script lang="ts">
+import type { ScanHistoryRow } from '@trusten/shared/api'
 import { goto } from '$app/navigation'
 import { ApiError, api, publicScanErrorMessage } from '$lib/api'
 import { historyCoverageLabel } from '$lib/history-coverage'
+import { findSavedEvidence, validateWebsiteInput } from '$lib/submission'
 import { getTurnstileToken } from '$lib/turnstile'
 import type { PageData } from './$types'
 
@@ -9,6 +11,8 @@ let { data }: { data: PageData } = $props()
 
 let url = $state('')
 let busy = $state(false)
+let phase = $state<'visitor' | 'scan'>('visitor')
+let savedEvidence = $state<ScanHistoryRow | null>(null)
 let problem = $state('')
 let extensionHelp = $state(false)
 let turnstileContainer = $state<HTMLDivElement>()
@@ -28,13 +32,22 @@ function readableDate(value: string) {
 
 async function check(event: SubmitEvent) {
   event.preventDefault()
+  if (busy) return
   extensionHelp = false
+  savedEvidence = null
   if (!url.trim()) {
     problem = 'Please type the address of the website you want to check.'
     return
   }
 
+  const submittedUrl = validateWebsiteInput(url)
+  if (!submittedUrl) {
+    problem = 'Please enter a valid website address, such as example.com.'
+    return
+  }
+
   busy = true
+  phase = 'visitor'
   problem = ''
   try {
     if (!turnstileContainer) throw new Error('Scan form is not ready')
@@ -42,7 +55,8 @@ async function check(event: SubmitEvent) {
       turnstileContainer,
       'quick_scan',
     )
-    const result = await api.quickScan({ url, turnstileToken })
+    phase = 'scan'
+    const result = await api.quickScan({ url: submittedUrl, turnstileToken })
     if (result.scanId)
       await goto(
         `/scan/${encodeURIComponent(result.scanId)}${result.cached ? '?cached=1' : ''}`,
@@ -55,6 +69,7 @@ async function check(event: SubmitEvent) {
       ['SITE_BLOCKED', 'PAGE_NOT_READY', 'PAGE_LOAD_FAILED'].includes(
         error.code ?? '',
       )
+    savedEvidence = await findSavedEvidence(error, submittedUrl, 'quick')
   } finally {
     busy = false
   }
@@ -87,6 +102,7 @@ async function check(event: SubmitEvent) {
               class="input input-lg w-full min-w-0 flex-1"
               type="text"
               bind:value={url}
+              disabled={busy}
               placeholder="example.com"
               autocomplete="url"
               inputmode="url"
@@ -94,7 +110,7 @@ async function check(event: SubmitEvent) {
               aria-describedby={problem ? 'site-problem' : 'site-hint'}
             />
             <button class="btn btn-primary btn-lg px-5" type="submit" disabled={busy} aria-busy={busy}>
-              {busy ? 'Checking…' : 'Check this site'}
+              {busy ? phase === 'visitor' ? 'Verifying visitor…' : 'Checking…' : 'Check this site'}
             </button>
           </div>
           <p id="site-hint" class="mb-0 mt-2 text-sm text-base-content/65">A quick check usually takes about a minute. No account needed.</p>
@@ -102,6 +118,10 @@ async function check(event: SubmitEvent) {
             <div id="site-problem" class="alert alert-error mt-3" role="alert">{problem}</div>
             {#if extensionHelp}
               <a class="link link-primary mt-2 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>
+            {/if}
+            {#if savedEvidence}
+              <p class="mb-0 mt-3 text-sm text-base-content/70">A saved check for this address is available from {readableDate(savedEvidence.completedAt)}.</p>
+              <a class="link link-primary inline-flex min-h-11 items-center font-bold" href="/scan/{encodeURIComponent(savedEvidence.id)}?cached=1">Open saved check</a>
             {/if}
           {/if}
           <div class="mt-1" bind:this={turnstileContainer}></div>
