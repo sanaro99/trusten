@@ -1,7 +1,7 @@
 <script lang="ts">
 import {
-  type DetectedPattern,
   assessScanCoverage,
+  type DetectedPattern,
 } from '@trusten/shared/domain'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
@@ -18,11 +18,24 @@ const quickEvidence = $derived(
   data.scan.scanType === 'quick' ? workflowSteps[0] : undefined,
 )
 const coverage = $derived(assessScanCoverage(data.scan.scanType, workflowSteps))
-const missingQuickEvidence = $derived(data.scan.scanType === 'quick' && coverage.status === 'missing')
-const blockedQuickEvidence = $derived(data.scan.scanType === 'quick' && coverage.status === 'blocked')
-const limitedQuickEvidence = $derived(data.scan.scanType === 'quick' && coverage.missingVisual)
+const missingQuickEvidence = $derived(
+  data.scan.scanType === 'quick' && coverage.status === 'missing',
+)
+const blockedQuickEvidence = $derived(
+  data.scan.scanType === 'quick' && coverage.status === 'blocked',
+)
+const limitedQuickEvidence = $derived(
+  data.scan.scanType === 'quick' && coverage.missingVisual,
+)
 const asideOnly = $derived(split.main.length === 0 && split.aside.length > 0)
-const summary = $derived(getReportSummary(data.scan.score.grade, data.scan.patterns.length, workflowSteps, data.scan.scanType))
+const summary = $derived(
+  getReportSummary(
+    data.scan.score.grade,
+    data.scan.patterns.length,
+    workflowSteps,
+    data.scan.scanType,
+  ),
+)
 const seriousCount = $derived(
   data.scan.patterns.filter(
     (pattern) => pattern.severity === 'critical' || pattern.severity === 'high',

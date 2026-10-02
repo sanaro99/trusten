@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ScanDetail } from '@trusten/shared/api'
+
 let { scan }: { scan: ScanDetail } = $props()
 </script>
 

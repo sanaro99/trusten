@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { ScanDetail, ScanHistoryRow } from '@trusten/shared/api'
-import { goto } from '$app/navigation'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
 import { onDestroy, onMount } from 'svelte'
+import { goto } from '$app/navigation'
 import { ApiError, api, publicScanErrorMessage } from '$lib/api'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
 import ReportAssets from '$lib/components/ReportAssets.svelte'
@@ -13,8 +13,8 @@ import {
   pollAuditStatus,
 } from '$lib/live.svelte'
 import { getReportSummary } from '$lib/report-content'
-import { getTurnstileToken } from '$lib/turnstile'
 import { findSavedEvidence, validateWebsiteInput } from '$lib/submission'
+import { getTurnstileToken } from '$lib/turnstile'
 
 let url = $state('')
 let started = $state(false)
@@ -37,22 +37,36 @@ onDestroy(() => {
 onMount(() => {
   // Only a refreshed completed audit restores its public result. Starting a
   // new visit to /audit still opens the form. No capability tokens are stored.
-  const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
-  if (navigation?.type !== 'reload' || new URL(navigation.name).pathname !== '/audit') return
+  const navigation = performance.getEntriesByType('navigation')[0] as
+    | PerformanceNavigationTiming
+    | undefined
+  if (
+    navigation?.type !== 'reload' ||
+    new URL(navigation.name).pathname !== '/audit'
+  )
+    return
   try {
     const path = sessionStorage.getItem(completedResultKey)
     if (path && /^\/scan\/[^/?#]+(?:\?cached=1)?$/.test(path)) {
       sessionStorage.removeItem(completedResultKey)
       void goto(path, { replaceState: true })
     }
-  } catch { /* Storage is optional; the saved result link remains available. */ }
+  } catch {
+    /* Storage is optional; the saved result link remains available. */
+  }
 })
 
 const split = $derived(result ? splitFindings(result.patterns) : null)
 const finishedSteps = $derived(
-  result?.workflowSteps?.filter((step) => step.status === 'observed' || step.status === 'reached').length ?? 0,
+  result?.workflowSteps?.filter(
+    (step) => step.status === 'observed' || step.status === 'reached',
+  ).length ?? 0,
 )
-const resultPath = $derived(result ? `/scan/${encodeURIComponent(result.id)}${reused ? '?cached=1' : ''}` : '')
+const resultPath = $derived(
+  result
+    ? `/scan/${encodeURIComponent(result.id)}${reused ? '?cached=1' : ''}`
+    : '',
+)
 
 function evidenceUrl(patternId: string): string | undefined {
   if (!result) return undefined
@@ -79,7 +93,11 @@ function startOver() {
   busy = false
   extensionHelp = false
   savedEvidence = null
-  try { sessionStorage.removeItem(completedResultKey) } catch { /* optional */ }
+  try {
+    sessionStorage.removeItem(completedResultKey)
+  } catch {
+    /* optional */
+  }
 }
 
 async function start(event: SubmitEvent) {
@@ -124,7 +142,11 @@ async function start(event: SubmitEvent) {
   } catch (error) {
     if (signal.aborted) return
     problem = publicScanErrorMessage(error)
-    extensionHelp = error instanceof ApiError && ['SITE_BLOCKED', 'PAGE_NOT_READY', 'PAGE_LOAD_FAILED'].includes(error.code ?? '')
+    extensionHelp =
+      error instanceof ApiError &&
+      ['SITE_BLOCKED', 'PAGE_NOT_READY', 'PAGE_LOAD_FAILED'].includes(
+        error.code ?? '',
+      )
     savedEvidence = await findSavedEvidence(error, submittedUrl, 'deep')
     if (started) live.fail(problem)
   } finally {
@@ -132,9 +154,16 @@ async function start(event: SubmitEvent) {
   }
 }
 
-async function waitForResult(jobId: string, capabilityToken: string, signal: AbortSignal) {
+async function waitForResult(
+  jobId: string,
+  capabilityToken: string,
+  signal: AbortSignal,
+) {
   const status = await pollAuditStatus(
-    () => api.getAuditStatus(jobId, capabilityToken, (input, init) => fetch(input, { ...init, signal })),
+    () =>
+      api.getAuditStatus(jobId, capabilityToken, (input, init) =>
+        fetch(input, { ...init, signal }),
+      ),
     (status) => live.update(status),
     undefined,
     signal,
@@ -149,11 +178,18 @@ async function waitForResult(jobId: string, capabilityToken: string, signal: Abo
     extensionHelp = true
   }
   if (resultId) {
-    const savedResult = await api.getScan(resultId, (input, init) => fetch(input, { ...init, signal }))
+    const savedResult = await api.getScan(resultId, (input, init) =>
+      fetch(input, { ...init, signal }),
+    )
     signal.throwIfAborted()
     result = savedResult
-    try { sessionStorage.setItem(completedResultKey, resultPath) } catch { /* optional */ }
-  } else if (status.status === 'done') throw new ApiError(422, 'SCAN_INCOMPLETE')
+    try {
+      sessionStorage.setItem(completedResultKey, resultPath)
+    } catch {
+      /* optional */
+    }
+  } else if (status.status === 'done')
+    throw new ApiError(422, 'SCAN_INCOMPLETE')
 }
 </script>
 

@@ -1,10 +1,10 @@
 <script lang="ts">
-import { goto } from '$app/navigation'
 import type { ScanHistoryRow } from '@trusten/shared/api'
+import { goto } from '$app/navigation'
 import { ApiError, api, publicScanErrorMessage } from '$lib/api'
 import { historyCoverageLabel } from '$lib/history-coverage'
-import { getTurnstileToken } from '$lib/turnstile'
 import { findSavedEvidence, validateWebsiteInput } from '$lib/submission'
+import { getTurnstileToken } from '$lib/turnstile'
 import type { PageData } from './$types'
 
 let { data }: { data: PageData } = $props()
