@@ -11,9 +11,24 @@ const steps = (statuses: WorkflowStep['status'][]): WorkflowStep[] =>
     patternsFound: [],
     timestamp: '2026-01-01T00:00:00Z',
     status,
+    screenshotPath: '/evidence/page.jpg',
+    visualCheckAvailable: true,
   }))
 
 describe('getReportSummary', () => {
+  test('does not call a visually incomplete journey fair', () => {
+    const incomplete = steps(['observed', 'reached'])
+    incomplete[1].visualCheckAvailable = false
+    const summary = getReportSummary('A', 0, incomplete)
+    expect(summary.limited).toBe(true)
+    expect(summary.headline).not.toMatch(/fair/)
+    expect(summary.sub).toContain('visual')
+  })
+  test('describes homepage-only observations as a page check', () => {
+    const summary = getReportSummary('A', 0, steps(['observed', 'observed']))
+    expect(summary.headline).toContain('page')
+    expect(summary.headline).not.toMatch(/website looks fair/)
+  })
   test('does not present a grade as conclusive when no journey step succeeded', () => {
     const summary = getReportSummary(
       'A',

@@ -205,10 +205,10 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
     if (!reportsDir.startsWith(path.resolve('.trusten-local') + path.sep))
       throw new Error('Unsafe cleanup path')
     rmSync(reportsDir, { recursive: true, force: true })
-  })
+  }, 30_000)
 
   async function audit(workflows: string[]) {
-    const url = `https://fixture.example/${crypto.randomUUID()}`
+    const url = `https://fixture-${crypto.randomUUID()}.example/`
     targets.push(url)
     const start = await app.request('/api/audit', {
       method: 'POST',
@@ -227,6 +227,7 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
       })
       expect(response.status).toBe(200)
       const status = (await response.json()) as {
+        jobId: string
         status: string
         scanIds: string[]
         error: string | null
@@ -271,7 +272,8 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
       }
       const html = readFileSync(result.htmlPath!, 'utf8')
       expect(html).toContain('Limited check')
-      expect(html).toContain('We could not complete the whole journey')
+      expect(html).toContain('The grade is not conclusive.')
+      expect(html).toContain('2 of 5 steps completed.')
       expect(html).not.toContain('Trusten reached every planned step.')
     } finally {
       blockedPricing = false
@@ -380,6 +382,17 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
     }
     expect(result.scanType).toBe('deep')
     expect(status.scanIds).toHaveLength(3)
+    const history = (await (
+      await app.request('/api/history?limit=1000')
+    ).json()) as { scans: Array<{ id: string }> }
+    expect(
+      history.scans
+        .filter((row) => status.scanIds.includes(row.id))
+        .map((row) => row.id),
+    ).toEqual([resultId])
+    const [children] =
+      await getDb()`SELECT count(*)::int AS count FROM trusten_scans WHERE parent_audit_id=${status.jobId}`
+    expect(children.count).toBe(2)
     expect(result.workflowSteps).toHaveLength(4)
     expect(result.patterns.some((p) => p.category === 'drip_pricing')).toBe(
       true,
@@ -405,6 +418,23 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
       const status = await audit(['pricing'])
       expect(status.status).toBe('failed')
       expect(status.error).toContain('every requested journey')
+      expect(status.scanIds).toHaveLength(2)
+      const resultId = status.scanIds.at(-1)!
+      const limited = (await (
+        await app.request(`/api/scan/${resultId}`)
+      ).json()) as ScanResult
+      expect(limited.scanType).toBe('deep')
+      expect(
+        limited.workflowSteps?.some((step) => step.status === 'not-reached'),
+      ).toBe(true)
+      const history = (await (
+        await app.request('/api/history?limit=200')
+      ).json()) as { scans: Array<{ id: string }> }
+      expect(
+        history.scans
+          .filter((row) => status.scanIds.includes(row.id))
+          .map((row) => row.id),
+      ).toEqual([resultId])
     } finally {
       failDeep = false
     }

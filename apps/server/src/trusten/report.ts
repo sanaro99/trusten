@@ -6,6 +6,7 @@
  * generateReportHtml()     — Full HTML report with annotated screenshots
  */
 
+import { assessScanCoverage } from '@trusten/shared/domain'
 import {
   CATEGORY_LABELS,
   getPatternContent,
@@ -353,6 +354,22 @@ const REPORT_HEADLINES: Record<string, string> = {
   F: 'Be careful on this website',
 }
 
+function reportCoverageNote(
+  coverage: ReturnType<typeof assessScanCoverage>,
+): string {
+  if (coverage.status === 'blocked')
+    return 'A verification page stopped the check. This result does not assess the requested website.'
+  if (coverage.status === 'missing')
+    return 'Page evidence is unavailable. Run a new check before relying on this result.'
+  if (coverage.missingVisual)
+    return 'The visual analysis did not complete. The grade is not conclusive.'
+  if (coverage.status !== 'complete')
+    return 'This result only describes the pages Trusten could check.'
+  if (coverage.scope === 'page')
+    return 'Only the captured page was assessed; other website journeys were not checked.'
+  return 'Trusten reached every planned step.'
+}
+
 /** Generate a complete, self-contained HTML report from a ScanResult. */
 export function generateReportHtml(
   result: ScanResult,
@@ -372,35 +389,35 @@ export function generateReportHtml(
   )
 
   const workflowSteps = result.workflowSteps ?? []
-  const completedSteps = workflowSteps.filter(
-    (step) =>
-      !step.status || step.status === 'reached' || step.status === 'observed',
-  ).length
-  const limited =
-    workflowSteps.length > 0 && completedSteps < workflowSteps.length
+  const coverage = assessScanCoverage(result.scanType, workflowSteps)
+  const completedSteps = coverage.completed
+  const limited = coverage.status !== 'complete'
   const findingNoun = result.patterns.length === 1 ? 'concern' : 'concerns'
   const resultHeadline = limited
     ? 'Limited check'
-    : REPORT_HEADLINES[result.score.grade]
+    : coverage.scope === 'page'
+      ? 'Result for the checked page'
+      : REPORT_HEADLINES[result.score.grade]
+  const coverageNote = reportCoverageNote(coverage)
 
   const coverageHtml = workflowSteps.length
     ? `<div class="coverage-card ${limited ? 'coverage-limited' : 'coverage-complete'}">
         <div class="coverage-icon" aria-hidden="true">${limited ? '!' : '&#10003;'}</div>
         <div>
-          <div class="coverage-title">${limited ? 'We could not complete the whole journey' : 'Journey completed'}</div>
-          <div class="coverage-copy">${completedSteps} of ${workflowSteps.length} steps completed. ${limited ? 'This result only describes the pages Trusten could check.' : 'Trusten reached every planned step.'}</div>
+          <div class="coverage-title">${limited ? 'Limited check' : coverage.scope === 'page' ? 'Page check only' : 'Journey completed'}</div>
+          <div class="coverage-copy">${completedSteps} of ${workflowSteps.length} steps completed. ${coverageNote}</div>
         </div>
       </div>`
-    : `<div class="coverage-card coverage-complete">
-        <div class="coverage-icon" aria-hidden="true">&#10003;</div>
-        <div><div class="coverage-title">Page check</div><div class="coverage-copy">This result describes the page Trusten could inspect.</div></div>
+    : `<div class="coverage-card coverage-limited">
+        <div class="coverage-icon" aria-hidden="true">!</div>
+        <div><div class="coverage-title">Evidence unavailable</div><div class="coverage-copy">${coverageNote}</div></div>
       </div>`
 
   const stepsHtml = workflowSteps
     .map((step: WorkflowStep) => renderStep(step))
     .join('\n')
 
-  const patternsHtml = result.patterns
+  const patternsHtml = [...result.patterns]
     .sort((a, b) => {
       const order = { critical: 0, high: 1, medium: 2, low: 3 }
       return order[a.severity] - order[b.severity]
@@ -503,10 +520,10 @@ export function generateReportHtml(
         </div>
       </div>
       <div class="score-card">
-        <div class="grade">${result.score.grade}</div>
+        <div class="grade">${limited ? '!' : result.score.grade}</div>
         <div class="score-details">
           <div class="score-headline">${resultHeadline}</div>
-          <div class="score-label">${limited ? 'Provisional grade' : 'Grade'} ${result.score.grade} for the pages checked</div>
+          <div class="score-label">${limited ? 'No conclusive grade for this check' : `Grade ${result.score.grade} for the pages checked`}</div>
           <div class="score-label" style="margin-top:4px;color:#fff">${result.patterns.length} ${findingNoun} found</div>
         </div>
       </div>

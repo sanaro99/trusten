@@ -267,6 +267,27 @@ export function createTrustenDashboardRoutes(config: Config) {
     }
   })
 
+  // Always preserve a downloadable report when Chromium cannot print a PDF.
+  app.get('/report/:id/html', async (c) => {
+    const id = c.req.param('id')
+    const scan = await getTrustenScanById(id)
+    if (!scan?.htmlPath) return c.text('HTML report not found', 404)
+    try {
+      const fs = await import('node:fs')
+      return new Response(fs.readFileSync(scan.htmlPath), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Disposition': `attachment; filename="trusten-${id}.html"`,
+          'Content-Security-Policy':
+            "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    } catch {
+      return c.text('HTML report file not accessible', 404)
+    }
+  })
+
   // ─── JSON APIs ───
 
   // Analyze pre-captured content — accepts HTML/text from a browser extension or any client.
@@ -663,9 +684,10 @@ async function runAuditJob(
     // First run a quick scan on the homepage
     progress.currentStep = 'quick scan'
     publish(jobId, { type: 'progress', action: 'Quick scan of homepage…' })
-    const quickResult = await engine.quickScan(url)
+    const quickResult = await engine.quickScan(url, { parentAuditId: jobId })
     const results: ScanResult[] = [quickResult]
     scanIds.push(quickResult.id)
+    await updateAuditJob(jobId, { scanIds })
 
     for (const workflow of wfList) {
       progress.currentStep = `${workflow.name} workflow`
@@ -678,6 +700,7 @@ async function runAuditJob(
         const result = await engine.deepScan(url, workflow, {
           jobKey: jobId,
           watch: opts.watch,
+          parentAuditId: jobId,
         })
         scanIds.push(result.id)
         results.push(result)
@@ -733,13 +756,17 @@ async function runAuditJob(
       }
     }
 
-    if (progress.completedWorkflows.length === 0)
-      throw new ScanIncompleteError(
-        'The website stopped every requested journey. Only the first page could be checked.',
-      )
     progress.currentStep = 'preparing the complete report'
     const summary = await engine.summarizeAudit(url, results, failedSteps)
     scanIds.push(summary.id)
+    // A failed journey still has usable homepage evidence. Publish its limited
+    // report before failing/refunding so that evidence remains reviewable.
+    if (progress.completedWorkflows.length === 0) {
+      await updateAuditJob(jobId, { scanIds })
+      throw new ScanIncompleteError(
+        'The website stopped every requested journey. Only the first page could be checked.',
+      )
+    }
 
     await updateAuditJob(jobId, {
       status: 'done',

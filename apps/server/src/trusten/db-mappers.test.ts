@@ -2,6 +2,24 @@ import { describe, expect, test } from 'bun:test'
 import { mapAuditJobRow, mapScanHistoryRow, mapScanRow } from './db-mappers'
 
 describe('PostgreSQL row mapping', () => {
+  test('marks deep scans with unavailable vision as partial history coverage', () => {
+    const row = mapScanHistoryRow({
+      scan_type: 'deep',
+      workflow_steps: [
+        {
+          url: 'https://example.com/',
+          status: 'reached',
+          screenshotPath: '/data/page.jpg',
+          visualCheckAvailable: false,
+        },
+      ],
+    })
+    expect(row.coverage).toBe('partial')
+    expect(row.coverageScope).toBe('journey')
+  })
+  test('does not silently certify legacy deep results without evidence', () => {
+    expect(mapScanHistoryRow({ scan_type: 'deep' }).coverage).toBe('missing')
+  })
   test('maps dates and numeric history fields', () => {
     const row = mapScanHistoryRow({
       id: 's',

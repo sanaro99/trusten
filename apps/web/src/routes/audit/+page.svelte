@@ -1,9 +1,11 @@
 <script lang="ts">
-import type { ScanDetail } from '@trusten/shared/api'
+import type { ScanDetail, ScanHistoryRow } from '@trusten/shared/api'
+import { goto } from '$app/navigation'
 import { FindingCard, GradeBadge } from '@trusten/ui/domain'
-import { onDestroy } from 'svelte'
+import { onDestroy, onMount } from 'svelte'
 import { ApiError, api, publicScanErrorMessage } from '$lib/api'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
+import ReportAssets from '$lib/components/ReportAssets.svelte'
 import { splitFindings } from '$lib/findings'
 import {
   completedAuditResultId,
@@ -12,6 +14,7 @@ import {
 } from '$lib/live.svelte'
 import { getReportSummary } from '$lib/report-content'
 import { getTurnstileToken } from '$lib/turnstile'
+import { findSavedEvidence, validateWebsiteInput } from '$lib/submission'
 
 let url = $state('')
 let started = $state(false)
@@ -19,46 +22,37 @@ let problem = $state('')
 let result = $state<ScanDetail | null>(null)
 let reused = $state(false)
 let busy = $state(false)
+let phase = $state<'visitor' | 'scan'>('visitor')
+let extensionHelp = $state(false)
+let savedEvidence = $state<ScanHistoryRow | null>(null)
 let turnstileContainer = $state<HTMLDivElement>()
+let polling = new AbortController()
+const completedResultKey = 'trusten:completed-audit'
 
 const live = createLiveScan()
-onDestroy(() => live.destroy())
+onDestroy(() => {
+  polling.abort()
+  live.destroy()
+})
+onMount(() => {
+  // Only a refreshed completed audit restores its public result. Starting a
+  // new visit to /audit still opens the form. No capability tokens are stored.
+  const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+  if (navigation?.type !== 'reload' || new URL(navigation.name).pathname !== '/audit') return
+  try {
+    const path = sessionStorage.getItem(completedResultKey)
+    if (path && /^\/scan\/[^/?#]+(?:\?cached=1)?$/.test(path)) {
+      sessionStorage.removeItem(completedResultKey)
+      void goto(path, { replaceState: true })
+    }
+  } catch { /* Storage is optional; the saved result link remains available. */ }
+})
 
 const split = $derived(result ? splitFindings(result.patterns) : null)
 const finishedSteps = $derived(
-  live.state.steps.filter((step) => step.done).length,
+  result?.workflowSteps?.filter((step) => step.status === 'observed' || step.status === 'reached').length ?? 0,
 )
-
-function friendlyActivity(action: string): string {
-  const value = action.toLowerCase()
-  if (value.includes('cookie') || value.includes('consent'))
-    return 'Checking the privacy choices'
-  if (value.includes('cancel') || value.includes('unsubscribe'))
-    return 'Looking for a way to leave'
-  if (
-    value.includes('sign') ||
-    value.includes('register') ||
-    value.includes('account')
-  )
-    return 'Checking the sign-up process'
-  if (value.includes('search') || value.includes('browse'))
-    return 'Looking for something to check'
-  if (value.includes('select') || value.includes('open'))
-    return 'Opening an item or option'
-  if (
-    value.includes('add') ||
-    value.includes('basket') ||
-    value.includes('cart')
-  )
-    return 'Checking what is added to the basket'
-  if (
-    value.includes('checkout') ||
-    value.includes('price') ||
-    value.includes('fee')
-  )
-    return 'Checking the final price and choices'
-  return 'Checking this part of the website'
-}
+const resultPath = $derived(result ? `/scan/${encodeURIComponent(result.id)}${reused ? '?cached=1' : ''}` : '')
 
 function evidenceUrl(patternId: string): string | undefined {
   if (!result) return undefined
@@ -75,59 +69,91 @@ function evidenceUrl(patternId: string): string | undefined {
 }
 
 function startOver() {
+  polling.abort()
+  polling = new AbortController()
   live.reset()
   result = null
   reused = false
   problem = ''
   started = false
+  busy = false
+  extensionHelp = false
+  savedEvidence = null
+  try { sessionStorage.removeItem(completedResultKey) } catch { /* optional */ }
 }
 
 async function start(event: SubmitEvent) {
   event.preventDefault()
+  if (busy) return
   if (!url.trim()) {
     problem = 'Please type the address of the website you want checked.'
     return
   }
 
+  const submittedUrl = validateWebsiteInput(url)
+  if (!submittedUrl) {
+    problem = 'Please enter a valid website address, such as example.com.'
+    return
+  }
+
   problem = ''
+  extensionHelp = false
+  savedEvidence = null
   busy = true
+  phase = 'visitor'
+  const signal = polling.signal
   try {
     if (!turnstileContainer) throw new Error('Scan form is not ready')
     const turnstileToken = await getTurnstileToken(
       turnstileContainer,
       'audit_scan',
     )
+    signal.throwIfAborted()
+    phase = 'scan'
     const { jobId, capabilityToken, cached } = await api.startAudit({
-      url,
+      url: submittedUrl,
       watch: true,
       mode: 'discover',
       turnstileToken,
     })
+    signal.throwIfAborted()
     reused = cached === true
     started = true
-    if (!reused) await live.connect(jobId, capabilityToken)
-    await waitForResult(jobId, capabilityToken)
+    if (!reused) void live.connect(jobId, capabilityToken)
+    await waitForResult(jobId, capabilityToken, signal)
   } catch (error) {
+    if (signal.aborted) return
     problem = publicScanErrorMessage(error)
+    extensionHelp = error instanceof ApiError && ['SITE_BLOCKED', 'PAGE_NOT_READY', 'PAGE_LOAD_FAILED'].includes(error.code ?? '')
+    savedEvidence = await findSavedEvidence(error, submittedUrl, 'deep')
     if (started) live.fail(problem)
   } finally {
-    busy = false
+    if (signal === polling.signal) busy = false
   }
 }
 
-async function waitForResult(jobId: string, capabilityToken: string) {
+async function waitForResult(jobId: string, capabilityToken: string, signal: AbortSignal) {
   const status = await pollAuditStatus(
-    () => api.getAuditStatus(jobId, capabilityToken),
+    () => api.getAuditStatus(jobId, capabilityToken, (input, init) => fetch(input, { ...init, signal })),
     (status) => live.update(status),
+    undefined,
+    signal,
   )
-  if (status.status === 'done') {
-    const resultId = completedAuditResultId(status.scanIds)
-    if (!resultId) throw new ApiError(422, 'SCAN_INCOMPLETE')
-    result = await api.getScan(resultId)
-  } else {
+  // HTTP is authoritative. Stop late optional stream events from replacing a
+  // terminal result or failure notice while its saved evidence is loaded.
+  live.destroy()
+  const resultId = completedAuditResultId(status.scanIds)
+  if (status.status === 'failed') {
     problem = 'The website stopped the check before it could finish.'
     live.fail(problem)
+    extensionHelp = true
   }
+  if (resultId) {
+    const savedResult = await api.getScan(resultId, (input, init) => fetch(input, { ...init, signal }))
+    signal.throwIfAborted()
+    result = savedResult
+    try { sessionStorage.setItem(completedResultKey, resultPath) } catch { /* optional */ }
+  } else if (status.status === 'done') throw new ApiError(422, 'SCAN_INCOMPLETE')
 }
 </script>
 
@@ -158,6 +184,7 @@ async function waitForResult(jobId: string, capabilityToken: string) {
             class="input input-lg mt-2 w-full"
             type="text"
             bind:value={url}
+            disabled={busy}
             placeholder="example.com"
             autocomplete="url"
             aria-describedby="audit-hint"
@@ -167,9 +194,11 @@ async function waitForResult(jobId: string, capabilityToken: string) {
           </p>
           {#if problem}
             <div class="alert alert-error mt-3" role="alert">{problem}</div>
+            {#if extensionHelp}<a class="link link-primary inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>{/if}
+            {#if savedEvidence}<a class="link link-primary inline-flex min-h-11 items-center font-bold" href="/scan/{encodeURIComponent(savedEvidence.id)}?cached=1">Open saved check</a>{/if}
           {/if}
           <button class="btn btn-primary btn-lg mt-5 w-full sm:w-auto" type="submit" disabled={busy}>
-            {busy ? 'Preparing the check…' : 'Start full check'}
+            {busy ? phase === 'visitor' ? 'Verifying visitor…' : 'Preparing…' : 'Start full check'}
           </button>
           <div class="mt-3" bind:this={turnstileContainer}></div>
         </div>
@@ -209,7 +238,7 @@ async function waitForResult(jobId: string, capabilityToken: string) {
             <p class="mt-2 mb-0 text-base-content/65">
               {live.state.status === 'running'
                 ? 'You can leave this tab open while the check continues.'
-                : `${finishedSteps} ${finishedSteps === 1 ? 'part' : 'parts'} checked.`}
+                : result ? `${finishedSteps} journey ${finishedSteps === 1 ? 'step' : 'steps'} checked.` : live.state.status === 'done' ? 'Preparing the saved result…' : 'The check stopped before a saved journey result was available.'}
             </p>
           </div>
           {#if live.state.status === 'running'}
@@ -226,15 +255,15 @@ async function waitForResult(jobId: string, capabilityToken: string) {
           </details>
         {/if}
 
-        <ol class="mt-7 list-none space-y-3 p-0" aria-label="Check progress">
+        <ol class="mt-7 list-none space-y-3 p-0" aria-label="Check activity">
           {#each live.state.steps as step (step.step)}
             <li class="neo-inset flex items-center gap-4 rounded-2xl px-4 py-3">
-              <span class="grid size-10 shrink-0 place-items-center rounded-full {step.done ? 'bg-success text-success-content' : 'bg-primary text-primary-content'}" aria-hidden="true">
-                {step.done ? '✓' : step.step}
+              <span class="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-primary-content" aria-hidden="true">
+                {step.step}
               </span>
               <span class="min-w-0 flex-1">
-                <strong class="block">{friendlyActivity(step.action)}</strong>
-                <small class="text-base-content/70">{step.done ? 'Finished' : 'In progress'}</small>
+                <strong class="block">{step.action}</strong>
+                <small class="text-base-content/70">{live.state.status === 'running' && step === live.state.steps.at(-1) ? 'In progress' : 'Activity reported'}</small>
               </span>
             </li>
           {/each}
@@ -250,17 +279,19 @@ async function waitForResult(jobId: string, capabilityToken: string) {
           <div class="alert alert-error mt-6" role="alert">
             <div>
               <strong class="block">{problem || live.state.error}</strong>
-              <span>Nothing was submitted or purchased. You can try again now.</span>
+              <span>Nothing was submitted or purchased.</span>
             </div>
           </div>
           <button class="btn btn-primary mt-4" type="button" onclick={startOver}>Try again</button>
+          {#if extensionHelp}<a class="link link-primary mt-2 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>{/if}
         {/if}
       </div>
     </section>
   {/if}
 
   {#if result && split}
-    {@const heading = getReportSummary(result.score.grade, split.main.length, result.workflowSteps ?? [])}
+    {@const heading = getReportSummary(result.score.grade, result.patterns.length, result.workflowSteps ?? [], result.scanType)}
+    {@const asideOnly = split.main.length === 0 && split.aside.length > 0}
     <section class="mt-16">
       <header class="card mb-8 border border-base-300 bg-base-100">
         <div class="card-body flex-row flex-wrap items-center gap-6">
@@ -269,18 +300,24 @@ async function waitForResult(jobId: string, capabilityToken: string) {
               <span class="text-3xl" aria-hidden="true">!</span>
               <span class="sr-only">Limited check</span>
             </div>
-          {:else}
+          {:else if !asideOnly}
             <GradeBadge grade={result.score.grade} />
           {/if}
           <div>
             {#if heading.limited}
               <div class="badge badge-warning mb-3">{heading.eyebrow}</div>
             {/if}
-            <h2 class="m-0 font-bold text-3xl">{heading.headline}</h2>
-            <p class="mt-2 mb-0 text-base-content/65">{heading.sub}</p>
+            <h2 class="m-0 font-bold text-3xl">{asideOnly && !heading.limited ? 'Some findings need a closer look' : heading.headline}</h2>
+            <p class="mt-2 mb-0 text-base-content/65">{asideOnly && !heading.limited ? 'The findings below are uncertain. Review their evidence before drawing a conclusion.' : heading.sub}</p>
           </div>
         </div>
       </header>
+      <div class="mb-8 flex flex-wrap gap-3">
+        <a class="btn btn-primary" href={resultPath}>Open saved result</a>
+        <button class="btn" type="button" onclick={startOver}>Check another site</button>
+      </div>
+      <ReportAssets scan={result} />
+      {#if heading.limited}<a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>{/if}
 
       {#if result.workflowSteps?.length}
         <JourneyTimeline scanId={result.id} steps={result.workflowSteps} />
@@ -293,6 +330,18 @@ async function waitForResult(jobId: string, capabilityToken: string) {
       {#each split.main as pattern, i (pattern.id)}
         <FindingCard {pattern} index={i + 1} screenshotUrl={evidenceUrl(pattern.id)} />
       {/each}
+      {#if result.patterns.length === 0}
+        <div class="alert {heading.limited ? 'alert-warning' : 'alert-success'}"><span>{heading.limited ? 'We did not find a concern in the pages we reached. The limited check does not show whether the whole website is clear.' : 'We did not find common tricks in the pages checked. Review the journey above to see what this result covers.'}</span></div>
+      {/if}
+      {#if split.aside.length > 0}
+        <details class="collapse-arrow collapse mt-8 border border-base-300 bg-base-100">
+          <summary class="collapse-title font-semibold text-primary">A few other things worth a look ({split.aside.length})</summary>
+          <div class="collapse-content">
+            <p class="max-w-measure text-base-content/65">We are less sure about these, so we have kept them separate.</p>
+            {#each split.aside as pattern, i (pattern.id)}<FindingCard {pattern} index={split.main.length + i + 1} screenshotUrl={evidenceUrl(pattern.id)} />{/each}
+          </div>
+        </details>
+      {/if}
     </section>
   {/if}
 </main>

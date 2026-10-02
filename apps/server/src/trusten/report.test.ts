@@ -11,6 +11,19 @@ function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
     startedAt: '2026-09-06T10:00:00.000Z',
     completedAt: '2026-09-06T10:01:00.000Z',
     patterns: [],
+    workflowSteps: [
+      {
+        stepNumber: 1,
+        action: 'Open checkout',
+        url: 'https://example.com/cart',
+        screenshot: '',
+        screenshotPath: '/evidence/page.jpg',
+        timestamp: '2026-10-02T00:00:00Z',
+        patternsFound: [],
+        status: 'reached',
+        visualCheckAvailable: true,
+      },
+    ],
     score: {
       numeric: 82,
       grade: 'B',
@@ -22,6 +35,39 @@ function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
 }
 
 describe('generateReportHtml', () => {
+  test('an observed homepage is a page check rather than a completed journey', () => {
+    const result = scanResult()
+    result.workflowSteps![0].status = 'observed'
+    const html = generateReportHtml(result)
+    expect(html).toContain('Page check only')
+    expect(html).toContain('other website journeys were not checked')
+    expect(html).not.toContain('Journey completed')
+    expect(html).not.toContain('This website looks mostly fair')
+  })
+  test('warns about missing visual analysis even when every journey step was reached', () => {
+    const html = generateReportHtml(
+      scanResult({
+        workflowSteps: [
+          {
+            stepNumber: 1,
+            action: 'Open checkout',
+            url: 'https://example.com/cart',
+            screenshot: '',
+            screenshotPath: '/evidence/page.jpg',
+            timestamp: '2026-10-02T00:00:00Z',
+            patternsFound: [],
+            status: 'reached',
+            visualCheckAvailable: false,
+          },
+        ],
+      }),
+    )
+    expect(html).toContain('Limited check')
+    expect(html).toContain('visual analysis')
+    expect(html).toContain('No conclusive grade for this check')
+    expect(html).not.toContain('<div class="grade">B</div>')
+    expect(html).not.toContain('This website looks mostly fair')
+  })
   test('makes incomplete coverage obvious without exposing navigation internals', () => {
     const result = scanResult({
       workflowSteps: [
@@ -62,7 +108,7 @@ describe('generateReportHtml', () => {
 
     expect(html).toContain('Limited check')
     expect(html).toContain('1 of 3 steps completed')
-    expect(html).toContain('Provisional grade B for the pages checked')
+    expect(html).toContain('No conclusive grade for this check')
     expect(html).toContain('Search the website')
     expect(html).toContain("Couldn't continue")
     expect(html).toContain('https://example.com/search')

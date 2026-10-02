@@ -2,6 +2,126 @@ import { describe, expect, test } from 'bun:test'
 import type { AnalyzerContext } from '../types'
 import { NaggingAnalyzer } from './nagging'
 
+function promptContext(html: string, visibleText = ''): AnalyzerContext {
+  return {
+    url: 'https://example.com/',
+    pageTitle: 'Example',
+    domSnapshot: html,
+    visibleText,
+    screenshotBase64: '',
+    networkRequests: [],
+    cookies: [],
+  }
+}
+
+async function prompts(context: AnalyzerContext) {
+  return (await new NaggingAnalyzer().analyze(context)).patterns.filter(
+    (pattern) => pattern.category === 'repeated_prompts',
+  )
+}
+
+describe('observed intrusive prompts', () => {
+  test('ignores an ordinary shipping banner with data-section-id', async () => {
+    expect(
+      await prompts(
+        promptContext(
+          '<div class="relative" style="background-color: #212121" data-section-type="global-banner" data-section-id="sections--16476871000144__global-banner" data-analytics-global-banner="" data-section-template-name="index" data-autoplay-delay="5000" data-enable-sticky-behavior="false" data-v-app="">Free shipping on orders over $100</div>',
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  test('does not label a single dismissible newsletter modal as repeated prompting', async () => {
+    expect(
+      await prompts(
+        promptContext(
+          '<div class="newsletter-modal"><p>Stay updated. Subscribe to our newsletter.</p><button>No thanks</button></div>',
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  test('does not label ordinary notification settings copy as nagging', async () => {
+    expect(
+      await prompts(
+        promptContext(
+          '<main><h1>Settings</h1><button>Enable notifications</button></main>',
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  test('does not match an overlay token inside data attributes', async () => {
+    expect(
+      await prompts(
+        promptContext(
+          '<div data-section-id="exit-modal">Wait! Before you go, subscribe.</div>',
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  test('retains an observed exit-interruption prompt with its content', async () => {
+    const patterns = await prompts(
+      promptContext(
+        '<div class="exit-modal"><p>Wait! Before you go, subscribe for a discount.</p><button>Continue shopping</button></div>',
+      ),
+    )
+    expect(patterns).toHaveLength(1)
+    expect(patterns[0]?.element?.text).toContain('subscribe for a discount')
+    expect(patterns[0]?.element?.html).toContain('Continue shopping')
+    expect(patterns[0]?.description).not.toContain(
+      'without a clear and easy dismiss',
+    )
+  })
+
+  test('reports a notification prompt observed again after a recorded refusal', async () => {
+    const context = promptContext(
+      '<div role="dialog"><p>Enable notifications for deals.</p><button>Allow</button><button>No thanks</button></div>',
+    )
+    context.previousStepContext = promptContext(
+      '<main>Notifications declined. Continue shopping.</main>',
+    )
+    const patterns = await prompts(context)
+    expect(patterns).toHaveLength(1)
+    expect(patterns[0]?.element?.text).toContain('Enable notifications')
+  })
+
+  test('ignores empty modal placeholders', async () => {
+    expect(
+      await prompts(promptContext('<div id="newsletter-modal"></div>')),
+    ).toEqual([])
+  })
+
+  test('does not treat an unchanged modal across snapshots as a refused prompt', async () => {
+    const context = promptContext(
+      '<div role="dialog">Enable notifications for deals. No thanks</div>',
+    )
+    context.previousStepContext = promptContext(context.domSnapshot)
+    expect(await prompts(context)).toEqual([])
+  })
+
+  test('does not connect refusal of an unrelated request to a notification prompt', async () => {
+    const context = promptContext(
+      '<div role="dialog">Enable notifications for deals.</div>',
+    )
+    context.previousStepContext = promptContext(
+      '<main>Newsletter declined.</main>',
+    )
+    expect(await prompts(context)).toEqual([])
+  })
+
+  test('does not report a hidden exit modal or prompt markup inside a script', async () => {
+    expect(
+      await prompts(
+        promptContext(
+          '<div class="exit-modal" aria-hidden="true">Wait! Before you go, subscribe.</div><script><div class="exit-modal">Wait! Before you go, subscribe.</div></script>',
+        ),
+      ),
+    ).toEqual([])
+  })
+})
+
 async function ads(html: string, visibleText = '') {
   const context: AnalyzerContext = {
     url: 'https://example.com/',

@@ -13,6 +13,8 @@ export const ScanHistoryRowSchema = z.object({
   quickCoverage: z
     .enum(['complete', 'partial', 'missing', 'blocked'])
     .nullable(),
+  coverage: z.enum(['complete', 'partial', 'missing', 'blocked']).optional(),
+  coverageScope: z.enum(['page', 'journey']).optional(),
   patternCount: z.number(),
   criticalCount: z.number(),
   highCount: z.number(),

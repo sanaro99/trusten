@@ -11,6 +11,8 @@ export interface ScanResult {
   url: string
   domain: string
   scanType: ScanType
+  /** Internal homepage/workflow artifact belonging to a public audit. */
+  parentAuditId?: string | null
   startedAt: string
   completedAt: string
   patterns: DetectedPattern[]
