@@ -56,6 +56,28 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
           html = page(
             '<header><a href="/cart">Cart</a></header><main><h1>Shop</h1><form action="/products"><input type="search" name="q"><button>Search</button></form></main>',
           )
+        } else if (url.pathname === '/textarea-shop') {
+          // Like Best Buy: a hidden mobile search input comes first, and the
+          // visible search box is a formless textarea that only searches on a
+          // real (trusted) Enter key press.
+          html = page(
+            `<header><a href="/cart">Cart</a><input type="search" name="q" style="display:none"></header>
+            <main><h1>Shop</h1>
+              <textarea id="autocomplete-search-bar" rows="1" aria-label="What can we help you find?"
+                onkeydown="if (event.key === 'Enter' && event.isTrusted) { event.preventDefault(); location.href = '/products?q=' + encodeURIComponent(this.value.trim()) }"></textarea>
+            </main>`,
+          )
+        } else if (url.pathname === '/refusing-shop') {
+          html = page(
+            '<header><a href="/cart">Cart</a></header><main><h1>Shop</h1><form action="/refusing-results"><input type="search" name="q"><button>Search</button></form></main>',
+          )
+        } else if (url.pathname === '/refusing-results') {
+          html = page(
+            '<main><h1>Results</h1><article class="product"><a href="/product/refused"><h2>Test shirt</h2><p>$20</p></a></article></main>',
+          )
+        } else if (url.pathname === '/product/refused') {
+          // The site refuses the product page, so Chrome shows its own error page.
+          return Response.redirect('http://127.0.0.1:1/', 302)
         } else if (url.pathname === '/products') {
           html = page(
             '<main><h1>Products</h1><article class="product"><a href="/product/shirt"><h2>Test shirt</h2><p>$20</p></a></article></main>',
@@ -180,6 +202,40 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
     ).toBe(true)
     expect(result.videoPath && existsSync(result.videoPath)).toBe(true)
     expect(await browser.listPages()).toHaveLength(0)
+  }, 90_000)
+
+  test('searches a store whose visible search box is a textarea', async () => {
+    const workflow: ScanWorkflow = {
+      ...CHECKOUT_WORKFLOW,
+      steps: CHECKOUT_WORKFLOW.steps.slice(0, 1),
+    }
+    const result = await engine.deepScan(`${baseUrl}/textarea-shop`, workflow)
+    const step = result.workflowSteps?.[0]
+    expect(step?.status).toBe('reached')
+    const reached = new URL(step?.url ?? baseUrl)
+    expect(reached.pathname).toBe('/products')
+    expect(reached.searchParams.get('q')).toBe('shirt')
+  }, 60_000)
+
+  test('keeps earlier results when the site refuses a later page', async () => {
+    const result = await engine.deepScan(
+      `${baseUrl}/refusing-shop`,
+      CHECKOUT_WORKFLOW,
+    )
+    expect(result.workflowSteps?.map((s) => s.status)).toEqual([
+      'reached',
+      'not-reached',
+      'skipped',
+      'skipped',
+      'skipped',
+    ])
+    const refused = result.workflowSteps?.[1]
+    expect(new URL(refused?.url ?? '').pathname).toBe('/refusing-results')
+    expect(refused?.screenshot).toBe('')
+    expect(refused?.navReason).toBe('The website did not load the next page')
+    expect(
+      result.workflowSteps?.every((s) => s.url.startsWith(`${baseUrl}/`)),
+    ).toBe(true)
   }, 90_000)
 
   test('does not inspect dependent observations when their destination was never reached', async () => {

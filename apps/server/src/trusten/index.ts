@@ -41,6 +41,41 @@ function dedupePatterns(patterns: DetectedPattern[]): DetectedPattern[] {
   return consolidateFindings(patterns)
 }
 
+/** Element id given to the chosen search field so the driver can type into it. */
+const SEARCH_FIELD_ID = 900_001
+
+/**
+ * In-page helper that returns the first visible, editable search field.
+ * Many stores (Best Buy, Google) use a textarea, and often hide a duplicate
+ * mobile input earlier in the page, so every match is checked for visibility.
+ */
+const FIND_SEARCH_FIELD = `function findSearchField() {
+  const fields = 'input:not([type]), input[type="search"], input[type="text"], textarea';
+  const selectors = [
+    'input[type="search"]',
+    '[role="searchbox"]',
+    '[role="searchbox"] :is(' + fields + ')',
+    'form[role="search"] :is(' + fields + ')',
+    '[role="search"] :is(' + fields + ')',
+    ':is(input, textarea):is([name="search"], [name="q"], [name="query"], [name="keyword"], [name="st"])',
+    ':is(input, textarea):is([placeholder*="search" i], [aria-label*="search" i], [id*="search" i], [class*="search" i])',
+    '[contenteditable="true"]:is([aria-label*="search" i], [placeholder*="search" i])',
+  ];
+  function usable(el) {
+    if (el.disabled || el.readOnly) return false;
+    if (el instanceof HTMLInputElement && !/^(search|text|)$/.test(el.type)) return false;
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) return false;
+    if (el.getClientRects().length === 0) return false;
+    return getComputedStyle(el).visibility !== 'hidden';
+  }
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (usable(el)) return el;
+    }
+  }
+  return null;
+}`
+
 // ─── Orchestrator ───
 
 export class TrustenEngine {
@@ -227,6 +262,8 @@ export class TrustenEngine {
       // once per distinct page (deterministic analyzers still run on repeats).
       const analyzedUrls = new Set<string>()
       let funnelBroken = false
+      // Last real web address, so steps never report Chrome's error page URL.
+      let lastPageUrl = url
       logger.info('Trusten deep scan navigation mode', {
         llmReady,
         mode: 'deterministic-first',
@@ -393,7 +430,27 @@ export class TrustenEngine {
         await sleep(800)
 
         const currentState = await capturePageState(this.browser, pid)
-        const currentUrl = currentState.url || beforeUrl
+        // A site that refuses the next page (e.g. Best Buy product pages in a
+        // headless browser) leaves Chrome's own error page. Keep the journey's
+        // earlier results instead of failing the whole scan.
+        const landedOnBrowserError =
+          expectsNav &&
+          status === undefined &&
+          !!currentState.url &&
+          !/^https?:\/\//i.test(currentState.url)
+        if (landedOnBrowserError) {
+          status = 'not-reached'
+          funnelBroken = true
+          navReason = 'The website did not load the next page'
+        }
+        const isWebUrl = (u: string | undefined): u is string =>
+          !!u && /^https?:\/\//i.test(u)
+        const currentUrl = isWebUrl(currentState.url)
+          ? currentState.url
+          : isWebUrl(beforeUrl)
+            ? beforeUrl
+            : lastPageUrl
+        lastPageUrl = currentUrl
         const advanced =
           expectsNav &&
           status === undefined &&
@@ -470,7 +527,9 @@ export class TrustenEngine {
 
         // ── Screenshot: annotate, capture, save ──────────────────────────
         const { screenshotB64, screenshotPath } =
-          status === 'skipped' || status === 'no-navigation'
+          status === 'skipped' ||
+          status === 'no-navigation' ||
+          landedOnBrowserError
             ? { screenshotB64: '', screenshotPath: '' }
             : await this.captureStepScreenshot(
                 pid,
@@ -1243,8 +1302,10 @@ export class TrustenEngine {
     // 2. Fill the main search box
     if (stepDef.fillSearch) {
       const query = JSON.stringify(stepDef.fillSearch)
-      // Step 1: try to reveal a hidden search input by clicking search icons/buttons
+      // Step 1: if no search field is visible, try to reveal one by clicking a search icon/button
       const revealScript = `(function() {
+        ${FIND_SEARCH_FIELD}
+        if (findSearchField()) return false;
         const triggers = [...document.querySelectorAll(
           '[class*="search-icon"], [class*="search-btn"], [class*="searchbtn"], [aria-label*="search" i][role="button"], button[class*="search"], [class*="search-trigger"]'
         )].filter(el => {
@@ -1263,40 +1324,34 @@ export class TrustenEngine {
 
       // Step 2: fill the input
       const fillScript = `(function() {
-        const selectors = [
-          'input[type="search"]',
-          'input[name="search"]',
-          'input[name="q"]',
-          'input[name="keyword"]',
-          'input[placeholder*="search" i]',
-          'input[aria-label*="search" i]',
-          'input[id*="search" i]',
-          'input[class*="search" i]',
-          '[role="searchbox"] input',
-          '[role="searchbox"]',
-        ];
-        for (const sel of selectors) {
-          const el = document.querySelector(sel);
-          if (el && el.offsetParent !== null) {
-            el.focus();
-            try {
-              const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-              if (nativeSet && nativeSet.set) nativeSet.set.call(el, ${query});
-              else el.value = ${query};
-            } catch(_) { el.value = ${query}; }
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
-            const form = el.closest('form');
-            if (form) { try { form.requestSubmit(); } catch(_) {} }
-            return true;
-          }
+        ${FIND_SEARCH_FIELD}
+        const el = findSearchField();
+        if (!el) return false;
+        document.querySelectorAll('[data-trusten-id="${SEARCH_FIELD_ID}"]').forEach(function (other) { other.removeAttribute('data-trusten-id'); });
+        el.setAttribute('data-trusten-id', String(${SEARCH_FIELD_ID}));
+        el.focus();
+        if (el.isContentEditable) {
+          el.textContent = ${query};
+        } else {
+          // Use the element's own native setter so React-style controlled fields see the change.
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          const nativeSet = Object.getOwnPropertyDescriptor(proto, 'value');
+          try { nativeSet && nativeSet.set ? nativeSet.set.call(el, ${query}) : (el.value = ${query}); }
+          catch (_) { el.value = ${query}; }
         }
-        return false;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
+        const form = el.closest('form');
+        if (form) { try { form.requestSubmit(); } catch(_) {} }
+        return true;
       })()`
+      const currentHref = async () =>
+        (await this.browser.evaluate(pageId, 'location.href')).value
       try {
+        const hrefBefore = await currentHref()
         const fillResult = await this.browser.evaluate(pageId, fillScript)
         if (fillResult.value === true) {
           actionPerformed = true
@@ -1307,6 +1362,13 @@ export class TrustenEngine {
           })
         }
         await this.waitForPageLoad(pageId)
+        // Some stores (Best Buy) ignore script-generated key events and have no
+        // form to submit, so retype the query with real key presses and Enter.
+        if (fillResult.value === true && (await currentHref()) === hrefBefore) {
+          await this.browser.fill(pageId, SEARCH_FIELD_ID, stepDef.fillSearch)
+          await this.browser.pressKey(pageId, 'Enter')
+          await this.waitForPageLoad(pageId)
+        }
       } catch (err) {
         logger.warn('Trusten: fillSearch failed', {
           query: stepDef.fillSearch,
