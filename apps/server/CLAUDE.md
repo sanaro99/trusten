@@ -40,6 +40,6 @@ bun run lint         # biome (root)
 
 The headless browser needs Chromium: `bunx puppeteer browsers install chrome` (one-time).
 Optional LLM keys enable hybrid detection + agentic discovery. Auto-detect order:
-`NVIDIA_NIM_API_KEY` → `TRUSTEN_GEMINI_API_KEY`/`GEMINI_API_KEY` → `DEEPSEEK_API_KEY` →
-`OPENROUTER_API_KEY` → local Ollama. Pin a provider with `TRUSTEN_LLM_PROVIDER=<name>`.
+`CLOUDFLARE_API_TOKEN` → `GROQ_API_KEY` → `TRUSTEN_GEMINI_API_KEY`/`GEMINI_API_KEY` →
+`NVIDIA_NIM_API_KEY` → `OPENROUTER_API_KEY` → local Ollama. Pin a provider with `TRUSTEN_LLM_PROVIDER=<name>`.
 Without any key, deterministic detection and the fixed-workflow fallback still run.
