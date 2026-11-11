@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import type { WorkflowStep } from '@trusten/shared/api'
-import { completedJourneySteps, getJourneyStepContent } from './journey-content'
+import {
+  completedJourneySteps,
+  getJourneyStepContent,
+  pageName,
+} from './journey-content'
 
 function step(overrides: Partial<WorkflowStep> = {}): WorkflowStep {
   return {
@@ -42,5 +46,17 @@ describe('journey content', () => {
         step({ stepNumber: 2, status: 'skipped' }),
       ]),
     ).toBe(1)
+  })
+})
+
+describe('page names', () => {
+  test('name a step after its page when the action is not recognised', () => {
+    expect(pageName('https://shop.example/')).toBe('Homepage')
+    expect(pageName('https://shop.example/checkout')).toBe('Checkout page')
+    expect(pageName('https://shop.example/help/order-status.html')).toBe(
+      'Order status page',
+    )
+    expect(pageName('https://shop.example/landing-page')).toBe('Landing page')
+    expect(pageName('not a url')).toBe('Website page')
   })
 })

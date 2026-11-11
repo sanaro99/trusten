@@ -9,6 +9,25 @@ const captured = {
 }
 
 describe('scan coverage', () => {
+  test('a text-only extension check is limited, not unverifiable', () => {
+    const coverage = assessScanCoverage('quick', [
+      {
+        url: 'https://example.com/',
+        status: 'observed',
+        pageTextCaptured: true,
+      },
+    ])
+    expect(coverage.status).toBe('partial')
+    expect(coverage.textOnly).toBe(true)
+    expect(coverage.missingVisual).toBe(true)
+  })
+  test('a step without screenshot or page text still has no evidence', () => {
+    expect(
+      assessScanCoverage('quick', [
+        { url: 'https://example.com/', status: 'observed' },
+      ]).status,
+    ).toBe('missing')
+  })
   test('a truncated extension capture is not a complete page check', () => {
     expect(
       assessScanCoverage('quick', [{ ...captured, captureTruncated: true }])

@@ -110,9 +110,10 @@ export class SneakingAnalyzer extends BaseAnalyzer {
 
     const matches = this.findKeywordMatches(text, SNEAKED_ITEM_PATTERNS)
 
-    // Pre-checked checkboxes with a price nearby — strong deterministic signal
+    // Pre-checked checkboxes with a price in their own label or row — strong
+    // deterministic signal. A price further down the page is a different item.
     const preCheckedPattern =
-      /<input[^>]+type="checkbox"[^>]+checked[^>]*>[\s\S]{0,300}(?:\$[\d,.]+|£[\d,.]+|€[\d,.]+)/gi
+      /<input[^>]+type="checkbox"[^>]+checked[^>]*>(?:(?!<\/(?:label|li|p|div|tr|td|section)>|<input\b)[\s\S]){0,300}(?:\$[\d,.]+|£[\d,.]+|€[\d,.]+)/gi
     const checkedItems = this.findElements(html, preCheckedPattern)
 
     // Items that have a "Remove" action — definitively in cart and not user-chosen
@@ -152,7 +153,7 @@ export class SneakingAnalyzer extends BaseAnalyzer {
         description: `Basket sneaking in your cart: "${best.evidence.slice(0, 80).trim()}" was added to your order without explicit consent. You must actively remove it — a deceptive default that inflates your total.`,
         url: context.url,
         pageTitle: context.pageTitle,
-        element: { text: best.text.slice(0, 200), html: '', selector: '' },
+        element: { text: this.clip(best.text, 200), html: '', selector: '' },
         evidence: { domSnapshot: best.text },
       }),
     ]

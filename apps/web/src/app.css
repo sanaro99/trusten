@@ -904,6 +904,102 @@ summary:focus-visible {
   background: #e9e5ef;
   box-shadow: var(--neo-inset);
 }
+.concern-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.concern {
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+  background: var(--color-base-100);
+  box-shadow: var(--neo-raised);
+}
+.concern-open {
+  border-color: rgb(91 70 154 / 0.45);
+}
+.concern-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1rem 1.1rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-box);
+}
+.concern-toggle:focus-visible {
+  outline: 0 none;
+  box-shadow: var(--neo-focus);
+}
+.concern-number {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  font-weight: 700;
+}
+.concern-quote {
+  display: block;
+  margin-top: 0.35rem;
+  color: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+  overflow-wrap: anywhere;
+}
+.concern-chevron {
+  flex-shrink: 0;
+  width: 1.5rem;
+  font-size: 1.4rem;
+  line-height: 1.5rem;
+  text-align: center;
+  color: var(--color-primary);
+}
+.concern-body {
+  padding: 0 1.1rem 1.1rem 3.95rem;
+}
+.inspector-viewer {
+  position: sticky;
+  /* Clear the sticky site header (6rem). */
+  top: 7.5rem;
+}
+.concern {
+  scroll-margin-top: 7rem;
+}
+.evidence-highlight {
+  position: absolute;
+  border: 3px solid #d23b34;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 0.85),
+    0 0 0 9999px rgb(30 22 48 / 0.38);
+  pointer-events: none;
+}
+.evidence-marker {
+  position: absolute;
+  top: -0.85rem;
+  left: -0.85rem;
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: #d23b34;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+@media (max-width: 639px) {
+  .concern-body {
+    padding-left: 1.1rem;
+  }
+}
 .journey-card {
   box-shadow: var(--neo-raised);
   transition:

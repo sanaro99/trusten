@@ -12,8 +12,19 @@ const json = <T>(value: unknown, fallback: T): T =>
       ? (JSON.parse(value) as T)
       : (value as T)
 
+const EXTENSION_STEP = 'Inspect the page captured by the browser extension'
+
+/** Extension checks saved before `pageTextCaptured` existed always read the page text. */
+function savedSteps(value: unknown): WorkflowStep[] {
+  return json<WorkflowStep[]>(value, []).map((step) =>
+    step.action === EXTENSION_STEP && step.pageTextCaptured === undefined
+      ? { ...step, pageTextCaptured: true }
+      : step,
+  )
+}
+
 export function mapScanHistoryRow(r: Row): ScanHistoryRow {
-  const steps = json<WorkflowStep[]>(r.workflow_steps, [])
+  const steps = savedSteps(r.workflow_steps)
   // Retain compatibility with older query projections during rolling upgrades.
   if (steps.length === 0 && r.scan_type === 'quick' && r.evidence_url) {
     steps.push({
@@ -67,9 +78,7 @@ export function mapScanRow(r: Row): ScanResult {
       summary: '',
     },
     workflowSteps:
-      r.workflow_steps == null
-        ? undefined
-        : json<WorkflowStep[]>(r.workflow_steps, []),
+      r.workflow_steps == null ? undefined : savedSteps(r.workflow_steps),
     pdfPath: (r.pdf_path as string | null) ?? null,
     htmlPath: (r.html_path as string | null) ?? null,
     videoPath: (r.video_path as string | null) ?? null,

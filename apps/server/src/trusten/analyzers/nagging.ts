@@ -197,7 +197,7 @@ export class NaggingAnalyzer extends BaseAnalyzer {
           url: context.url,
           pageTitle: context.pageTitle,
           element: {
-            text: popupText.slice(0, 150),
+            text: this.clip(popupText, 150),
             html: container.html.slice(0, 500),
             selector: container.selector,
           },
@@ -291,7 +291,7 @@ export class NaggingAnalyzer extends BaseAnalyzer {
               url: context.url,
               pageTitle: context.pageTitle,
               element: {
-                text: containerText.slice(0, 150),
+                text: this.clip(containerText, 150),
                 html: container.html.slice(0, 300),
                 selector: container.selector,
               },

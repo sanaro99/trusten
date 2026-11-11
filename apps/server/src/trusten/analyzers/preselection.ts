@@ -84,13 +84,31 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
         Math.min(html.length, boxIndex + boxHtml.length + 300),
       )
       const surroundingText = this.extractVisibleText(surroundingHtml)
-      // The label normally follows the box; text before it is unrelated markup.
-      const labelText = this.extractVisibleText(
-        html.slice(boxIndex, boxIndex + boxHtml.length + 300),
+      // The label normally follows the box and ends with its element; text
+      // before it, or after the label closes, is unrelated.
+      const after = html.slice(
+        boxIndex + boxHtml.length,
+        boxIndex + boxHtml.length + 300,
       )
-        .split(/(?<=[.!?])\s/)[0]
-        .slice(0, 120)
-        .trim()
+      const labelEnd = after.search(
+        /<\/(?:label|p|div|li|td|dd|button)>|<(?:br|input|select|p|div|li|section|footer|button)\b/i,
+      )
+      let labelText = this.clip(
+        this.extractVisibleText(
+          labelEnd === -1 ? after : after.slice(0, labelEnd),
+        ).split(/(?<=[.!?])\s/)[0],
+        120,
+      )
+      // <label>Send me offers <input checked></label>: the words come first.
+      if (!labelText) {
+        const before = html.slice(Math.max(0, boxIndex - 300), boxIndex)
+        const labelStart = before.lastIndexOf('<label')
+        if (labelStart !== -1)
+          labelText = this.clip(
+            this.extractVisibleText(before.slice(labelStart)),
+            120,
+          )
+      }
 
       const isConsentCheckbox = CONSENT_CHECKBOX_TEXT_PATTERNS.some((p) =>
         p.test(surroundingText),
@@ -106,7 +124,7 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: labelText || surroundingText.slice(0, 200),
+              text: labelText || this.clip(surroundingText, 200),
               html: boxHtml,
               selector: boxHtml.match(/\bid=["']([^"']+)["']/i)?.[1]
                 ? '[id=' +
@@ -124,11 +142,11 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
             category: DarkPatternCategory.PRESELECTED_OPTIONS,
             severity: 'high',
             confidence: 0.75,
-            description: `Pre-selected checkbox detected. An option is checked by default near: "${labelText || surroundingText.slice(0, 100)}". Users who don't notice will inadvertently agree to this selection.`,
+            description: `Pre-selected checkbox detected. An option is checked by default near: "${labelText || this.clip(surroundingText, 100)}". Users who don't notice will inadvertently agree to this selection.`,
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: labelText || surroundingText.slice(0, 200),
+              text: labelText || this.clip(surroundingText, 200),
               html: boxHtml,
               selector: boxHtml.match(/\bid=["']([^"']+)["']/i)?.[1]
                 ? '[id=' +

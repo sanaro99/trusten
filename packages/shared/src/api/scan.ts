@@ -60,6 +60,7 @@ export const WorkflowStepSchema = z.object({
   navReason: z.string().optional(),
   visualCheckAvailable: z.boolean().optional(),
   captureTruncated: z.boolean().optional(),
+  pageTextCaptured: z.boolean().optional(),
 })
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>
 

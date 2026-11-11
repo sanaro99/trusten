@@ -1,9 +1,10 @@
 <script lang="ts">
 import type { ScanDetail, ScanHistoryRow } from '@trusten/shared/api'
-import { FindingCard, GradeBadge } from '@trusten/ui/domain'
+import { GradeBadge } from '@trusten/ui/domain'
 import { onDestroy, onMount } from 'svelte'
 import { goto } from '$app/navigation'
 import { ApiError, api, publicScanErrorMessage } from '$lib/api'
+import FindingInspector from '$lib/components/FindingInspector.svelte'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
 import ReportAssets from '$lib/components/ReportAssets.svelte'
 import { splitFindings } from '$lib/findings'
@@ -67,20 +68,6 @@ const resultPath = $derived(
     ? `/scan/${encodeURIComponent(result.id)}${reused ? '?cached=1' : ''}`
     : '',
 )
-
-function evidenceUrl(patternId: string): string | undefined {
-  if (!result) return undefined
-  const pattern = result.patterns.find(
-    (candidate) => candidate.id === patternId,
-  )
-  if (pattern?.evidence.screenshotUrl) return pattern.evidence.screenshotUrl
-  const step = result.workflowSteps?.find((candidate) =>
-    candidate.patternsFound.some((pattern) => pattern.id === patternId),
-  )
-  return step
-    ? `/trusten/report/${encodeURIComponent(result.id)}/screenshot/${step.stepNumber}`
-    : undefined
-}
 
 function startOver() {
   polling.abort()
@@ -355,28 +342,19 @@ async function waitForResult(
       <ReportAssets scan={result} />
       {#if heading.limited}<a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>{/if}
 
+      <FindingInspector
+        scanId={result.id}
+        steps={result.workflowSteps ?? []}
+        findings={[...split.main, ...split.more]}
+        uncertain={split.aside}
+      >
+        {#snippet empty()}
+          <div class="alert {heading.limited ? 'alert-warning' : 'alert-success'}"><span>{heading.limited ? 'We did not find a concern in the pages we reached. The limited check does not show whether the whole website is clear.' : 'We did not find common tricks in the pages checked. Review the journey below to see what this result covers.'}</span></div>
+        {/snippet}
+      </FindingInspector>
+
       {#if result.workflowSteps?.length}
         <JourneyTimeline scanId={result.id} steps={result.workflowSteps} />
-      {/if}
-
-      <h2 class="mt-14 mb-2 font-bold text-3xl">What we found</h2>
-      <p class="mb-6 max-w-measure text-base-content/65">
-        Start with the plain explanation. Open the evidence when you want to see exactly where it appeared.
-      </p>
-      {#each split.main as pattern, i (pattern.id)}
-        <FindingCard {pattern} index={i + 1} screenshotUrl={evidenceUrl(pattern.id)} />
-      {/each}
-      {#if result.patterns.length === 0}
-        <div class="alert {heading.limited ? 'alert-warning' : 'alert-success'}"><span>{heading.limited ? 'We did not find a concern in the pages we reached. The limited check does not show whether the whole website is clear.' : 'We did not find common tricks in the pages checked. Review the journey above to see what this result covers.'}</span></div>
-      {/if}
-      {#if split.aside.length > 0}
-        <details class="collapse-arrow collapse mt-8 border border-base-300 bg-base-100">
-          <summary class="collapse-title font-semibold text-primary">A few other things worth a look ({split.aside.length})</summary>
-          <div class="collapse-content">
-            <p class="max-w-measure text-base-content/65">We are less sure about these, so we have kept them separate.</p>
-            {#each split.aside as pattern, i (pattern.id)}<FindingCard {pattern} index={split.main.length + i + 1} screenshotUrl={evidenceUrl(pattern.id)} />{/each}
-          </div>
-        </details>
       {/if}
     </section>
   {/if}

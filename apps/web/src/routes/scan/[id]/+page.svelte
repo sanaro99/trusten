@@ -1,9 +1,7 @@
 <script lang="ts">
-import {
-  assessScanCoverage,
-  type DetectedPattern,
-} from '@trusten/shared/domain'
-import { FindingCard, GradeBadge } from '@trusten/ui/domain'
+import { assessScanCoverage } from '@trusten/shared/domain'
+import { GradeBadge } from '@trusten/ui/domain'
+import FindingInspector from '$lib/components/FindingInspector.svelte'
 import JourneyTimeline from '$lib/components/JourneyTimeline.svelte'
 import ReportAssets from '$lib/components/ReportAssets.svelte'
 import { splitFindings } from '$lib/findings'
@@ -14,9 +12,6 @@ let { data }: { data: PageData } = $props()
 
 const split = $derived(splitFindings(data.scan.patterns))
 const workflowSteps = $derived(data.scan.workflowSteps ?? [])
-const quickEvidence = $derived(
-  data.scan.scanType === 'quick' ? workflowSteps[0] : undefined,
-)
 const coverage = $derived(assessScanCoverage(data.scan.scanType, workflowSteps))
 const missingQuickEvidence = $derived(
   data.scan.scanType === 'quick' && coverage.status === 'missing',
@@ -46,27 +41,6 @@ const checkedDate = $derived(
     new Date(data.scan.completedAt),
   ),
 )
-
-function stepFor(pattern: DetectedPattern) {
-  return workflowSteps.find((step) =>
-    step.patternsFound.some((candidate) => candidate.id === pattern.id),
-  )
-}
-
-function evidenceUrl(pattern: DetectedPattern): string | undefined {
-  if (pattern.evidence.screenshotUrl) return pattern.evidence.screenshotUrl
-  if (
-    pattern.evidence.screenshot &&
-    !pattern.evidence.screenshot.startsWith('[')
-  ) {
-    return pattern.evidence.screenshot.startsWith('data:')
-      ? pattern.evidence.screenshot
-      : `data:image/jpeg;base64,${pattern.evidence.screenshot}`
-  }
-  const step = stepFor(pattern)
-  if (!step?.screenshotPath) return undefined
-  return `/trusten/report/${encodeURIComponent(data.scan.id)}/screenshot/${step.stepNumber}`
-}
 </script>
 
 <svelte:head>
@@ -114,73 +88,25 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
   {#if summary.limited}
     <a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>
   {/if}
-  <ReportAssets scan={data.scan} />
 
-  {#if quickEvidence?.screenshotPath}
-    <section class="mt-12" aria-labelledby="page-evidence-heading">
-      <div class="badge badge-primary badge-outline font-bold">Evidence trail</div>
-      <h2 id="page-evidence-heading" class="mt-3 mb-0 font-bold text-3xl">Page we checked</h2>
-      <p class="mt-2 mb-5 break-all text-base-content/65">{quickEvidence.url}</p>
-      <details class="rounded-box border border-base-300 bg-base-100">
-        <summary class="cursor-pointer p-5 font-semibold text-primary">View captured page</summary>
-      <figure class="evidence-frame m-0 overflow-hidden rounded-box bg-base-100">
-        <img
-          class="block max-h-[42rem] w-full object-contain"
-          src="/trusten/report/{encodeURIComponent(data.scan.id)}/screenshot/{quickEvidence.stepNumber}"
-          alt="Screenshot of the page captured during the quick check"
-          loading="lazy"
-        />
-        <figcaption class="px-5 py-3 text-sm text-base-content/65">Captured {new Date(quickEvidence.timestamp).toLocaleString()} · Single page check</figcaption>
-      </figure>
-      </details>
-    </section>
-  {:else if workflowSteps.length > 0}
+  <FindingInspector
+    scanId={data.scan.id}
+    steps={workflowSteps}
+    findings={[...split.main, ...split.more]}
+    uncertain={split.aside}
+  >
+    {#snippet empty()}
+      <div class="alert {summary.limited ? 'alert-warning' : 'alert-success'} shadow-lg">
+        <span>{missingQuickEvidence ? 'The page evidence for this older result is unavailable. Run a new check before relying on its grade.' : blockedQuickEvidence ? 'The captured page is a website verification screen. No findings about the requested site can be drawn from this check.' : coverage.textOnly ? 'We checked the words on this page and found no concern, but no screenshot was captured, so visual tricks were not reviewed.' : limitedQuickEvidence ? 'Text and page checks found no concern, but visual analysis did not complete. Review the screenshot before relying on this result.' : summary.limited ? 'We did not find a concern in the pages we reached. Because the check was limited, this does not mean the whole website is clear.' : data.scan.scanType === 'quick' ? 'We did not find common tricks on the captured page. This result covers one page only.' : 'We checked the available pages for common tricks and did not find any concerns.'}</span>
+      </div>
+    {/snippet}
+  </FindingInspector>
+
+  {#if data.scan.scanType !== 'quick' && workflowSteps.length > 0}
     <JourneyTimeline scanId={data.scan.id} steps={workflowSteps} />
   {/if}
 
-  <section class="mt-14" aria-labelledby="findings-heading">
-    <div class="mb-7 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <div class="badge badge-secondary badge-outline font-bold">What you should know</div>
-        <h2 id="findings-heading" class="mt-3 mb-0 font-bold text-3xl">What we found</h2>
-        <p class="mt-2 mb-0 max-w-measure text-base-content/65">Start with the practical advice. Then review the words and page evidence behind each concern.</p>
-      </div>
-    </div>
-
-    {#if split.main.length === 0 && split.aside.length === 0}
-      <div class="alert {summary.limited ? 'alert-warning' : 'alert-success'} shadow-lg">
-        <span>{missingQuickEvidence ? 'The page evidence for this older result is unavailable. Run a new check before relying on its grade.' : blockedQuickEvidence ? 'The captured page is a website verification screen. No findings about the requested site can be drawn from this check.' : limitedQuickEvidence ? 'Text and page checks found no concern, but visual analysis did not complete. Review the screenshot before relying on this result.' : summary.limited ? 'We did not find a concern in the pages we reached. Because the check was limited, this does not mean the whole website is clear.' : data.scan.scanType === 'quick' ? 'We did not find common tricks on the captured page. This result covers one page only.' : 'We checked the available pages for common tricks and did not find any concerns.'}</span>
-      </div>
-    {:else}
-      {#each split.main as pattern, i (pattern.id)}
-        <FindingCard {pattern} index={i + 1} screenshotUrl={evidenceUrl(pattern)} />
-      {/each}
-    {/if}
-  </section>
-
-  {#if split.more.length > 0}
-    <details class="collapse-arrow collapse mt-8 border border-base-300 bg-base-100 shadow-lg">
-      <summary class="collapse-title font-semibold text-primary">More concerns ({split.more.length})</summary>
-      <div class="collapse-content">
-        <p class="max-w-measure text-base-content/65">The three most important concerns are shown above. These additional findings are available when you want the detail.</p>
-        {#each split.more as pattern, i (pattern.id)}
-          <FindingCard {pattern} index={split.main.length + i + 1} screenshotUrl={evidenceUrl(pattern)} />
-        {/each}
-      </div>
-    </details>
-  {/if}
-
-  {#if split.aside.length > 0}
-    <details class="collapse-arrow collapse mt-8 border border-base-300 bg-base-100 shadow-lg">
-      <summary class="collapse-title font-semibold text-primary">A few other things worth a look ({split.aside.length})</summary>
-      <div class="collapse-content">
-        <p class="max-w-measure text-base-content/65">We are less sure about these, so we have kept them separate.</p>
-        {#each split.aside as pattern, i (pattern.id)}
-          <FindingCard {pattern} index={split.main.length + split.more.length + i + 1} screenshotUrl={evidenceUrl(pattern)} />
-        {/each}
-      </div>
-    </details>
-  {/if}
+  <ReportAssets scan={data.scan} />
 
   <div class="mt-12 flex flex-wrap gap-3">
     <a class="btn btn-primary" href="/">Check another site</a>

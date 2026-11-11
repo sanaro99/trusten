@@ -27,6 +27,7 @@ import {
   getTrustenScansByDomain,
   updateAuditJob,
 } from '../db'
+import { captureDirectory, isValidCapture } from '../finding-capture'
 import { TrustenEngine } from '../index'
 import { closeChannel, publish } from '../live/hub'
 import { ScanIncompleteError } from '../scan-incomplete-error'
@@ -180,6 +181,34 @@ export function createTrustenDashboardRoutes(config: Config) {
   const app = new Hono()
   const findQuickScan = config.recentQuickScan ?? getRecentPublicQuickScan
   const findAuditJob = config.recentAuditJob ?? getRecentCompletedAuditJob
+
+  // Finding screenshot — validated file name inside the scan's own folder
+  app.get('/report/:id/capture/:file', async (c) => {
+    const capture = { scanId: c.req.param('id'), file: c.req.param('file') }
+    if (!isValidCapture(capture)) return c.text('Screenshot not found', 404)
+    const scan = await getTrustenScanById(capture.scanId)
+    if (!scan) return c.text('Screenshot not found', 404)
+    const home = process.env.USERPROFILE ?? process.env.HOME ?? ''
+    const reportsDir =
+      process.env.TRUSTEN_REPORTS_DIR ?? `${home}/Desktop/trusten-reports`
+    const dir = captureDirectory(
+      capture.scanId,
+      scan.workflowSteps ?? [],
+      reportsDir,
+    )
+    try {
+      const fs = await import('node:fs')
+      return new Response(fs.readFileSync(`${dir}/${capture.file}`), {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    } catch {
+      return c.text('Screenshot not found', 404)
+    }
+  })
 
   // Step screenshot — served directly from the saved file
   app.get('/report/:id/screenshot/:step', async (c) => {

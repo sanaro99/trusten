@@ -1,126 +1,18 @@
 /**
  * Trusten — Report generation and screenshot annotation
  *
- * buildAnnotationScript()  — JS to inject a step-summary overlay before screenshotting
- * buildCleanupScript()     — JS to remove the overlay after the screenshot
- * generateReportHtml()     — Full HTML report with annotated screenshots
+ * generateReportHtml()     — Full HTML report; finding boxes are drawn over
+ *                            the step screenshots from their saved positions
  */
 
 import { assessScanCoverage } from '@trusten/shared/domain'
 import {
-  CATEGORY_LABELS,
   getPatternContent,
   SEVERITY_COLOR,
   SHOWN_LEVELS,
   toShownLevel,
 } from '@trusten/ui/content'
 import type { DetectedPattern, ScanResult, WorkflowStep } from './types'
-
-// ─── Screenshot annotation ───
-
-/**
- * Returns a JS expression that draws a labeled bounding box around each detected
- * dark-pattern element, evaluated via browser.evaluate() right before the step
- * screenshot. The box is colored by severity and labeled with the pattern
- * category only — the full explanation lives in the report caption, not on the
- * image. The most severe locatable element is scrolled into view first.
- *
- * `stepNumber`/`totalSteps`/`action` are kept for call-site compatibility; the
- * step context is shown in the report, not painted onto the screenshot.
- */
-export function buildAnnotationScript(
-  _stepNumber: number,
-  _totalSteps: number,
-  _action: string,
-  patterns: DetectedPattern[],
-): string {
-  const sevOrder: Record<string, number> = {
-    critical: 0,
-    high: 1,
-    medium: 2,
-    low: 3,
-  }
-  const slim = [...patterns]
-    .sort((a, b) => (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9))
-    .slice(0, 8)
-    .map((p) => ({
-      cat:
-        CATEGORY_LABELS[p.category as string] ??
-        String(p.category).replace(/_/g, ' '),
-      sev: p.severity,
-      sel: p.element?.selector ?? '',
-      text: (p.element?.text ?? '').trim().slice(0, 48),
-    }))
-
-  const pJson = JSON.stringify(slim)
-  const sevJson = JSON.stringify(SEVERITY_COLOR)
-
-  return `(function(){
-    try {
-      document.querySelectorAll('[data-trusten-box]').forEach(function(e){ e.remove(); });
-      var patterns = ${pJson};
-      var SEV = ${sevJson};
-      if (!patterns.length) return 'boxes:0';
-
-      function deepestMatch(needle){
-        needle = needle.toLowerCase();
-        var nodes = document.body ? document.body.querySelectorAll('*') : [];
-        var match = null;
-        for (var i=0;i<nodes.length;i++){
-          var el = nodes[i];
-          if ((el.textContent||'').toLowerCase().indexOf(needle) !== -1){
-            var r = el.getBoundingClientRect();
-            if (r.width>0 && r.height>0) match = el; /* keep deepest in tree order */
-          }
-        }
-        return match;
-      }
-      function locate(p){
-        if (p.sel){ try { var el=document.querySelector(p.sel); if(el) return el; } catch(e){} }
-        if (p.text && p.text.length>=4) return deepestMatch(p.text);
-        return null;
-      }
-
-      // Scroll the most severe locatable pattern into view so it is captured.
-      for (var s=0;s<patterns.length;s++){
-        var firstEl=locate(patterns[s]);
-        if (firstEl){ try{ firstEl.scrollIntoView({block:'center',inline:'nearest'}); }catch(e){} break; }
-      }
-
-      var vh = window.innerHeight || 800;
-      var drawn=0;
-      patterns.forEach(function(p){
-        if (drawn>=6) return;
-        var el=locate(p);
-        if(!el) return;
-        var r=el.getBoundingClientRect();
-        if(r.width<2||r.height<2) return;
-        if(r.bottom<0 || r.top>vh) return; /* off-screen → no visible box */
-        var color=SEV[p.sev]||'#e0651b';
-        var box=document.createElement('div');
-        box.setAttribute('data-trusten-box','1');
-        box.style.cssText='position:fixed;z-index:2147483646;pointer-events:none;border:2.5px solid '+color+';border-radius:5px;box-shadow:0 0 0 2px rgba(255,255,255,.7);left:'+(r.left-3)+'px;top:'+(r.top-3)+'px;width:'+(r.width+6)+'px;height:'+(r.height+6)+'px;';
-        document.documentElement.appendChild(box);
-        var lt=r.top-22; if(lt<2) lt=r.top+4;
-        var label=document.createElement('div');
-        label.setAttribute('data-trusten-box','1');
-        label.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;left:'+(r.left-3)+'px;top:'+lt+'px;background:'+color+';color:#fff;font:700 11px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:2px 8px;border-radius:5px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);';
-        label.textContent=p.cat;
-        document.documentElement.appendChild(label);
-        drawn++;
-      });
-      return 'boxes:'+drawn;
-    } catch(e){ return 'error:'+String(e); }
-  })()`
-}
-
-/** Returns a JS expression that removes the bounding boxes + labels. */
-export function buildCleanupScript(): string {
-  return `(function(){
-    document.querySelectorAll('[data-trusten-box]').forEach(function(e){ e.remove(); });
-    return true;
-  })()`
-}
 
 /**
  * Returns a JS expression that injects a persistent, interactive dark pattern
@@ -361,6 +253,8 @@ function reportCoverageNote(
     return 'A verification page stopped the check. This result does not assess the requested website.'
   if (coverage.status === 'missing')
     return 'Page evidence is unavailable. Run a new check before relying on this result.'
+  if (coverage.textOnly)
+    return 'Trusten checked the words on this page, but no screenshot was captured, so visual tricks were not reviewed. The grade is not conclusive.'
   if (coverage.missingVisual)
     return 'The visual analysis did not complete. The grade is not conclusive.'
   if (coverage.status !== 'complete')
@@ -476,6 +370,10 @@ export function generateReportHtml(
   .step-action { font-size: 14px; font-weight: 700; color: var(--ink) }
   .step-url { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all }
   .step-img { width: 100%; border-radius: 12px; border: 1px solid var(--rim); display: block; margin: 12px 0 }
+  .step-shot { position: relative; margin: 12px 0 }
+  .step-shot .step-img { margin: 0 }
+  .step-box { position: absolute; border: 2.5px solid; border-radius: 5px; box-shadow: 0 0 0 2px rgba(255,255,255,.7) }
+  .step-box span { position: absolute; left: -2px; bottom: 100%; margin-bottom: 2px; color: #fff; font: 700 10px/1.45 sans-serif; padding: 1px 6px; border-radius: 4px; white-space: nowrap }
   .step-patterns { margin-top: 10px }
   .no-patterns { font-size: 12px; color: #176b55; font-weight: 650 }
   /* Pattern item */
@@ -573,7 +471,7 @@ function renderStep(step: WorkflowStep): string {
   const action = publicStepAction(step.action)
   const outcome = publicStepOutcome(step)
   const imgHtml = step.screenshot
-    ? `<img class="step-img" src="data:image/jpeg;base64,${step.screenshot}" alt="Page seen while Trusten tried to ${escapeHtml(action.toLowerCase())}">`
+    ? `<div class="step-shot"><img class="step-img" src="data:image/jpeg;base64,${step.screenshot}" alt="Page seen while Trusten tried to ${escapeHtml(action.toLowerCase())}">${stepBoxes(step)}</div>`
     : `<div style="background:#e8e3f1;border-radius:10px;padding:20px;text-align:center;color:#5f596e;font-size:12px;margin:12px 0">${skipped ? 'No page was checked for this step.' : 'No image was available for this step.'}</div>`
 
   const patternsHtml = skipped
@@ -599,6 +497,31 @@ function renderStep(step: WorkflowStep): string {
   ${imgHtml}
   <div class="step-patterns">${patternsHtml}</div>
 </div>`
+}
+
+/** Boxes for the findings shown on this step's own screenshot. */
+function stepBoxes(step: WorkflowStep): string {
+  const parts = step.screenshotPath?.split(/[\\/]/) ?? []
+  const file = parts.at(-1)
+  const folder = parts.at(-2)
+  if (!file || !folder) return ''
+  // A finding cached from another scan can share the file name, not the folder.
+  return step.patternsFound
+    .filter(
+      (p) =>
+        p.evidence.capture?.file === file &&
+        p.evidence.capture.scanId === folder &&
+        p.evidence.capture.box,
+    )
+    .slice(0, 8)
+    .map((p) => {
+      const box = p.evidence.capture?.box
+      if (!box) return ''
+      const color = SEVERITY_COLOR[p.severity] ?? '#e0651b'
+      const pct = (value: number) => `${(value * 100).toFixed(2)}%`
+      return `<div class="step-box" style="left:${pct(box.x)};top:${pct(box.y)};width:${pct(box.width)};height:${pct(box.height)};border-color:${color}"><span style="background:${color}">${escapeHtml(getPatternContent(p.category).name)}</span></div>`
+    })
+    .join('')
 }
 
 function renderPattern(p: DetectedPattern): string {

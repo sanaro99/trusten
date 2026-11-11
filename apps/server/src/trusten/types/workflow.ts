@@ -35,6 +35,8 @@ export interface WorkflowStep {
   /** Whether the visual LLM check completed on a quick scan. */
   visualCheckAvailable?: boolean
   captureTruncated?: boolean
+  /** The page text was analyzed even though no screenshot exists. */
+  pageTextCaptured?: boolean
 }
 
 export interface WorkflowStepDefinition {

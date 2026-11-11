@@ -21,6 +21,8 @@ export interface CoverageStep {
   visualCheckAvailable?: boolean
   navAdvanced?: boolean
   captureTruncated?: boolean
+  /** The page text was analyzed even though no screenshot exists. */
+  pageTextCaptured?: boolean
 }
 
 export interface ScanCoverage {
@@ -29,6 +31,8 @@ export interface ScanCoverage {
   completed: number
   total: number
   missingVisual: boolean
+  /** Only page text was checked: no screenshot was captured. */
+  textOnly: boolean
 }
 
 export function assessScanCoverage(
@@ -47,6 +51,12 @@ export function assessScanCoverage(
   )
   const blocked = steps.some((step) => isAccessChallengeUrl(step.url))
   const completed = completedSteps.length
+  const textOnly =
+    evidenced.length === 0 &&
+    !blocked &&
+    completedSteps.some(
+      (step) => step.pageTextCaptured && !isAccessChallengeUrl(step.url),
+    )
   const missingVisual = evidenced.some(
     (step) => step.visualCheckAvailable !== true,
   )
@@ -59,13 +69,14 @@ export function assessScanCoverage(
       ? 'page'
       : 'journey'
   let status: CoverageStatus = 'complete'
-  if (evidenced.length === 0) {
+  if (evidenced.length === 0 && !textOnly) {
     status = blocked
       ? 'blocked'
       : completed === 0 && steps.length > 0
         ? 'partial'
         : 'missing'
   } else if (
+    textOnly ||
     completed < steps.length ||
     evidenced.length < completed ||
     missingVisual ||
@@ -74,5 +85,12 @@ export function assessScanCoverage(
   ) {
     status = 'partial'
   }
-  return { status, scope, completed, total: steps.length, missingVisual }
+  return {
+    status,
+    scope,
+    completed,
+    total: steps.length,
+    missingVisual: missingVisual || textOnly,
+    textOnly,
+  }
 }
