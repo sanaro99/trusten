@@ -145,7 +145,7 @@ describe('generateReportHtml', () => {
     )
 
     expect(html).toContain('This website uses some unfair tricks')
-    expect(html).toContain('A fake deadline')
+    expect(html).toContain('Pressure to decide quickly')
     expect(html).toContain('This website used a countdown')
     expect(html).toContain('What Trusten saw')
     expect(html).toContain('Offer ends in 04:59')

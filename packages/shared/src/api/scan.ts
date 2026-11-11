@@ -14,6 +14,12 @@ export const AnalyzePageRequestSchema = z.object({
   html: z.string().min(1, 'html is required'),
   text: z.string().default(''),
   pageTitle: z.string().default(''),
+  screenshotBase64: z
+    .string()
+    .max(8_000_000)
+    .regex(/^\/9j\/[A-Za-z0-9+/]*={0,2}$/, 'Expected a base64 JPEG screenshot')
+    .optional(),
+  captureTruncated: z.boolean().optional(),
 })
 export type AnalyzePageRequest = z.infer<typeof AnalyzePageRequestSchema>
 
@@ -52,6 +58,7 @@ export const WorkflowStepSchema = z.object({
   navAdvanced: z.boolean().optional(),
   navReason: z.string().optional(),
   visualCheckAvailable: z.boolean().optional(),
+  captureTruncated: z.boolean().optional(),
 })
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>
 

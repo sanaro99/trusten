@@ -27,9 +27,26 @@ httpOnly-cookie signals into `SneakingAnalyzer`/`PrivacyAnalyzer`.
 
 Deterministic A–F grade computed in `scoring/engine.ts`:
 
-- Start at **100**, deduct by severity: critical −15 (cap −45), high −8 (cap −32),
-  medium −4 (cap −20), low −2 (cap −10). Minimum 0.
+- Start at **100**. Each finding weighs by severity: critical 25, high 15, medium 8,
+  low 3. Findings below 0.7 confidence (shown as "less sure") count half.
+- Within one category, repeats have diminishing returns (each counts half the previous),
+  and a category never takes more than 1.5× its strongest finding. A banner repeated on
+  every page can't sink a site on its own, but distinct kinds of trick add up fully.
+  Minimum 0.
 - Grades: **A** 80–100 · **B** 60–79 · **C** 40–59 · **D** 20–39 · **F** 0–19.
+- A critical finding caps the score at 59, and a high-severity finding caps it at 79,
+  so a serious concern cannot produce a reassuring A/B verdict. Overlapping findings
+  from text and vision are consolidated before scoring; distinct identified choices remain separate.
+- Severity reflects the evidence, not the keyword. Pressure or stock wording on its own is
+  "worth knowing" (medium); a countdown element or timer code beside deadline wording is
+  serious (high). Words that only look like pressure out of context are not flagged:
+  times of day ("starts at 10:30"), dated deadlines ("sale ends December 31"), list
+  headings like "Most popular" away from plans or billing, privacy opt-out controls, and
+  retail fine print ("Limited quantities. No rainchecks."). `fairness.test.ts` pins these
+  cases and checks that every manipulative fixture grades below every honest one.
+- Timers are flagged immediately as time pressure. Trusten does not wait for a timer to
+  expire or claim it is fabricated without supporting evidence. Per-customer quantity
+  limits are distinguished from low-stock claims.
 - LLM-derived detections only count when confidence ≥ 0.7; the same input always yields the
   same score.
 

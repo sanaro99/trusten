@@ -19,7 +19,6 @@ const COMPARISON_PREVENTION_PATTERNS = [
   /\bcustom\s+pricing\b/i,
   /\benterp?rise\s+(?:plan|pricing)\b.*\bcontact\b/i,
   /\bfeatures?\s+vary\s+by\s+plan\b/i,
-  /\bsee\s+(?:full\s+)?(?:terms?|details?|comparison)\b/i,
   /\bmost\s+popular\b.*\bplan\b/i, // "Most popular" badge biases choice without showing comparison
   /\bbest\s+value\b.*\bplan\b/i,
 ]
@@ -39,7 +38,9 @@ const INFORMATION_HIDING_PATTERNS = [
 
 // DOM: Collapsed / accordion sections hiding critical info
 const ACCORDION_PATTERN =
-  /<(?:details|summary|div)[^>]+(?:class|id)="[^"]*(?:accordion|collapse|expand|toggle|faq|more)[^"]*"[^>]*>/gi
+  /<details\b(?![^>]*\bopen(?:\s|=|>))[^>]*>[\s\S]*?<\/details>/gi
+const MATERIAL_TERMS =
+  /automatic(?:ally)?\s+renew|renew(?:s|al)?\s+(?:at|for)|cancellation\s+fee|non[ -]?refundable|mandatory\s+(?:fee|charge)|additional\s+(?:fee|charge)/i
 
 // Fine print indicators
 const FINE_PRINT_PATTERN =
@@ -103,7 +104,9 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
       text,
       INFORMATION_HIDING_PATTERNS,
     )
-    for (const m of textMatches.slice(0, 2)) {
+    for (const m of textMatches
+      .filter((m) => MATERIAL_TERMS.test(m.context))
+      .slice(0, 2)) {
       patterns.push(
         this.buildPattern({
           category: DarkPatternCategory.INFORMATION_HIDING,
@@ -120,21 +123,24 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
 
     // DOM-based: collapsed sections hiding critical info
     const collapsedSections = this.findElements(html, ACCORDION_PATTERN)
-    if (collapsedSections.length > 2) {
+    for (const section of collapsedSections
+      .filter((section) => MATERIAL_TERMS.test(section.text))
+      .slice(0, 2)) {
       patterns.push(
         this.buildPattern({
           category: DarkPatternCategory.INFORMATION_HIDING,
-          severity: 'low',
-          confidence: 0.6,
-          description: `Multiple collapsed/accordion sections detected (${collapsedSections.length} found). Important information may be hidden behind "expand" interactions, reducing its visibility.`,
+          severity: 'medium',
+          confidence: 0.8,
+          description:
+            'Renewal, fee, or refund terms are inside a collapsed section. Review these terms before committing.',
           url: context.url,
           pageTitle: context.pageTitle,
           element: {
-            text: collapsedSections[0].text.slice(0, 100),
-            html: collapsedSections[0].html.slice(0, 300),
-            selector: 'details,summary,[class*=accordion],[class*=collapse]',
+            text: section.text.slice(0, 500),
+            html: section.html.slice(0, 700),
+            selector: 'details:not([open])',
           },
-          evidence: { domSnapshot: collapsedSections[0].html.slice(0, 500) },
+          evidence: { domSnapshot: section.html.slice(0, 1000) },
         }),
       )
     }
@@ -143,7 +149,7 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
     const finePrint = this.findElements(html, FINE_PRINT_PATTERN)
     if (finePrint.length > 0) {
       for (const fp of finePrint.slice(0, 2)) {
-        if (fp.text.length > 20) {
+        if (fp.text.length > 20 && MATERIAL_TERMS.test(fp.text)) {
           patterns.push(
             this.buildPattern({
               category: DarkPatternCategory.INFORMATION_HIDING,

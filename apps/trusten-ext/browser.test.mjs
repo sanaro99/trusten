@@ -134,7 +134,11 @@ test('unpacked extension captures live page, renders server result and opens cur
     } else {
       response.setHeader('content-type', 'text/html')
       response.end(
-        '<html><head><title>Live shop</title></head><body><button id="buy">Only today — buy now</button></body></html>',
+        '<html><head><title>Live shop</title><script type="application/json">' +
+          'x'.repeat(550000) +
+          '</script></head><body><nav style="display:none">' +
+          'hidden'.repeat(100000) +
+          '</nav><button id="buy">Only today — buy now</button><input id="marketing" type="checkbox" style="display:none"><label for="marketing">Receive marketing emails</label><select id="shipping"><option>Standard</option><option>Express</option></select></body></html>',
       )
     }
   })
@@ -165,6 +169,10 @@ test('unpacked extension captures live page, renders server result and opens cur
           .shadowRoot.querySelector('extensions-item').id,
     )
     await fixture.goto(`${origin}/shop`)
+    await fixture.$eval('#marketing', (el) => {
+      el.checked = true
+    })
+    await fixture.select('#shipping', 'Express')
     await popup.goto(`chrome-extension://${id}/popup.html`)
     await popup.evaluate(async (origin) => {
       await chrome.storage.local.set({
@@ -192,6 +200,17 @@ test('unpacked extension captures live page, renders server result and opens cur
     )
     assert.equal(captured.pageTitle, 'Live shop')
     assert.match(captured.text, /Only today/)
+    assert.match(
+      captured.html,
+      /id="marketing"[^>]*data-trusten-current-checked="true"/,
+    )
+    assert.doesNotMatch(captured.html, /<input[^>]*\schecked(?:=|\s|>)/)
+    assert.match(captured.html, /option[^>]*selected[^>]*>Express/)
+    assert.ok(captured.html.length < 500000)
+    assert.equal(captured.captureTruncated, false)
+    // This harness opens popup.html directly, so Chrome has not granted activeTab.
+    // Host access permits the DOM check; a missing screenshot must stay missing.
+    assert.equal(captured.screenshotBase64, undefined)
     assert.equal(
       await popup.$eval('#btnFullReport', (el) => el.href),
       `${origin}/scan/chrome-scan`,

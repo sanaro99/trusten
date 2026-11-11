@@ -96,6 +96,6 @@ describe('PATTERN_CONTENT', () => {
 describe('getPatternContent', () => {
   test('returns the entry for a known category', () => {
     const content = getPatternContent(DarkPatternCategory.FAKE_URGENCY)
-    expect(content.name).toBe('A fake deadline')
+    expect(content.name).toBe('Pressure to decide quickly')
   })
 })

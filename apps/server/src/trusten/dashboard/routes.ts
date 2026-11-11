@@ -10,6 +10,7 @@ import {
   AuditRequestSchema,
   QuickScanRequestSchema,
 } from '@trusten/shared/api'
+import { assessScanCoverage } from '@trusten/shared/domain'
 import { type Context, Hono } from 'hono'
 import { logger } from '../../lib/logger'
 import { discoverWorkflows } from '../agent/discovery'
@@ -295,7 +296,8 @@ export function createTrustenDashboardRoutes(config: Config) {
   app.post('/api/analyze-page', async (c) => {
     const parsed = await parseBody(c, AnalyzePageRequestSchema)
     if (!parsed.ok) return c.json(parsed.body, 400)
-    const { url, html, text, pageTitle } = parsed.data
+    const { url, html, text, pageTitle, screenshotBase64, captureTruncated } =
+      parsed.data
 
     if (!parseHostname(url)) return c.json({ error: 'Invalid URL' }, 400)
 
@@ -306,6 +308,7 @@ export function createTrustenDashboardRoutes(config: Config) {
         html,
         text,
         pageTitle,
+        { screenshotBase64, captureTruncated },
       )
       return c.json({
         scanId: result.id,
@@ -316,6 +319,7 @@ export function createTrustenDashboardRoutes(config: Config) {
         summary: result.score.summary,
         categoryBreakdown: result.score.categoryBreakdown,
         patterns: result.patterns,
+        coverage: assessScanCoverage(result.scanType, result.workflowSteps),
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -402,6 +406,7 @@ export function createTrustenDashboardRoutes(config: Config) {
         grade: result.score.grade,
         score: result.score.numeric,
         patterns: result.patterns.length,
+        coverage: assessScanCoverage(result.scanType, result.workflowSteps),
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

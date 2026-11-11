@@ -13,13 +13,16 @@ async function popup({
     domain: 'shop.example',
     grade: 'C',
     patterns: [],
+    coverage: { status: 'complete' },
   },
   status = 200,
+  changeTabDuringCapture = false,
 }: {
   url?: string
   settings?: Record<string, string>
   response?: object
   status?: number
+  changeTabDuringCapture?: boolean
 } = {}) {
   const elements = new Map<string, any>()
   function element(id: string) {
@@ -37,13 +40,29 @@ async function popup({
   }
   const requests: { url: string; body?: any }[] = []
   let captures = 0
+  let screenshots = 0
   const context = vm.createContext({
     URL,
     console,
     TypeError,
     document: { getElementById: element, createElement: () => element('row') },
     chrome: {
-      tabs: { query: async () => [{ id: 7, url }] },
+      tabs: {
+        query: async () => [
+          {
+            id: 7,
+            windowId: 2,
+            url:
+              screenshots && changeTabDuringCapture
+                ? 'https://another.example/'
+                : url,
+          },
+        ],
+        captureVisibleTab: async () => {
+          screenshots++
+          return 'data:image/jpeg;base64,/9j/4AAQ/9k='
+        },
+      },
       storage: { local: { get: async () => settings } },
       runtime: { openOptionsPage() {} },
       scripting: {
@@ -85,6 +104,7 @@ describe('extension popup', () => {
     expect(app.requests[0]?.url).toBe(
       'https://api.trusten.example/trusten/api/analyze-page',
     )
+    expect(app.requests[0]?.body.screenshotBase64).toBe('/9j/4AAQ/9k=')
     expect(app.element('dashboardLink').href).toBe('https://trusten.example/')
     expect(app.element('btnFullReport').href).toBe(
       'https://trusten.example/scan/scan-1',
@@ -112,5 +132,54 @@ describe('extension popup', () => {
       'Rate limit: try again shortly',
     )
     expect(app.requests).toHaveLength(1)
+  })
+
+  test('never calls a page mostly fair while showing serious concerns', async () => {
+    const app = await popup({
+      response: {
+        scanId: 'scan-1',
+        domain: 'shop.example',
+        grade: 'A',
+        coverage: { status: 'complete' },
+        patterns: [
+          {
+            severity: 'high',
+            category: 'fake_urgency',
+            description: 'Time pressure',
+          },
+        ],
+      },
+    })
+    await vm.runInContext('runScan()', app.context)
+    expect(app.element('resultSummary').textContent).not.toMatch(
+      /no clear concerns|mostly fair/i,
+    )
+    expect(app.element('resultSummary').textContent).toMatch(
+      /important|concern|closer look/i,
+    )
+  })
+
+  test('withholds the grade and explains incomplete visual coverage', async () => {
+    const app = await popup({
+      response: {
+        scanId: 'scan-1',
+        domain: 'shop.example',
+        grade: 'A',
+        coverage: { status: 'partial', missingVisual: true },
+        patterns: [],
+      },
+    })
+    await vm.runInContext('runScan()', app.context)
+    expect(app.element('gradeLetter').textContent).not.toBe('A')
+    expect(app.element('coverageNote').textContent).toMatch(
+      /visual|incomplete|limited/i,
+    )
+    expect(app.element('resultSummary').textContent).not.toMatch(/mostly fair/i)
+  })
+  test('does not attach a screenshot taken after the target page navigates', async () => {
+    const app = await popup({ changeTabDuringCapture: true })
+    await vm.runInContext('runScan()', app.context)
+    expect(app.requests[0].body.screenshotBase64).toBeUndefined()
+    expect(app.requests[0].body.html).toContain('Sale')
   })
 })

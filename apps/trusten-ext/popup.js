@@ -72,9 +72,14 @@ const CAT_LABEL = {
   fake_hierarchy: 'One choice is made much easier to notice',
 }
 
-function verdictText(grade, patternCount) {
-  if (grade === 'A') return 'No clear concerns found on this page.'
-  if (grade === 'B') return 'This page appears mostly fair.'
+function verdictText(grade, patterns) {
+  const patternCount = patterns.length
+  if (patterns.some((p) => p.severity === 'critical' || p.severity === 'high'))
+    return `We found ${patternCount} ${patternCount === 1 ? 'concern' : 'concerns'}, including important choices to review.`
+  if (patternCount === 0)
+    return 'No clear concerns found in the available checks.'
+  if (grade === 'A' || grade === 'B')
+    return `${patternCount} ${patternCount === 1 ? 'choice deserves' : 'choices deserve'} a closer look.`
   if (grade === 'C')
     return `We found ${patternCount} ${patternCount === 1 ? 'choice' : 'choices'} worth a closer look.`
   if (grade === 'D')
@@ -123,17 +128,25 @@ function showError(title, msg) {
 
 function renderResults(data) {
   const { grade, domain, patterns } = data
+  const complete = data.coverage?.status === 'complete'
 
   const gradeColor = GRADE_COLOR[grade] ?? '#8f2d46'
   const circle = document.getElementById('gradeCircle')
   circle.style.borderColor = gradeColor
   circle.style.color = gradeColor
-  document.getElementById('gradeLetter').textContent = grade
-  document.getElementById('gradeNum').textContent = 'Trusten grade'
+  document.getElementById('gradeLetter').textContent = complete ? grade : '—'
+  document.getElementById('gradeNum').textContent = complete
+    ? 'Page grade'
+    : 'Limited check'
+  document.getElementById('coverageNote').textContent = complete
+    ? 'This page only. Checkout and other journeys were not checked.'
+    : data.coverage?.missingVisual
+      ? 'Visual analysis is unavailable. These findings are useful, but this check is incomplete.'
+      : 'Page evidence or complete coverage is unavailable. Review these findings without relying on an overall grade.'
   document.getElementById('resultDomain').textContent = domain
   document.getElementById('resultSummary').textContent = verdictText(
     grade,
-    patterns.length,
+    patterns,
   )
 
   // Severity badge summary
@@ -167,7 +180,13 @@ function renderResults(data) {
     list.innerHTML =
       '<div class="no-patterns">✓ We did not find clear pressure tactics on this page</div>'
   } else {
-    for (const p of patterns) {
+    for (const p of [...patterns]
+      .sort(
+        (a, b) =>
+          ['critical', 'high', 'medium', 'low'].indexOf(a.severity) -
+          ['critical', 'high', 'medium', 'low'].indexOf(b.severity),
+      )
+      .slice(0, 3)) {
       const color = SEV_COLOR[p.severity] ?? '#94a3b8'
       const bg = SEV_BG[p.severity] ?? '#f8fafc'
       const cat = CAT_LABEL[p.category] ?? 'Choice worth reviewing'
@@ -440,6 +459,118 @@ function __trustenInjectOverlay(patterns, grade, scanId, dashboardOrigin) {
  * Try the live-DOM endpoint first (analyze-page). If the server doesn't have
  * it yet (pre-rebuild binary), fall back to the URL-based quick-scan flow.
  */
+function __trustenCapturePage() {
+  const overlay = document.getElementById('__trusten_live__')
+  if (overlay?.__trustenCleanup) overlay.__trustenCleanup()
+  const root = document.body || document.documentElement
+  const copy = root.cloneNode(true)
+  const originals = root.querySelectorAll('*')
+  const copies = copy.querySelectorAll('*')
+  originals.forEach((original, index) => {
+    const target = copies[index]
+    if (!copy.contains(target)) return
+    if (
+      ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'LINK'].includes(
+        original.tagName.toUpperCase(),
+      )
+    ) {
+      target.remove()
+      return
+    }
+    const style = getComputedStyle(original)
+    const choice =
+      original.tagName === 'INPUT' &&
+      ['checkbox', 'radio'].includes(original.type)
+    const visibleLabel =
+      choice &&
+      Array.from(original.labels ?? []).some((label) => {
+        const state = getComputedStyle(label)
+        return state.display !== 'none' && state.visibility !== 'hidden'
+      })
+    if (
+      (style.display === 'none' || style.visibility === 'hidden') &&
+      !visibleLabel
+    ) {
+      target.remove()
+      return
+    }
+    if (choice) {
+      target.toggleAttribute('checked', original.defaultChecked)
+      target.setAttribute(
+        'data-trusten-current-checked',
+        String(original.checked),
+      )
+    }
+    if (original.tagName === 'SELECT')
+      Array.from(target.options).forEach((option, optionIndex) => {
+        option.toggleAttribute(
+          'selected',
+          original.options[optionIndex].selected,
+        )
+      })
+    for (const attribute of Array.from(target.attributes)) {
+      if (
+        attribute.name === 'srcset' ||
+        (attribute.name.startsWith('data-') && attribute.value.length > 1000)
+      )
+        target.removeAttribute(attribute.name)
+    }
+  })
+  const html = copy.outerHTML
+  const text = document.body?.innerText ?? ''
+  return {
+    url: location.href,
+    html: html.slice(0, 500_000),
+    text: text.slice(0, 50_000),
+    pageTitle: document.title,
+    captureTruncated: html.length > 500_000 || text.length > 50_000,
+  }
+}
+
+async function captureLivePage(tab) {
+  // 1. Try to capture live DOM (works once server is rebuilt with new endpoint)
+  let pageContent = null
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: __trustenCapturePage,
+    })
+    pageContent = injection.result
+    if (pageContent && typeof chrome.tabs.captureVisibleTab === 'function') {
+      try {
+        const [before] = await chrome.tabs.query({
+          active: true,
+          windowId: tab.windowId,
+        })
+        if (before?.id === tab.id && before.url === pageContent.url) {
+          const image = await chrome.tabs.captureVisibleTab(tab.windowId, {
+            format: 'jpeg',
+            quality: 75,
+          })
+          const [after] = await chrome.tabs.query({
+            active: true,
+            windowId: tab.windowId,
+          })
+          if (
+            after?.id === tab.id &&
+            after.url === pageContent.url &&
+            image.startsWith('data:image/jpeg;base64,')
+          )
+            pageContent.screenshotBase64 = image.slice(
+              'data:image/jpeg;base64,'.length,
+            )
+        }
+      } catch {
+        /* The DOM check can still run with explicitly limited coverage. */
+      }
+    }
+  } catch {
+    // Restricted page — fall through to URL-only scan
+  }
+
+  return pageContent
+}
+
 async function runScan() {
   if (!currentTab) return
 
@@ -456,26 +587,7 @@ async function runScan() {
 
   const url = currentTab.url
 
-  // 1. Try to capture live DOM (works once server is rebuilt with new endpoint)
-  let pageContent = null
-  try {
-    const [injection] = await chrome.scripting.executeScript({
-      target: { tabId: currentTab.id },
-      func: () => {
-        var overlay = document.getElementById('__trusten_live__')
-        if (overlay?.__trustenCleanup) overlay.__trustenCleanup()
-        return {
-          url: location.href,
-          html: document.documentElement.outerHTML.slice(0, 500_000),
-          text: (document.body?.innerText ?? '').slice(0, 50_000),
-          pageTitle: document.title,
-        }
-      },
-    })
-    pageContent = injection.result
-  } catch {
-    // Restricted page — fall through to URL-only scan
-  }
+  const pageContent = await captureLivePage(currentTab)
 
   let data
   try {
@@ -529,6 +641,7 @@ async function runScan() {
         patternCount: full.patterns.length,
         summary: full.score.summary,
         patterns: full.patterns,
+        coverage: scanSummary.coverage,
       }
     }
   } catch (err) {
@@ -562,7 +675,7 @@ async function toggleOverlay() {
       func: __trustenInjectOverlay,
       args: [
         scanResult.patterns,
-        scanResult.grade,
+        scanResult.coverage?.status === 'complete' ? scanResult.grade : '—',
         scanResult.scanId,
         settings.dashboardOrigin,
       ],

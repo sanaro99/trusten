@@ -64,7 +64,7 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
       : `data:image/jpeg;base64,${pattern.evidence.screenshot}`
   }
   const step = stepFor(pattern)
-  if (!step) return undefined
+  if (!step?.screenshotPath) return undefined
   return `/trusten/report/${encodeURIComponent(data.scan.id)}/screenshot/${step.stepNumber}`
 }
 </script>
@@ -121,6 +121,8 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
       <div class="badge badge-primary badge-outline font-bold">Evidence trail</div>
       <h2 id="page-evidence-heading" class="mt-3 mb-0 font-bold text-3xl">Page we checked</h2>
       <p class="mt-2 mb-5 break-all text-base-content/65">{quickEvidence.url}</p>
+      <details class="rounded-box border border-base-300 bg-base-100">
+        <summary class="cursor-pointer p-5 font-semibold text-primary">View captured page</summary>
       <figure class="evidence-frame m-0 overflow-hidden rounded-box bg-base-100">
         <img
           class="block max-h-[42rem] w-full object-contain"
@@ -130,6 +132,7 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
         />
         <figcaption class="px-5 py-3 text-sm text-base-content/65">Captured {new Date(quickEvidence.timestamp).toLocaleString()} · Single page check</figcaption>
       </figure>
+      </details>
     </section>
   {:else if workflowSteps.length > 0}
     <JourneyTimeline scanId={data.scan.id} steps={workflowSteps} />
@@ -155,13 +158,25 @@ function evidenceUrl(pattern: DetectedPattern): string | undefined {
     {/if}
   </section>
 
+  {#if split.more.length > 0}
+    <details class="collapse-arrow collapse mt-8 border border-base-300 bg-base-100 shadow-lg">
+      <summary class="collapse-title font-semibold text-primary">More concerns ({split.more.length})</summary>
+      <div class="collapse-content">
+        <p class="max-w-measure text-base-content/65">The three most important concerns are shown above. These additional findings are available when you want the detail.</p>
+        {#each split.more as pattern, i (pattern.id)}
+          <FindingCard {pattern} index={split.main.length + i + 1} screenshotUrl={evidenceUrl(pattern)} />
+        {/each}
+      </div>
+    </details>
+  {/if}
+
   {#if split.aside.length > 0}
     <details class="collapse-arrow collapse mt-8 border border-base-300 bg-base-100 shadow-lg">
       <summary class="collapse-title font-semibold text-primary">A few other things worth a look ({split.aside.length})</summary>
       <div class="collapse-content">
         <p class="max-w-measure text-base-content/65">We are less sure about these, so we have kept them separate.</p>
         {#each split.aside as pattern, i (pattern.id)}
-          <FindingCard {pattern} index={split.main.length + i + 1} screenshotUrl={evidenceUrl(pattern)} />
+          <FindingCard {pattern} index={split.main.length + split.more.length + i + 1} screenshotUrl={evidenceUrl(pattern)} />
         {/each}
       </div>
     </details>

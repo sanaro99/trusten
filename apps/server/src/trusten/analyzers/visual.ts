@@ -16,6 +16,7 @@
  * defense against visual patterns that text-only analyzers miss.
  */
 
+import { hasCategoryEvidence } from '@trusten/shared/domain'
 import { getTrustenLLM, type TrustenLLMClient } from '../llm/client'
 import type { AnalyzerContext, AnalyzerResult, DetectedPattern } from '../types'
 import { DarkPatternCategory } from '../types'
@@ -102,10 +103,25 @@ export class VisualAnalyzer extends BaseAnalyzer {
       if (!Array.isArray(json.patterns)) return null
 
       return json.patterns
-        .filter((p) => p.confidence >= 0.65)
+        .filter(
+          (p) =>
+            p &&
+            CATEGORY_MAP[p.category] &&
+            Number.isFinite(p.confidence) &&
+            p.confidence >= 0.65 &&
+            typeof p.description === 'string' &&
+            typeof p.evidence_text === 'string' &&
+            p.evidence_text.trim(),
+        )
+        .filter((p) =>
+          hasCategoryEvidence(
+            p.category,
+            p.evidence_text,
+            Boolean(context.previousStepContext),
+          ),
+        )
         .map((p) => {
-          const category =
-            CATEGORY_MAP[p.category] ?? DarkPatternCategory.FAKE_URGENCY
+          const category = CATEGORY_MAP[p.category]
           return this.buildPattern({
             category,
             severity: (['critical', 'high', 'medium', 'low'].includes(
@@ -114,7 +130,10 @@ export class VisualAnalyzer extends BaseAnalyzer {
               ? p.severity
               : 'medium') as 'critical' | 'high' | 'medium' | 'low',
             confidence: Math.min(1, p.confidence),
-            description: p.description,
+            description:
+              category === DarkPatternCategory.FAKE_URGENCY
+                ? 'This page uses a countdown or deadline to encourage a quick decision. Take time to compare options; the deadline has not been independently verified.'
+                : p.description,
             url: context.url,
             pageTitle: context.pageTitle,
             element: { text: p.evidence_text ?? '', html: '', selector: '' },

@@ -45,6 +45,11 @@ const WEAK_DECLINE_PATTERNS = [
   /<(?:a|button|span)[^>]+(?:class|style)[^>]*(?:small|tiny|muted|gray|grey|light|secondary|subtle|dismiss|skip)[^>]*>[^<]{3,80}<\/(?:a|button|span)>/gi,
 ]
 
+const DECLINE_WORDING =
+  /\b(?:no,?\s+thanks?|no\s+thank\s+you|not\s+now|maybe\s+later|remind\s+me\s+later|skip|decline|dismiss|i'?ll\s+pass|don'?t\s+(?:want|need)|cancel|close)\b/i
+const SKIP_LINK =
+  /\bskip\s+(?:to\s+)?(?:the\s+)?(?:main\s+)?(?:content|navigation|nav|menu|search)\b/i
+
 export class MisdirectionAnalyzer extends BaseAnalyzer {
   name = 'MisdirectionAnalyzer'
   categories = [
@@ -103,10 +108,27 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
         description: `Confirmshaming detected: "${m.match}". The decline option is worded to make users feel guilty or foolish for not accepting, manipulating their emotional state to drive compliance.`,
         url: context.url,
         pageTitle: context.pageTitle,
-        element: { text: m.context, html: '', selector: '' },
+        element: { text: this.declineQuote(text, m), html: '', selector: '' },
         evidence: { domSnapshot: m.context },
       }),
     )
+  }
+
+  /** Quote the decline option itself ("No thanks, I don't like saving money"). */
+  private declineQuote(
+    text: string,
+    m: { index: number; match: string },
+  ): string {
+    const end = m.index + m.match.length
+    const lead = text.slice(Math.max(0, m.index - 30), m.index)
+    const no = lead.search(/\bno\b(?!.*\bno\b)/i)
+    const start = no === -1 ? m.index : m.index - lead.length + no
+    // Visible text joins UI labels without punctuation, so a capitalised word
+    // usually starts the next element ("... saving money Buy now").
+    const tail =
+      text.slice(end, end + 60).match(/^[^.!?]*?(?=[.!?]|\s+[A-Z]|$)/)?.[0] ??
+      ''
+    return text.slice(start, end + tail.length).trim()
   }
 
   private detectTrickWording(
@@ -142,17 +164,9 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
 
       // Check if the text looks like a decline/skip action
       for (const el of elements.slice(0, 2)) {
-        const text = el.text.toLowerCase()
-        if (
-          text.includes('no') ||
-          text.includes('skip') ||
-          text.includes("don't") ||
-          text.includes('cancel') ||
-          text.includes('dismiss') ||
-          text.includes('close') ||
-          text.includes('later') ||
-          text.includes('maybe')
-        ) {
+        // Whole decline phrases only: a substring "no" matched "Do Not Sell",
+        // and "Skip to content" is an accessibility link, not a refusal.
+        if (DECLINE_WORDING.test(el.text) && !SKIP_LINK.test(el.text)) {
           patterns.push(
             this.buildPattern({
               category: DarkPatternCategory.VISUAL_INTERFERENCE,

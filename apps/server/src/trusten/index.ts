@@ -9,7 +9,10 @@
  *   analyzeCurrentPage() — Scan whatever page is currently open
  */
 
-import { isAccessChallengeUrl } from '@trusten/shared/domain'
+import {
+  consolidateFindings,
+  isAccessChallengeUrl,
+} from '@trusten/shared/domain'
 import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
@@ -33,23 +36,9 @@ import type {
 import { sleep } from './utils/delay'
 import { normalizeUrlKey } from './utils/url'
 
-/**
- * Collapse patterns that are effectively the same finding seen on the same page
- * across multiple steps (keyed by category + severity + normalized URL +
- * description prefix). Keeps the first occurrence. This prevents a page that was
- * analyzed more than once — e.g. when a step did not advance — from inflating
- * the score or the report.
- */
+/** Merge repeated evidence without dropping separately identified choices. */
 function dedupePatterns(patterns: DetectedPattern[]): DetectedPattern[] {
-  const seen = new Set<string>()
-  const out: DetectedPattern[] = []
-  for (const p of patterns) {
-    const key = `${p.category}|${p.severity}|${normalizeUrlKey(p.url ?? '')}|${(p.description ?? '').trim().slice(0, 120)}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(p)
-  }
-  return out
+  return consolidateFindings(patterns)
 }
 
 // ─── Orchestrator ───
@@ -622,6 +611,7 @@ export class TrustenEngine {
     html: string,
     text = '',
     pageTitle = '',
+    capture: { screenshotBase64?: string; captureTruncated?: boolean } = {},
   ): Promise<ScanResult> {
     const startedAt = new Date().toISOString()
     const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -638,7 +628,7 @@ export class TrustenEngine {
       pageTitle,
       domSnapshot: html,
       visibleText: text,
-      screenshotBase64: '',
+      screenshotBase64: capture.screenshotBase64 ?? '',
       networkRequests: [],
       cookies: [],
     }
@@ -647,11 +637,31 @@ export class TrustenEngine {
 
     logger.info('Trusten analyzing provided content', { domain, scanId })
 
-    const patterns = await this.mergeCachedFindings(
-      url,
-      await this.runAllAnalyzers(context),
+    let visualCheckAvailable = false
+    const patterns = consolidateFindings(
+      await this.mergeCachedFindings(
+        url,
+        await this.runAnalyzers(ALL_ANALYZERS, context, (analyzer, result) => {
+          if (analyzer.name === 'VisualAnalyzer')
+            visualCheckAvailable =
+              result.metadata?.visualCheckAvailable === true
+        }),
+      ),
     )
     const score = calculateScore(patterns)
+
+    let screenshotPath: string | undefined
+    if (context.screenshotBase64) {
+      const fs = await import('node:fs')
+      const path = await import('node:path')
+      const directory = path.join(this.reportsDir, 'screenshots', scanId)
+      fs.mkdirSync(directory, { recursive: true })
+      screenshotPath = path.join(directory, 'step-1.jpg')
+      fs.writeFileSync(
+        screenshotPath,
+        Buffer.from(context.screenshotBase64, 'base64'),
+      )
+    }
 
     const result: ScanResult = {
       id: scanId,
@@ -662,6 +672,21 @@ export class TrustenEngine {
       completedAt: new Date().toISOString(),
       patterns,
       score,
+      workflowSteps: [
+        {
+          stepNumber: 1,
+          action: 'Inspect the page captured by the browser extension',
+          url,
+          screenshot: '',
+          screenshotPath,
+          patternsFound: patterns,
+          timestamp: startedAt,
+          status: 'observed',
+          navAdvanced: false,
+          visualCheckAvailable,
+          captureTruncated: capture.captureTruncated,
+        },
+      ],
     }
 
     await this.persistScan(result)
@@ -855,11 +880,11 @@ export class TrustenEngine {
   }
 
   private assertUsableContext(context: AnalyzerContext): void {
-    this.assertPageNotBlocked(context)
     if (!/^https?:\/\//i.test(context.url) || !context.screenshotBase64)
       throw new ScanIncompleteError(
         'Could not capture a usable page for this check. Please try again or check a different URL.',
       )
+    this.assertPageNotBlocked(context)
     if (
       !/<body[\s>]/i.test(context.domSnapshot) ||
       !context.visibleText
@@ -873,16 +898,50 @@ export class TrustenEngine {
   }
 
   private assertPageNotBlocked(context: AnalyzerContext): void {
+    const text = (
+      context.visibleText ||
+      context.domSnapshot
+        .replace(
+          /<(head|script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1>/gi,
+          '',
+        )
+        .replace(/&nbsp;|&#160;|&#xA0;/gi, ' ')
+        .replace(/<[^>]*>/g, ' ')
+    )
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!text || !context.domSnapshot.trim())
+      throw new ScanIncompleteError(
+        'This page did not render readable content. Load the page and try again.',
+        'PAGE_NOT_READY',
+      )
     if (
       isAccessChallengeUrl(context.url) ||
-      (context.visibleText.length < 2500 &&
-        /^(just a moment|access denied|security (check|verification)|verify (you are|you're) human|captcha|robot check)/i.test(
+      (text.length < 2500 &&
+        (/^(just a moment|access denied|security (check|verification)|verify (you are|you're) human|captcha|robot check)/i.test(
           context.pageTitle.trim(),
-        ))
+        ) ||
+          /^(?:click the button below to continue shopping|verify (?:you are|you're) human|checking your browser|access denied|please (?:verify|confirm) (?:that )?you are (?:a )?human)\b/i.test(
+            text,
+          )))
     )
       throw new ScanIncompleteError(
         'This website requires security verification and blocked the automated check. Finish the website verification in Chrome, then check the loaded page with the Trusten Chrome extension.',
         'SITE_BLOCKED',
+      )
+    if (
+      text.length < 2500 &&
+      /^(?:error(?: page)?\b|service unavailable|page not found|[45]\d\d\b)/i.test(
+        context.pageTitle.trim(),
+      ) &&
+      /\b(?:sorry|something went wrong|unavailable|not found|try again)\b/i.test(
+        text,
+      )
+    )
+      throw new ScanIncompleteError(
+        'The website returned an error page. We could not inspect the requested content. Try again later.',
+        'PAGE_LOAD_FAILED',
       )
   }
 
@@ -979,7 +1038,7 @@ export class TrustenEngine {
           added: extra.length,
         })
       }
-      return [...live, ...extra]
+      return consolidateFindings([...live, ...extra])
     } catch (err) {
       logger.warn('Trusten: cache merge failed', { error: String(err) })
       return live
@@ -1013,7 +1072,7 @@ export class TrustenEngine {
       }
     }
 
-    return patterns
+    return consolidateFindings(patterns)
   }
 
   private async generateReport(

@@ -44,6 +44,15 @@ describe('splitFindings', () => {
   })
 
   test('handles an empty scan', () => {
-    expect(splitFindings([])).toEqual({ main: [], aside: [] })
+    expect(splitFindings([])).toEqual({ main: [], more: [], aside: [] })
+  })
+
+  test('shows the three most important concerns first while retaining the others', () => {
+    const { main, more, aside } = splitFindings(
+      Array.from({ length: 8 }, (_, i) => pattern(0.9, 'critical', String(i))),
+    )
+    expect(main).toHaveLength(3)
+    expect(more).toHaveLength(5)
+    expect(aside).toHaveLength(0)
   })
 })

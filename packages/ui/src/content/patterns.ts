@@ -40,10 +40,11 @@ export interface PatternContent {
 
 export const PATTERN_CONTENT: Record<DarkPatternCategory, PatternContent> = {
   [DarkPatternCategory.FAKE_URGENCY]: {
-    name: 'A fake deadline',
+    name: 'Pressure to decide quickly',
     what: 'This website used a countdown or a "hurry" message to rush you.',
-    why: 'The deadline often is not real. It is there to stop you comparing prices or thinking it over.',
-    watchFor: 'Timers that start again when you reload the page.',
+    why: 'A countdown can rush you into buying before comparing options. This check does not establish whether the deadline is genuine.',
+    watchFor:
+      'Countdowns, short deadlines, and timers that start again when you reload. A timer alone does not prove that an offer is fake.',
     lawPlain:
       'In the EU and the US, inventing a fake deadline to hurry a shopper is against the law.',
   },

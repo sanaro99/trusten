@@ -23,15 +23,12 @@ const URGENCY_PATTERNS = [
   /\bact\s+now\b/i,
   /\bhurry\b/i,
   /\blast\s+chance\b/i,
-  /\bdon'?t\s+miss\b/i,
   /\bexpires?\s+in\b/i,
   /\bflash\s+(?:sale|deal)\b/i,
   /\blightning\s+deal\b/i,
   /\bdoorb?uster\b/i,
   /\btoday\s+only\b/i,
-  /\bwhile\s+(?:supplies|stocks?)\s+last\b/i,
   /\b(?:sale|deal)\s+ends?\b/i,
-  /\b\d+\s*:\s*\d{2}\s*:\s*\d{2}\b/, // time countdown HH:MM:SS
   /\bhours?\s+left\b/i,
   /\bminutes?\s+left\b/i,
 ]
@@ -54,10 +51,25 @@ const SOCIAL_PROOF_PATTERNS = [
   /\b[\d,]+\s+(?:customers?\s+)?purchased\b/i,
   /\b[\d,]+\s+watching\s+(?:now|this)\b/i,
   /\b[\d,]+\s+(?:others?\s+)?(?:viewed|looked\s+at)\s+this\b/i,
-  /\btrending\b.*\b(?:today|now|this\s+week)\b/i,
   /\b#\d+\s+(?:best\s*)?seller\b/i,
-  /\bmost[\s-]popular\b/i,
 ]
+
+// "Sale ends December 31" names a checkable deadline; it is not pressure.
+const MONTH =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+const DATED_DEADLINE = new RegExp(
+  `^[^.!?]{0,25}?(?:\\b${MONTH}\\.?\\s+\\d{1,2}\\b|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH}\\b|\\b\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}\\b)`,
+  'i',
+)
+
+// A clock is a countdown only when deadline wording sits right beside it.
+const COUNTDOWN_WORDING =
+  /\b(?:ends?\s+in|expires?\s+in|left|remaining|countdown|hurry|limited[\s-]time|(?:offer|deal|sale)\s+ends?|time\s+left)\b/i
+const CLOCK = /\b\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b/g
+const TIME_OF_DAY_BEFORE =
+  /\b(?:at|from|until|till|by|between|and|to|opens?|closes?|starts?|rest\s+for|for)\s*$/i
+const TIME_OF_DAY_AFTER =
+  /^\s*(?:a\.?m\.?|p\.?m\.?|hours?|hrs?|on|o'?clock|[ap])\b/i
 
 // CSS selectors that are common for countdown timers
 const TIMER_SELECTORS = [
@@ -83,11 +95,17 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
     const text =
       context.visibleText || this.extractVisibleText(context.domSnapshot)
 
-    patterns.push(
-      ...this.detectUrgency(text, context),
+    const timers = [
       ...this.detectCountdownTimers(context.domSnapshot, context),
       ...this.detectScriptBasedTimers(context.domSnapshot, context),
-      ...this.detectFakeStrikethroughPrices(context.domSnapshot, context),
+    ]
+    // A timer quotes the wording beside it; don't list that wording twice.
+    const quotedByTimer = new Set(timers.map((t) => t.element?.text))
+    patterns.push(
+      ...timers,
+      ...this.detectUrgency(text, context).filter(
+        (p) => !quotedByTimer.has(p.element?.text),
+      ),
       ...this.detectScarcity(text, context),
       ...this.detectSocialProof(text, context),
     )
@@ -122,15 +140,18 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
     text: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
-    const matches = this.findKeywordMatches(text, URGENCY_PATTERNS)
+    const matches = this.findKeywordMatches(text, URGENCY_PATTERNS).filter(
+      (m) => !DATED_DEADLINE.test(text.slice(m.index + m.match.length)),
+    )
     if (matches.length === 0) return []
 
+    // Wording alone is worth knowing; a working timer is what makes it serious.
     return matches.slice(0, 3).map((m) =>
       this.buildPattern({
         category: DarkPatternCategory.FAKE_URGENCY,
-        severity: 'high',
+        severity: 'medium',
         confidence: 0.85,
-        description: `Urgency language detected: "${m.match}". Manufactured time pressure is a dark pattern that exploits loss aversion to rush purchasing decisions.`,
+        description: `Time pressure detected: "${m.match}". This message encourages a quick decision. Pause and compare your options; this check has not verified whether the deadline is genuine.`,
         url: context.url,
         pageTitle: context.pageTitle,
         element: { text: m.match, html: '', selector: '' },
@@ -148,46 +169,73 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
       `<[^>]+(?:class|id)="[^"]*(?:${TIMER_SELECTORS.join('|')})[^"]*"[^>]*>[^<]*</[^>]+>`,
       'gi',
     )
-    const timerElements = this.findElements(html, timerPattern)
-
-    // A bare HH:MM:SS / MM:SS in the markup is NOT enough — it matches scripts,
-    // SVG, data-attributes, prices, etc. (that produced false positives). Only
-    // count a clock in the *visible* text when urgency language corroborates it.
+    // Script-drawn timers leave only a unit label ("h") in the markup, so an
+    // element counts when it or the rendered page shows a running clock.
+    // Without either it is usually unused widget markup.
     const visibleText = context.visibleText || this.extractVisibleText(html)
-    const clockMatch = visibleText.match(
-      /\b\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b/,
+    const pageShowsClock =
+      /\b\d{1,2}\s*:\s*\d{2}\s*:\s*\d{2}\b|\b\d{1,2}\s*h\s*\d{1,2}\s*m\b/i.test(
+        visibleText,
+      )
+    const timerElements = this.findElements(html, timerPattern).filter(
+      (el) => /\d/.test(el.text) || pageShowsClock,
     )
-    const urgencyNearby = URGENCY_PATTERNS.some((p) => p.test(visibleText))
-    const corroboratedClock = clockMatch !== null && urgencyNearby
 
-    if (timerElements.length === 0 && !corroboratedClock) return []
+    // A bare clock is usually a time of day ("starts at 10:30"). Only count one
+    // in the visible text when countdown wording sits right beside it.
+    const clockMatch = this.findCountdownClock(visibleText)
+
+    if (timerElements.length === 0 && !clockMatch) return []
 
     const hasElement = timerElements.length > 0
     return [
       this.buildPattern({
         category: DarkPatternCategory.FAKE_URGENCY,
-        severity: hasElement ? 'critical' : 'high',
+        severity: 'high',
         confidence: hasElement ? 0.85 : 0.7,
         description: hasElement
-          ? 'Countdown timer element detected (its class/id marks it as a timer). Timers create artificial urgency; if it resets on page reload it constitutes fake urgency.'
-          : 'A countdown-style clock appears in the visible page text alongside urgency language, suggesting manufactured time pressure.',
+          ? 'A countdown timer creates pressure to decide quickly. Take time to compare your options. We have not verified whether this deadline expires or resets.'
+          : 'A countdown-style clock appears alongside urgency language. Take time to compare your options; this check has not verified the deadline.',
         url: context.url,
         pageTitle: context.pageTitle,
         element: hasElement
           ? {
-              text: timerElements[0].text,
+              text:
+                this.findKeywordMatches(visibleText, URGENCY_PATTERNS)[0]
+                  ?.match ||
+                (timerElements[0].text.trim().length > 2
+                  ? timerElements[0].text
+                  : '') ||
+                'Countdown timer',
               html: timerElements[0].html,
               selector:
                 '[class*=timer],[id*=timer],[class*=countdown],[id*=countdown]',
             }
-          : { text: clockMatch?.[0] ?? '', html: '', selector: '' },
+          : { text: clockMatch ?? '', html: '', selector: '' },
         evidence: {
-          domSnapshot: hasElement
-            ? timerElements[0].html
-            : (clockMatch?.[0] ?? ''),
+          domSnapshot: hasElement ? timerElements[0].html : (clockMatch ?? ''),
         },
       }),
     ]
+  }
+
+  private findCountdownClock(text: string): string | null {
+    for (const clock of text.matchAll(CLOCK)) {
+      const start = clock.index ?? 0
+      const end = start + clock[0].length
+      const before = text.slice(Math.max(0, start - 40), start)
+      const after = text.slice(end, end + 40)
+      if (TIME_OF_DAY_BEFORE.test(before) || TIME_OF_DAY_AFTER.test(after))
+        continue
+      if (COUNTDOWN_WORDING.test(`${before} ${after}`)) return clock[0]
+      // A running seconds display reads as a countdown beside any sale pressure
+      // ("Flash sale 02:14:33"); a plain HH:MM still needs deadline wording.
+      const hasSeconds = /:\s*\d{2}\s*:\s*\d{2}$/.test(clock[0])
+      const wide = text.slice(Math.max(0, start - 80), end + 80)
+      if (hasSeconds && URGENCY_PATTERNS.some((p) => p.test(wide)))
+        return clock[0]
+    }
+    return null
   }
 
   private detectScarcity(
@@ -200,7 +248,7 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
     return matches.slice(0, 3).map((m) =>
       this.buildPattern({
         category: DarkPatternCategory.FAKE_SCARCITY,
-        severity: 'high',
+        severity: 'medium',
         confidence: 0.8,
         description: `Scarcity claim detected: "${m.match}". Artificial scarcity exploits FOMO (fear of missing out) to pressure users into immediate purchases.`,
         url: context.url,
@@ -253,19 +301,24 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
       const scriptContent = match[1] ?? ''
       if (
         timerVarPattern.test(scriptContent) &&
-        intervalPattern.test(scriptContent)
+        intervalPattern.test(scriptContent) &&
+        URGENCY_PATTERNS.some((pattern) => pattern.test(context.visibleText))
       ) {
         return [
           this.buildPattern({
             category: DarkPatternCategory.FAKE_URGENCY,
-            severity: 'critical',
+            severity: 'high',
             confidence: 0.92,
             description:
-              'JavaScript-driven countdown timer detected. The page uses setInterval/setTimeout with timer variables to display a countdown. These timers almost always reset on page reload, proving they are manufactured urgency — not real deadlines.',
+              'Timer code accompanies a visible time-pressure message. You can pause and compare options; this check has not verified whether the deadline expires or resets.',
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: scriptContent.slice(0, 100),
+              text:
+                this.findKeywordMatches(
+                  context.visibleText,
+                  URGENCY_PATTERNS,
+                )[0]?.match ?? 'Countdown timer',
               html: match[0].slice(0, 200),
               selector:
                 '[class*=timer],[class*=countdown],[id*=timer],[id*=countdown]',
@@ -276,53 +329,6 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
       }
     }
     return []
-  }
-
-  /**
-   * Detects fake strikethrough/crossed-out "original" prices.
-   * Sites show a higher original price crossed out next to a "sale" price.
-   * When the original price was never real, this is a deceptive dark pattern.
-   */
-  private detectFakeStrikethroughPrices(
-    html: string,
-    context: AnalyzerContext,
-  ): DetectedPattern[] {
-    // Look for <del>, <s>, <strike> tags, or CSS strikethrough classes near price patterns
-    const strikethroughTags =
-      /<(?:del|s|strike)[^>]*>([^<]{1,50})<\/(?:del|s|strike)>/gi
-    const strikethroughClasses =
-      /<[^>]+class="[^"]*(?:strike|strikethrough|was-price|original-price|list-price|before-price|old-price|crossed)[^"]*"[^>]*>([^<]{1,60})<\/[^>]+>/gi
-    const pricePattern = /[$£€¥₹]\s*[\d,]+(?:\.\d{2})?/
-
-    const tagMatches = [...html.matchAll(strikethroughTags)]
-    const classMatches = [...html.matchAll(strikethroughClasses)]
-    const allMatches = [...tagMatches, ...classMatches]
-
-    const priceMatches = allMatches.filter((m) => pricePattern.test(m[1] ?? ''))
-    if (priceMatches.length === 0) return []
-
-    return [
-      this.buildPattern({
-        category: DarkPatternCategory.FAKE_URGENCY,
-        severity: 'high',
-        confidence: 0.82,
-        description: `Strikethrough "original" price detected: "${(priceMatches[0][1] ?? '').trim()}". Sites frequently inflate the crossed-out price to make the sale discount appear larger than it really is (reference price manipulation). This violates FTC pricing guidelines and the EU Consumer Rights Directive.`,
-        url: context.url,
-        pageTitle: context.pageTitle,
-        element: {
-          text: (priceMatches[0][1] ?? '').trim(),
-          html: priceMatches[0][0].slice(0, 200),
-          selector:
-            'del, s, [class*=strike],[class*=was-price],[class*=original-price],[class*=old-price]',
-        },
-        evidence: {
-          domSnapshot: priceMatches
-            .slice(0, 3)
-            .map((m) => m[0])
-            .join(' | '),
-        },
-      }),
-    ]
   }
 
   // ─── LLM Fallback ───
