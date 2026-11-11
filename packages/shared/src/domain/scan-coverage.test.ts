@@ -9,6 +9,12 @@ const captured = {
 }
 
 describe('scan coverage', () => {
+  test('a truncated extension capture is not a complete page check', () => {
+    expect(
+      assessScanCoverage('quick', [{ ...captured, captureTruncated: true }])
+        .status,
+    ).toBe('partial')
+  })
   test('withholds complete coverage when a reached page has no visual analysis', () => {
     const coverage = assessScanCoverage('deep', [
       captured,

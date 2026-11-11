@@ -10,6 +10,7 @@ import { compareSeverity, toConfidenceBand } from '@trusten/ui/content'
 
 export function splitFindings(patterns: DetectedPattern[]): {
   main: DetectedPattern[]
+  more: DetectedPattern[]
   aside: DetectedPattern[]
 } {
   const main: DetectedPattern[] = []
@@ -23,5 +24,10 @@ export function splitFindings(patterns: DetectedPattern[]): {
   const order = (a: DetectedPattern, b: DetectedPattern) =>
     compareSeverity(a.severity, b.severity) || b.confidence - a.confidence
 
-  return { main: main.sort(order), aside: aside.sort(order) }
+  const ordered = main.sort(order)
+  return {
+    main: ordered.slice(0, 3),
+    more: ordered.slice(3),
+    aside: aside.sort(order),
+  }
 }

@@ -34,6 +34,7 @@ export interface WorkflowStep {
   navReason?: string
   /** Whether the visual LLM check completed on a quick scan. */
   visualCheckAvailable?: boolean
+  captureTruncated?: boolean
 }
 
 export interface WorkflowStepDefinition {

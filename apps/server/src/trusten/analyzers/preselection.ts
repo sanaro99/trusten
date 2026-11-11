@@ -11,8 +11,7 @@ import { DarkPatternCategory } from '../types'
 import { BaseAnalyzer } from './base-analyzer'
 
 // Checkbox elements that are checked by default
-const CHECKED_CHECKBOX_PATTERN =
-  /<input[^>]+type=["']?checkbox["']?[^>]+checked(?:="checked")?[^>]*>/gi
+const CHECKED_CHECKBOX_PATTERN = /<input\b[^>]*>/gi
 
 // Text near checkboxes that suggests consent (marketing, data sharing, etc.)
 const CONSENT_CHECKBOX_TEXT_PATTERNS = [
@@ -68,7 +67,11 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
     let match: RegExpExecArray | null
 
     while ((match = checkedRegex.exec(html)) !== null) {
-      checkedBoxes.push(match[0])
+      if (
+        /\btype\s*=\s*["']?checkbox\b/i.test(match[0]) &&
+        /\schecked(?:\s|=|\/?>)/i.test(match[0])
+      )
+        checkedBoxes.push(match[0])
     }
 
     if (checkedBoxes.length === 0) return []
@@ -81,6 +84,13 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
         Math.min(html.length, boxIndex + boxHtml.length + 300),
       )
       const surroundingText = this.extractVisibleText(surroundingHtml)
+      // The label normally follows the box; text before it is unrelated markup.
+      const labelText = this.extractVisibleText(
+        html.slice(boxIndex, boxIndex + boxHtml.length + 300),
+      )
+        .split(/(?<=[.!?])\s/)[0]
+        .slice(0, 120)
+        .trim()
 
       const isConsentCheckbox = CONSENT_CHECKBOX_TEXT_PATTERNS.some((p) =>
         p.test(surroundingText),
@@ -92,13 +102,17 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
             category: DarkPatternCategory.PRESELECTED_OPTIONS,
             severity: 'critical',
             confidence: 0.9,
-            description: `Pre-selected consent checkbox detected. A checkbox for marketing, data sharing, or third-party consent is checked by default, requiring users to actively opt out. This is illegal under GDPR (consent must be freely given and unambiguous).`,
+            description: `Pre-selected consent checkbox detected. A checkbox for marketing, data sharing, or third-party consent is checked by default, requiring users to actively opt out. Review this default before proceeding; valid consent requires an affirmative choice.`,
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: surroundingText.slice(0, 200),
+              text: labelText || surroundingText.slice(0, 200),
               html: boxHtml,
-              selector: 'input[type="checkbox"][checked]',
+              selector: boxHtml.match(/\bid=["']([^"']+)["']/i)?.[1]
+                ? '[id=' +
+                  JSON.stringify(boxHtml.match(/\bid=["']([^"']+)["']/i)![1]) +
+                  ']'
+                : 'input[type="checkbox"][checked]',
             },
             evidence: { domSnapshot: surroundingHtml.slice(0, 500) },
           }),
@@ -110,13 +124,17 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
             category: DarkPatternCategory.PRESELECTED_OPTIONS,
             severity: 'high',
             confidence: 0.75,
-            description: `Pre-selected checkbox detected. An option is checked by default near: "${surroundingText.slice(0, 100)}". Users who don't notice will inadvertently agree to this selection.`,
+            description: `Pre-selected checkbox detected. An option is checked by default near: "${labelText || surroundingText.slice(0, 100)}". Users who don't notice will inadvertently agree to this selection.`,
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: surroundingText.slice(0, 200),
+              text: labelText || surroundingText.slice(0, 200),
               html: boxHtml,
-              selector: 'input[type="checkbox"][checked]',
+              selector: boxHtml.match(/\bid=["']([^"']+)["']/i)?.[1]
+                ? '[id=' +
+                  JSON.stringify(boxHtml.match(/\bid=["']([^"']+)["']/i)![1]) +
+                  ']'
+                : 'input[type="checkbox"][checked]',
             },
             evidence: { domSnapshot: surroundingHtml.slice(0, 500) },
           }),

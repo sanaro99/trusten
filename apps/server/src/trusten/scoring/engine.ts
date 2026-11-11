@@ -3,14 +3,13 @@
  *
  * Calculates a 0-100 numeric score and A-F letter grade from detected patterns.
  *
- * Scoring logic:
- * - Start at 100 (perfect score)
- * - Deduct points based on severity and count:
- *     critical: -15 per instance (capped at -45)
- *     high:     -8  per instance (capped at -32)
- *     medium:   -4  per instance (capped at -20)
- *     low:      -2  per instance (capped at -10)
- * - Minimum score: 0
+ * - Start at 100. Each finding weighs by severity (critical 25, high 15,
+ *   medium 8, low 3); findings below 0.7 confidence count half.
+ * - Within one category, repeats have diminishing returns (each counts half
+ *   the previous) and the category cannot take more than 1.5x its strongest
+ *   finding, so a banner repeated on every page cannot sink a site on its own.
+ *   Distinct kinds of trick add up fully.
+ * - Serious concerns cap the score at 59; important concerns cap it at 79.
  *
  * Grade mapping:
  *   A: 80-100  (minor issues at most)
@@ -31,15 +30,16 @@ import type {
 
 // ─── Constants ───
 
-const SEVERITY_DEDUCTIONS: Record<
-  Severity,
-  { perInstance: number; cap: number }
-> = {
-  critical: { perInstance: 15, cap: 45 },
-  high: { perInstance: 8, cap: 32 },
-  medium: { perInstance: 4, cap: 20 },
-  low: { perInstance: 2, cap: 10 },
+const SEVERITY_WEIGHT: Record<Severity, number> = {
+  critical: 25,
+  high: 15,
+  medium: 8,
+  low: 3,
 }
+
+/** Matches the confidence below which findings are shown as "less sure". */
+const CONFIDENT = 0.7
+const CATEGORY_CAP_MULTIPLIER = 1.5
 
 const GRADE_BOUNDARIES: Array<{ min: number; grade: Grade }> = [
   { min: 80, grade: 'A' },
@@ -52,40 +52,40 @@ const GRADE_BOUNDARIES: Array<{ min: number; grade: Grade }> = [
 // ─── Score Calculation ───
 
 export function calculateScore(patterns: DetectedPattern[]): DarkPatternScore {
-  // Group patterns by severity for deduction calculation
-  const bySeverity: Record<Severity, DetectedPattern[]> = {
-    critical: [],
-    high: [],
-    medium: [],
-    low: [],
-  }
-
-  for (const p of patterns) {
-    bySeverity[p.severity].push(p)
-  }
-
-  // Calculate total deductions
-  let totalDeductions = 0
-  for (const severity of Object.keys(bySeverity) as Severity[]) {
-    const count = bySeverity[severity].length
-    const { perInstance, cap } = SEVERITY_DEDUCTIONS[severity]
-    const deduction = Math.min(count * perInstance, cap)
-    totalDeductions += deduction
-  }
-
-  // Compute numeric score
-  const numeric = Math.max(0, 100 - totalDeductions)
-
-  // Determine grade
-  const grade = numericToGrade(numeric)
-
-  // Build category breakdown
   const categoryBreakdown = buildCategoryBreakdown(patterns)
+  const totalDeductions = Object.values(categoryBreakdown).reduce(
+    (sum, entry) => sum + (entry?.score ?? 0),
+    0,
+  )
 
-  // Generate summary
+  const ceiling = patterns.some((p) => p.severity === 'critical')
+    ? 59
+    : patterns.some((p) => p.severity === 'high')
+      ? 79
+      : 100
+  const numeric = Math.min(
+    ceiling,
+    Math.max(0, Math.round(100 - totalDeductions)),
+  )
+  const grade = numericToGrade(numeric)
   const summary = generateSummary(numeric, grade, patterns, categoryBreakdown)
 
   return { numeric, grade, categoryBreakdown, summary }
+}
+
+function findingWeight(pattern: DetectedPattern): number {
+  const weight = SEVERITY_WEIGHT[pattern.severity]
+  return pattern.confidence >= CONFIDENT ? weight : weight / 2
+}
+
+/** How much one category takes off the score. */
+function categoryDeduction(patterns: DetectedPattern[]): number {
+  const weights = patterns.map(findingWeight).sort((a, b) => b - a)
+  if (weights.length === 0) return 0
+  const raw = weights.reduce((sum, weight, i) => sum + weight / 2 ** i, 0)
+  return (
+    Math.round(Math.min(raw, weights[0] * CATEGORY_CAP_MULTIPLIER) * 10) / 10
+  )
 }
 
 // ─── Helpers ───
@@ -119,12 +119,11 @@ function buildCategoryBreakdown(
     }
   }
 
-  // Calculate per-category score (how much each category deducts)
-  for (const entry of Object.values(breakdown)) {
-    if (entry) {
-      const { perInstance, cap } = SEVERITY_DEDUCTIONS[entry.severity]
-      entry.score = Math.min(entry.count * perInstance, cap)
-    }
+  for (const [category, entry] of Object.entries(breakdown)) {
+    if (entry)
+      entry.score = categoryDeduction(
+        patterns.filter((pattern) => pattern.category === category),
+      )
   }
 
   return breakdown
@@ -147,7 +146,7 @@ function generateSummary(
   breakdown: Partial<Record<DarkPatternCategory, CategoryScore>>,
 ): string {
   if (patterns.length === 0) {
-    return 'No dark patterns detected. This page appears to use transparent, user-friendly design practices.'
+    return 'No concerns were detected in the available checks. Review the coverage and evidence before relying on this result.'
   }
 
   const criticalCount = patterns.filter((p) => p.severity === 'critical').length
@@ -162,7 +161,7 @@ function generateSummary(
 
   if (criticalCount > 0) {
     parts.push(
-      `${criticalCount} critical issue${criticalCount > 1 ? 's' : ''} found that likely violate consumer protection regulations.`,
+      `${criticalCount} serious concern${criticalCount > 1 ? 's' : ''} require${criticalCount === 1 ? 's' : ''} attention before proceeding.`,
     )
   }
 
@@ -187,4 +186,9 @@ function generateSummary(
 
 // ─── Exports for testing ───
 
-export { buildCategoryBreakdown, numericToGrade, severityRank }
+export {
+  buildCategoryBreakdown,
+  categoryDeduction,
+  numericToGrade,
+  severityRank,
+}

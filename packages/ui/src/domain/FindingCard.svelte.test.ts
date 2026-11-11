@@ -39,7 +39,7 @@ const props = {
 describe('FindingCard', () => {
   test('leads with the plain name, not the taxonomy name', () => {
     render(FindingCard, { props })
-    expect(screen.getByText('A fake deadline')).toBeTruthy()
+    expect(screen.getByText(/Pressure to decide quickly/)).toBeTruthy()
     expect(screen.queryByText(/fake_urgency/i)).toBeNull()
   })
 

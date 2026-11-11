@@ -44,6 +44,9 @@ const PRIVACY_ZUCKERING_PATTERNS = [
   /\bcross[\s-]site\s+tracking\b/i,
 ]
 
+const PRIVACY_CONTROL_WORDING =
+  /\b(?:opt[\s-]?out|do\s+not\s+sell|limit\s+(?:the\s+)?use|your\s+privacy\s+choices|privacy\s+(?:settings|choices|rights|preferences)|manage\s+(?:preferences|settings|consent)|cookie\s+(?:settings|preferences))\b/i
+
 // DOM patterns for cookie banner analysis
 const COOKIE_BANNER_PATTERN =
   /<(?:div|section|aside)[^>]+(?:class|id)="[^"]*(?:cookie|consent|gdpr|privacy|cmp|onetrust|cookielaw)[^"]*"[^>]*>/gi
@@ -185,7 +188,12 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
     text: string,
     context: AnalyzerContext,
   ): DetectedPattern[] {
-    const matches = this.findKeywordMatches(text, PRIVACY_ZUCKERING_PATTERNS)
+    // "Targeted Advertising Opt Out" is a control that protects the visitor,
+    // not a buried disclosure.
+    const matches = this.findKeywordMatches(
+      text,
+      PRIVACY_ZUCKERING_PATTERNS,
+    ).filter((m) => !PRIVACY_CONTROL_WORDING.test(m.context))
     if (matches.length === 0) return []
 
     return matches.slice(0, 2).map((m) =>
@@ -193,10 +201,10 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
         category: DarkPatternCategory.PRIVACY_ZUCKERING,
         severity: 'high',
         confidence: 0.78,
-        description: `Privacy zuckering detected: "${m.match}". The service discloses sharing user data with third parties or for tracking, often buried in terms or consent flows to ensure most users miss it.`,
+        description: `Data sharing disclosed: "${m.match}". The page says your information may go to other companies or be used for tracking. Look for a way to limit this before you continue.`,
         url: context.url,
         pageTitle: context.pageTitle,
-        element: { text: m.context, html: '', selector: '' },
+        element: { text: this.sentenceAround(text, m), html: '', selector: '' },
         evidence: { domSnapshot: m.context },
       }),
     )

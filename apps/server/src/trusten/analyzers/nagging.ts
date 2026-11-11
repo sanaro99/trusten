@@ -272,9 +272,10 @@ export class NaggingAnalyzer extends BaseAnalyzer {
 
     if (adContainers.length > 0) {
       for (const container of adContainers) {
+        // Image-only slots usually carry their "Ad" label just outside the
+        // container, and there would be nothing to show the reader as proof.
         const containerText = this.extractVisibleText(container.html)
-        if (!containerText && !/<(?:img|iframe|video)\b/i.test(container.html))
-          continue
+        if (!containerText) continue
         const hasAdLabel = DISGUISED_AD_LABELS.some((p) =>
           p.test(containerText),
         )
@@ -284,7 +285,7 @@ export class NaggingAnalyzer extends BaseAnalyzer {
           patterns.push(
             this.buildPattern({
               category: DarkPatternCategory.DISGUISED_ADS,
-              severity: 'high',
+              severity: 'medium',
               confidence: 0.72,
               description: `Possible unlabeled advertising: a populated advertising container has no clear "Ad", "Sponsored", or "Advertisement" disclosure in its content.`,
               url: context.url,

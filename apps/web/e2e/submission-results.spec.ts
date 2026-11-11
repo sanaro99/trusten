@@ -157,7 +157,10 @@ test('completed full reports preserve uncertain findings, evidence counts, recor
   await expect(otherFindings).toBeVisible()
   await otherFindings.click()
   await expect(
-    page.getByRole('heading', { name: '1. A fake deadline', exact: true }),
+    page.getByRole('heading', {
+      name: '1. Pressure to decide quickly',
+      exact: true,
+    }),
   ).toBeVisible()
   await page.getByText('How we worked this out', { exact: true }).click()
   await expect(

@@ -8,6 +8,11 @@
  * - Confidence-gated pattern filtering
  */
 
+import {
+  consolidateFindings,
+  hasCategoryEvidence,
+  DarkPatternCategory as PatternCategory,
+} from '@trusten/shared/domain'
 import { getTrustenLLM } from '../llm/client'
 import { REGULATORY_MAP } from '../regulatory/mapping'
 import type {
@@ -62,10 +67,53 @@ export abstract class BaseAnalyzer {
   }
 
   /**
-   * Find all occurrences of keyword patterns in text.
-   * Returns match details with surrounding context.
+   * Find all occurrences of keyword patterns in text, in page order.
+   * Overlapping matches ("Only 2 left" / "2 left in stock") describe one claim,
+   * so only the first-found of each overlapping group is kept.
    */
   protected findKeywordMatches(
+    text: string,
+    patterns: RegExp[],
+  ): Array<{ match: string; context: string; index: number }> {
+    const found = this.findAllKeywordMatches(text, patterns)
+    const kept: typeof found = []
+    for (const candidate of found) {
+      const end = candidate.index + candidate.match.length
+      const overlaps = kept.some(
+        (k) => candidate.index < k.index + k.match.length && k.index < end,
+      )
+      if (!overlaps) kept.push(candidate)
+    }
+    return kept.sort((a, b) => a.index - b.index)
+  }
+
+  /**
+   * The sentence containing a match, cut at word boundaries, so a quote shown
+   * to the reader never starts or ends mid-word.
+   */
+  protected sentenceAround(
+    text: string,
+    match: { index: number; match: string },
+    maxLength = 160,
+  ): string {
+    const end = match.index + match.match.length
+    const boundary = /[.!?](?:\s|$)|\n/g
+    let start = 0
+    for (const b of text.slice(0, match.index).matchAll(boundary))
+      start = (b.index ?? 0) + b[0].length
+    boundary.lastIndex = 0
+    const next = boundary.exec(text.slice(end))
+    let stop = next ? end + next.index + 1 : text.length
+    if (start < match.index - maxLength / 2)
+      start = text.lastIndexOf(' ', match.index - maxLength / 2) + 1
+    if (stop > end + maxLength / 2) {
+      const space = text.indexOf(' ', end + maxLength / 2)
+      stop = space === -1 ? text.length : space
+    }
+    return text.slice(start, stop).trim()
+  }
+
+  private findAllKeywordMatches(
     text: string,
     patterns: RegExp[],
   ): Array<{ match: string; context: string; index: number }> {
@@ -180,17 +228,7 @@ export abstract class BaseAnalyzer {
   protected deduplicatePatterns(
     patterns: DetectedPattern[],
   ): DetectedPattern[] {
-    const best = new Map<string, DetectedPattern>()
-
-    for (const p of patterns) {
-      const key = `${p.category}:${p.element?.text ?? p.description.slice(0, 50)}`
-      const existing = best.get(key)
-      if (!existing || p.confidence > existing.confidence) {
-        best.set(key, p)
-      }
-    }
-
-    return [...best.values()]
+    return consolidateFindings(patterns)
   }
 
   /**
@@ -257,14 +295,39 @@ export abstract class BaseAnalyzer {
         }>
       }
 
-      if (!json.patterns) return []
+      if (!Array.isArray(json.patterns)) return []
 
       return json.patterns
-        .filter((p) => p.confidence >= minConfidence)
+        .filter(
+          (p) =>
+            p &&
+            Object.values(PatternCategory).includes(
+              p.category as PatternCategory,
+            ) &&
+            (categoryMap
+              ? categoryMap[p.category]
+              : p.category === defaultCategory) &&
+            Number.isFinite(p.confidence) &&
+            p.confidence >= minConfidence &&
+            typeof p.description === 'string' &&
+            typeof p.evidence_text === 'string' &&
+            p.evidence_text.trim(),
+        )
+        .filter((p) =>
+          hasCategoryEvidence(
+            p.category,
+            p.evidence_text,
+            Boolean(context.previousStepContext),
+          ),
+        )
         .map((p) =>
           this.buildPattern({
             category: categoryMap?.[p.category] ?? defaultCategory,
-            severity: (p.severity as Severity) ?? defaultSeverity,
+            severity: (['critical', 'high', 'medium', 'low'].includes(
+              p.severity,
+            )
+              ? p.severity
+              : defaultSeverity) as Severity,
             confidence: p.confidence,
             description: p.description,
             url: context.url,

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Bun](https://bun.sh) ≥ 1.4.0.
-- PostgreSQL 17 (a local installation or the Compose database).
+- PostgreSQL 18 (a local installation or the Compose database).
 - Chromium for Puppeteer: `bunx puppeteer browsers install chrome` (one-time). `ffmpeg-static`
   (for session video) is fetched on install via `trustedDependencies`.
 
@@ -15,6 +15,17 @@ bunx puppeteer browsers install chrome
 export DATABASE_URL=postgresql://trusten:trusten@localhost:5432/trusten
 bun run start        # http://localhost:9200/trusten   (alias: bun run dev for --watch)
 ```
+
+### One-command local stack (Windows)
+
+From PowerShell, run `./scripts/start-local.ps1`. It clears stale listeners on
+the API (`9200`) and dashboard (`5173`) ports, starts a local PostgreSQL 18
+Docker container on `5433`, then starts the Bun API
+and SvelteKit dashboard. Open <http://127.0.0.1:5173/> when it reports
+ready. Logs are written to `.trusten-local/`.
+
+If you already run PostgreSQL yourself with a different connection string, set
+`DATABASE_URL` first and use `./scripts/start-local.ps1 -SkipDatabase`.
 
 The server applies versioned migrations under an advisory lock during startup.
 Do not hand-edit the development schema.

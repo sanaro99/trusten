@@ -23,6 +23,9 @@ const BIASED_BADGE_PATTERNS = [
   /\b#1\s+(?:choice|pick|seller|plan)\b/i,
 ]
 
+const PLAN_CONTEXT =
+  /\/\s?(?:mo|month|yr|year)\b|\bper\s+(?:month|year)\b|\b(?:plans?|tiers?|subscriptions?|memberships?|billed)\b/i
+
 // Pricing page patterns where one option is visually inflated
 const PRICING_HIERARCHY_PATTERN =
   /<(?:div|article|section)[^>]+(?:class|id)="[^"]*(?:pricing|plan|tier|package)[^"]*"[^>]*>[\s\S]{0,2000}(?:most\s+popular|best\s+value|recommended)/gi
@@ -70,8 +73,12 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
   ): DetectedPattern[] {
     const patterns: DetectedPattern[] = []
 
-    // Biased promotional badges
-    const badgeMatches = this.findKeywordMatches(text, BIASED_BADGE_PATTERNS)
+    // A badge only steers a choice beside plans or billing; in a news sidebar
+    // or shop menu "Most popular" is just a list heading.
+    const badgeMatches = this.findKeywordMatches(
+      text,
+      BIASED_BADGE_PATTERNS,
+    ).filter((m) => PLAN_CONTEXT.test(m.context))
     for (const m of badgeMatches.slice(0, 2)) {
       patterns.push(
         this.buildPattern({

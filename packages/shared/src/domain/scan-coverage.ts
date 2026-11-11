@@ -20,6 +20,7 @@ export interface CoverageStep {
   screenshotPath?: string
   visualCheckAvailable?: boolean
   navAdvanced?: boolean
+  captureTruncated?: boolean
 }
 
 export interface ScanCoverage {
@@ -68,6 +69,7 @@ export function assessScanCoverage(
     completed < steps.length ||
     evidenced.length < completed ||
     missingVisual ||
+    steps.some((step) => step.captureTruncated) ||
     blocked
   ) {
     status = 'partial'

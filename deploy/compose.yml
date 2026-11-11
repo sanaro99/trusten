@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17.6-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: trusten
@@ -61,6 +61,8 @@ services:
     environment:
       NODE_ENV: production
       HOME: /data
+      XDG_CONFIG_HOME: /tmp/.chromium
+      XDG_CACHE_HOME: /tmp/.chromium
       TRUSTEN_PORT: 9200
       DATABASE_URL: postgresql://trusten:REPLACE_POSTGRES_PASSWORD@postgres:5432/trusten
     volumes:

@@ -24,6 +24,7 @@
 
 # Logs
 **/*.log
+.trusten-local/
 
 .env
 **/.env.*

@@ -46,11 +46,16 @@ proxy. No authentication or bot-verification requirement is bypassed.
 
 ## What it does
 
-- A check captures the current page URL, title, up to 500,000 characters of HTML, and up to
-  50,000 characters of visible text using `chrome.scripting`. The content is sent to your
+- A check captures the current page URL, title, up to 500,000 characters of HTML, up to
+  50,000 characters of visible text, and a JPEG of the visible tab. Scripts, styles, and SVG
+  markup are removed from the HTML copy before applying its limit, and current checkbox,
+  radio, and select choices are preserved. The content is sent to your
   chosen service's `POST /trusten/api/analyze-page` endpoint.
 - Results show the **A–F grade**, concerns in plain language, and severity. **See evidence**
   opens the saved scan in the current dashboard.
+- If visual analysis or screenshot capture fails, or the capture is truncated, the popup
+  clearly labels the limited check and withholds the overall grade. The screenshot is saved
+  with the report when available. The popup shows the three most important concerns first.
 - **Highlight these choices** outlines matching elements and opens an evidence panel on the
   page. The close button, Escape key, and popup toggle remove the highlights and restore
   the page's original styles. Trusten's own panel is removed before another capture.
@@ -68,7 +73,7 @@ Trusten service; optional HTTP(S) access is requested only when you save another
 Chrome-compatible PNG icons are rendered from the existing SVG artwork.
 
 Checks are manual. The extension does not read browsing history or intercept cookies and
-network traffic. Captured HTML and text may include signed-in or personal page content;
+network traffic. Captured HTML, text, and screenshots may include signed-in or personal page content;
 choose a Trusten service you trust and check pages you are comfortable sharing.
 
 ## Verification
@@ -81,3 +86,5 @@ node --test apps/trusten-ext/browser.test.mjs
 The browser checks use the server workspace's Puppeteer and its installed Chrome to load an
 actual unpacked extension, capture a live fixture, render the API response, follow current
 report links, decode icons, and close highlights on a page with a restrictive script policy.
+
+Capture preserves site-default checkbox states separately from current user selections. A current opt-in alone is not evidence that the website selected it by default.
