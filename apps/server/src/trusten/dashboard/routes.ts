@@ -42,6 +42,7 @@ import {
 import type { ScanResult, ScanWorkflow, WorkflowStep } from '../types'
 import { isAllowedByRobots, reserveRateLimit } from '../utils/guardrails'
 import { WORKFLOW_REGISTRY } from '../workflows/definitions'
+import { publicErrorMessage, publicHistoryRow, publicScan } from './public-scan'
 import { parseBody } from './validate'
 
 interface Config {
@@ -326,7 +327,7 @@ export function createTrustenDashboardRoutes(config: Config) {
       logger.error('Trusten analyze-page failed', { url, error: msg })
       if (err instanceof ScanIncompleteError)
         return c.json({ code: err.code, error: msg }, 422)
-      return c.json({ error: msg }, 500)
+      return c.json({ error: publicErrorMessage(err) }, 500)
     }
   })
 
@@ -414,7 +415,7 @@ export function createTrustenDashboardRoutes(config: Config) {
       if (err instanceof ScanIncompleteError) {
         return c.json({ code: err.code, error: msg }, 422)
       }
-      return c.json({ error: msg }, 500)
+      return c.json({ error: publicErrorMessage(err) }, 500)
     } finally {
       if (completed) await config.admission.release(admitted.id)
       else {
@@ -614,7 +615,7 @@ export function createTrustenDashboardRoutes(config: Config) {
     const domain = c.req.param('domain')
     const summary = await getDomainSummary(domain)
     const scans = await getTrustenScansByDomain(domain, 20)
-    return c.json({ domain, summary, scans })
+    return c.json({ domain, summary, scans: scans.map(publicHistoryRow) })
   })
 
   // JSON scan detail
@@ -622,14 +623,14 @@ export function createTrustenDashboardRoutes(config: Config) {
     const id = c.req.param('id')
     const scan = await getTrustenScanById(id)
     if (!scan) return c.json({ error: 'Not found' }, 404)
-    return c.json(scan)
+    return c.json(publicScan(scan))
   })
 
   // JSON scan history
   app.get('/api/history', async (c) => {
     const limit = Number(c.req.query('limit') ?? '50')
     const scans = await getTrustenScanHistory(Math.min(limit, 200))
-    return c.json({ scans, total: scans.length })
+    return c.json({ scans: scans.map(publicHistoryRow), total: scans.length })
   })
 
   return app
@@ -793,10 +794,10 @@ async function runAuditJob(
     await opts.onFailure()
     await updateAuditJob(jobId, {
       status: 'failed',
-      error: msg,
+      error: publicErrorMessage(err),
       completedAt: new Date().toISOString(),
     })
-    publish(jobId, { type: 'error', message: msg })
+    publish(jobId, { type: 'error', message: publicErrorMessage(err) })
     closeChannel(jobId)
     logger.error('Trusten audit job failed', { jobId, error: msg })
     return false
