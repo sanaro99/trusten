@@ -65,8 +65,8 @@ discovery: `TRUSTEN_LLM_PROVIDER` + `NVIDIA_NIM_API_KEY`, or `TRUSTEN_GEMINI_API
 `GEMINI_API_KEY`, or run Ollama locally. Without a key, deterministic detection and the
 fixed-workflow fallback still run. See [docs/development.md](docs/development.md).
 
-Screenshot-based visual analysis needs a reachable vision-capable model. The DeepSeek default
-is `deepseek-flash`; its API key must have available balance. If a vision request fails, the
+Screenshot-based visual analysis needs a reachable vision-capable model, such as the Nvidia NIM
+default `nvidia/nemotron-3.5-super-vl-120b-a12b` or Gemini. If a vision request fails, the
 saved screenshot and text/layout findings remain available, and the result says visual coverage
 was incomplete. See [visual analysis setup](docs/visual-analysis.md).
 

@@ -32,10 +32,10 @@ test('visual coverage means the screenshot reached a vision-capable model', asyn
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'fixture-key',
       baseUrl: `http://127.0.0.1:${server.port}/v1`,
-      model: 'deepseek-flash',
+      model: 'google/gemini-2.5-flash',
     })
     const result = await new VisualAnalyzer(client).analyze(context)
     expect(result.metadata?.visualCheckAvailable).toBe(true)
@@ -64,10 +64,10 @@ test('a malformed vision response does not count as visual coverage', async () =
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'fixture-key',
       baseUrl: `http://127.0.0.1:${server.port}/v1`,
-      model: 'deepseek-flash',
+      model: 'google/gemini-2.5-flash',
     })
     const result = await new VisualAnalyzer(client).analyze(context)
     expect(result.metadata?.visualCheckAvailable).toBe(false)
@@ -117,10 +117,10 @@ test('a model cannot turn a per-customer quantity limit into low stock or invent
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'fixture-key',
       baseUrl: `http://127.0.0.1:${server.port}/v1`,
-      model: 'deepseek-flash',
+      model: 'google/gemini-2.5-flash',
     })
     const result = await new VisualAnalyzer(client).analyze({
       ...context,

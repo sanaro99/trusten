@@ -5,7 +5,6 @@ export type TrustenLLMProvider =
   | 'gemini'
   | 'cloudflare'
   | 'groq'
-  | 'deepseek'
   | 'openrouter'
   | 'ollama'
 

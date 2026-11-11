@@ -30,7 +30,7 @@ See the providers' current API documentation:
 [Gemini compatibility](https://ai.google.dev/gemini-api/docs/openai).
 
 Without an explicit provider, auto-detection prefers Cloudflare, Groq, Gemini, Nvidia NIM,
-DeepSeek, OpenRouter, then local Ollama. A pinned provider is tried first; failures may use
+OpenRouter, then local Ollama. A pinned provider is tried first; failures may use
 other configured providers, including providers earlier in that order. Fallback requests
 honor each provider's credentials, model, and endpoint overrides.
 
@@ -40,6 +40,7 @@ retry cannot count as completed visual coverage. If using a custom vision model 
 is not recognized, `TRUSTEN_LLM_VISION=1` explicitly enables image requests. Model rejection
 still prevents it from reporting successful coverage.
 
-Provider errors appear in server logs. For example, DeepSeek's `402 Insufficient Balance`
-requires account balance or another configured provider. Captured evidence and timestamps
+Provider errors appear in server logs. For example, a `402` or `429` means the account is out
+of balance or quota; add balance or configure another provider. A `410` means the provider
+retired the model; set a current one with that provider's `_MODEL` setting. Captured evidence and timestamps
 remain available when vision fails, and the report is marked partial.

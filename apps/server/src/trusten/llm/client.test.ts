@@ -7,12 +7,14 @@ const environmentNames = [
   'TRUSTEN_LLM_PROVIDER',
   'TRUSTEN_LLM_VISION',
   'NVIDIA_NIM_API_KEY',
+  'NVIDIA_NIM_MODEL',
   'TRUSTEN_GEMINI_API_KEY',
   'GEMINI_API_KEY',
   'GOOGLE_API_KEY',
   'GEMINI_MODEL',
   'GEMINI_BASE_URL',
   'DEEPSEEK_API_KEY',
+  'OLLAMA_MODEL',
   'OPENROUTER_API_KEY',
   'GROQ_API_KEY',
   'GROQ_MODEL',
@@ -200,7 +202,7 @@ test('a payment failure and image rejection fall back with the original screensh
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'primary-key',
       baseUrl: 'https://fixture.test/primary',
     })
@@ -232,6 +234,7 @@ test('a text-only primary can use a configured vision fallback for pattern analy
     const client = new TrustenLLMClient({
       provider: 'nvidia-nim',
       apiKey: 'nim-fixture-key',
+      model: 'meta/llama-3.3-70b-instruct',
     })
     expect(client.supportsImages()).toBe(true)
     await client.analyzeForPatterns({
@@ -257,7 +260,7 @@ test('a per-call provider override uses that provider credentials and endpoint',
   const wire = captureRequests()
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'primary-key',
       baseUrl: 'https://fixture.test/primary',
     })
@@ -290,7 +293,7 @@ test('exhausted vision providers cannot succeed by retrying without the image', 
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'fixture-key',
       model: 'vision-primary-rejected',
     })
@@ -324,7 +327,8 @@ test('a required screenshot cannot be omitted by the caller', async () => {
   }
 })
 
-test('auto-detection prefers configured alternatives over DeepSeek', () => {
+test('leftover DeepSeek settings are ignored', () => {
+  process.env.TRUSTEN_LLM_PROVIDER = 'deepseek'
   process.env.DEEPSEEK_API_KEY = 'deepseek-fixture-key'
   process.env.GROQ_API_KEY = 'groq-fixture-key'
   expect(new TrustenLLMClient().provider).toBe('groq')
@@ -382,7 +386,7 @@ test('partial client configuration inherits provider credentials and endpoint fr
   }
 })
 
-test('the default DeepSeek request sends an image to the current vision model', async () => {
+test('the default OpenRouter request sends an image to a vision model', async () => {
   const requests: Array<Record<string, unknown>> = []
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -396,7 +400,7 @@ test('the default DeepSeek request sends an image to the current vision model', 
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'fixture-key',
       baseUrl: `http://127.0.0.1:${server.port}/v1`,
     })
@@ -406,7 +410,7 @@ test('the default DeepSeek request sends an image to the current vision model', 
       screenshotBase64: screenshot,
       requireImage: true,
     })
-    expect(requests[0]?.model).toBe('deepseek-flash')
+    expect(requests[0]?.model).toBe('google/gemini-2.5-flash')
     const messages = requests[0]?.messages as Array<{ content: unknown }>
     expect(JSON.stringify(messages[1]?.content)).toContain('image_url')
   } finally {
@@ -436,10 +440,10 @@ test('a rejected image cannot turn a text-only retry into visual coverage', asyn
   })
   try {
     const client = new TrustenLLMClient({
-      provider: 'deepseek',
+      provider: 'openrouter',
       apiKey: 'fixture-key',
       baseUrl: `http://127.0.0.1:${server.port}/v1`,
-      model: 'deepseek-v4-flash',
+      model: 'vision-fixture-rejected',
     })
     await expect(
       client.analyzeForPatterns({
@@ -454,3 +458,59 @@ test('a rejected image cannot turn a text-only retry into visual coverage', asyn
     server.stop(true)
   }
 })
+
+test('the default Nvidia model is a current model that reads screenshots', async () => {
+  const wire = captureRequests()
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'nvidia-nim',
+      apiKey: 'nim-fixture-key',
+    })
+    expect(client.supportsImages()).toBe(true)
+    await client.complete({ messages: imageMessages, requireImage: true })
+    expect(wire.requests[0]?.url).toBe(
+      'https://integrate.api.nvidia.com/v1/chat/completions',
+    )
+    expect(wire.requests[0]?.body.model).toBe(
+      'nvidia/nemotron-3.5-super-vl-120b-a12b',
+    )
+    // Without this the model reasons first and often returns no answer.
+    expect(wire.requests[0]?.body.chat_template_kwargs).toEqual({
+      enable_thinking: false,
+    })
+  } finally {
+    wire.restore()
+  }
+})
+
+const retiredBody = {
+  type: 'about:blank',
+  title: 'Gone',
+  status: 410,
+  detail:
+    "The model 'meta/llama-3.2-11b-vision-instruct' has reached its end of life on 2026-11-05T09:00:00Z and is no longer available.",
+}
+
+for (const requireImage of [true, false])
+  test(`a retired model is skipped at once (screenshot ${requireImage ? 'required' : 'optional'})`, async () => {
+    process.env.GEMINI_API_KEY = 'gemini-fixture-key'
+    const wire = captureRequests((url) =>
+      url.includes('nvidia')
+        ? Response.json(retiredBody, { status: 410 })
+        : Response.json({ choices: [{ message: { content: 'fallback' } }] }),
+    )
+    try {
+      const client = new TrustenLLMClient({
+        provider: 'nvidia-nim',
+        apiKey: 'nim-fixture-key',
+      })
+      for (let i = 0; i < 2; i++)
+        expect(
+          await client.complete({ messages: imageMessages, requireImage }),
+        ).toBe('fallback')
+      const nvidiaCalls = wire.requests.filter((r) => r.url.includes('nvidia'))
+      expect(nvidiaCalls).toHaveLength(1)
+    } finally {
+      wire.restore()
+    }
+  })

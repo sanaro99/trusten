@@ -2,8 +2,8 @@
  * Trusten LLM Client
  *
  * Lightweight LLM utility for semantic analysis in Trusten analyzers.
- * Supports: Cloudflare Workers AI, Groq, Gemini, Nvidia NIM, DeepSeek,
- * OpenRouter, and Ollama (local).
+ * Supports: Cloudflare Workers AI, Groq, Gemini, Nvidia NIM, OpenRouter,
+ * and Ollama (local).
  *
  * All providers expose an OpenAI-compatible chat completions API,
  * so we use a single fetch-based implementation with provider-specific
@@ -35,7 +35,7 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
   },
   'nvidia-nim': {
     baseUrl: 'https://integrate.api.nvidia.com/v1',
-    defaultModel: 'meta/llama-3.1-70b-instruct',
+    defaultModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
   },
   gemini: {
@@ -43,14 +43,9 @@ const PROVIDER_DEFAULTS: Record<TrustenLLMProvider, ProviderDefaults> = {
     defaultModel: 'gemini-2.5-flash',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
   },
-  deepseek: {
-    baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-flash',
-    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
-  },
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'deepseek/deepseek-chat',
+    defaultModel: 'google/gemini-2.5-flash',
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
     extraHeaders: {
       'HTTP-Referer': 'https://trusten.app',
@@ -70,7 +65,6 @@ const FALLBACK_CHAIN: TrustenLLMProvider[] = [
   'groq',
   'gemini',
   'nvidia-nim',
-  'deepseek',
   'openrouter',
   'ollama',
 ]
@@ -106,6 +100,11 @@ function stripImages(messages: LLMMessage[]): LLMMessage[] {
   )
 }
 
+/** The provider no longer serves the requested model (retired or renamed). */
+function isModelGone(errorText: string): boolean {
+  return /LLM request failed \(410\)/.test(errorText)
+}
+
 /** Heuristic for "the model can't take images" given the provider's error text. */
 function isImageRejection(errorText: string): boolean {
   return /multimodal|image input|image_url|vision|does not support image|not a multimodal/i.test(
@@ -130,8 +129,6 @@ function getApiKey(provider: TrustenLLMProvider): string {
         process.env.GOOGLE_API_KEY ||
         ''
       )
-    case 'deepseek':
-      return process.env.DEEPSEEK_API_KEY ?? ''
     case 'openrouter':
       return process.env.OPENROUTER_API_KEY ?? ''
     case 'ollama':
@@ -163,7 +160,7 @@ function modelSupportsImages(
   const env = process.env.TRUSTEN_LLM_VISION?.toLowerCase()
   if (env === '1' || env === 'true') return true
   if (env === '0' || env === 'false') return false
-  return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|llama-4-(scout|maverick)|qwen.*(vl|3\.8)|multimodal|deepseek-v4|deepseek-flash/.test(
+  return /vision|gemini|gpt-4o|\b4o\b|claude|llava|pixtral|llama-3\.2|llama-4-(scout|maverick)|qwen.*(vl|3\.8)|[-_]vl\b|multimodal/.test(
     model,
   )
 }
@@ -200,13 +197,6 @@ function resolveExplicitConfig(provider: TrustenLLMProvider): TrustenLLMConfig {
         apiKey: getApiKey(provider),
         baseUrl: process.env.GEMINI_BASE_URL,
         model: process.env.GEMINI_MODEL,
-      }
-    case 'deepseek':
-      return {
-        provider,
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseUrl: process.env.DEEPSEEK_BASE_URL,
-        model: process.env.DEEPSEEK_MODEL,
       }
     case 'openrouter':
       return {
@@ -400,6 +390,10 @@ export class TrustenLLMClient {
         body.reasoning_effort = 'none'
       }
     }
+    // Nemotron reasons by default and can spend the whole budget before answering.
+    if (provider === 'nvidia-nim' && /nemotron/i.test(model)) {
+      body.chat_template_kwargs = { enable_thinking: false }
+    }
     return {
       url: `${baseUrl.replace(/\/$/, '')}/chat/completions`,
       headers: {
@@ -453,7 +447,11 @@ export class TrustenLLMClient {
       )
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
-      if (messagesHaveImage(options.messages) && isImageRejection(msg)) {
+      if (
+        messagesHaveImage(options.messages) &&
+        !isModelGone(msg) &&
+        isImageRejection(msg)
+      ) {
         this.textOnlyModels.add(request.model.toLowerCase())
         logger.warn('Trusten LLM model rejected image input', {
           provider: config.provider,
@@ -500,7 +498,14 @@ export class TrustenLLMClient {
       } catch (error) {
         lastError = error
         const msg = error instanceof Error ? error.message : String(error)
-        if (!isImageRejection(msg)) this.markUnreachable(provider)
+        if (isModelGone(msg)) {
+          this.unreachableUntil.set(provider, Date.now() + UNREACHABLE_TTL_MS)
+          logger.error('Trusten LLM model is no longer available', {
+            provider,
+            model: config.model ?? PROVIDER_DEFAULTS[provider].defaultModel,
+            hint: 'Set a current model with the provider _MODEL setting',
+          })
+        } else if (!isImageRejection(msg)) this.markUnreachable(provider)
         logger.warn('Trusten LLM provider request failed', {
           provider,
           model: config.model ?? PROVIDER_DEFAULTS[provider].defaultModel,
