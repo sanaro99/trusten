@@ -111,7 +111,7 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
           url: context.url,
           pageTitle: context.pageTitle,
           element: {
-            text: el.text.slice(0, 200),
+            text: this.clip(el.text, 200),
             html: el.html.slice(0, 300),
             selector: '[class*=pricing],[class*=plan]',
           },
@@ -146,7 +146,7 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: el.text.slice(0, 150),
+              text: this.clip(el.text, 150),
               html: el.html.slice(0, 300),
               selector: 'button.primary,[class*=cta]',
             },
@@ -189,7 +189,7 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
         hasBadge,
         maxPrice,
         html: m[0].slice(0, 300),
-        text: content.slice(0, 200),
+        text: this.clip(content, 200),
       }
     })
 
@@ -213,7 +213,7 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
         url: context.url,
         pageTitle: context.pageTitle,
         element: {
-          text: badgedCard.text.slice(0, 150),
+          text: this.clip(badgedCard.text, 150),
           html: badgedCard.html,
           selector:
             '[class*=plan][class*=popular],[class*=plan][class*=recommend],[class*=recommended],[class*=highlighted]',
@@ -268,7 +268,7 @@ export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: content.slice(0, 150),
+              text: this.clip(content, 150),
               html: banner[0].slice(0, 300),
               selector:
                 '[class*=cookie],[class*=consent],[class*=gdpr],[class*=notice]',

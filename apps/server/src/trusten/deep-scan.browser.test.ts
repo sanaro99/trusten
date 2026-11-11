@@ -94,6 +94,10 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
           html = page(
             '<main><h1>Checkout</h1><p>Service fee $9 is added at checkout.</p><label><input type="checkbox" checked>Receive marketing offers</label><input name="card" aria-label="Card number"><button>Place order</button></main>',
           )
+        } else if (url.pathname === '/long-page') {
+          html = page(
+            '<main><h1>Checkout</h1><label><input type="checkbox" checked>Receive marketing offers</label><div style="height:3000px"></div></main><footer><p>Service fee $9 is added at checkout.</p></footer>',
+          )
         } else if (url.pathname === '/timer') {
           html = page(
             '<main><h1>Welcome</h1><p id="timer">59 seconds left</p></main><script>let seconds=59; setInterval(()=>document.querySelector("#timer").textContent=seconds-- + " seconds left",100)</script>',
@@ -202,6 +206,18 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
     ).toBe(true)
     expect(result.videoPath && existsSync(result.videoPath)).toBe(true)
     expect(await browser.listPages()).toHaveLength(0)
+    // Every finding, in the result and on its step, points at a saved screenshot.
+    const stepFindings =
+      result.workflowSteps?.flatMap((s) => s.patternsFound) ?? []
+    for (const p of [...result.patterns, ...stepFindings]) {
+      const capture = p.evidence.capture
+      expect(capture?.scanId).toBe(result.id)
+      expect(
+        existsSync(
+          path.join(reportsDir, 'screenshots', result.id, capture!.file),
+        ),
+      ).toBe(true)
+    }
   }, 90_000)
 
   test('searches a store whose visible search box is a textarea', async () => {
@@ -320,6 +336,51 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
     const html = readFileSync(summary.htmlPath!, 'utf8')
     expect(html.match(/src="data:image\/jpeg;base64,/g)).toHaveLength(2)
   }, 30_000)
+
+  test('gives a finding further down the page its own screenshot and box', async () => {
+    const result = await engine.quickScan(`${baseUrl}/long-page`)
+    const fee = result.patterns.find((p) => p.category === 'drip_pricing')
+    const offers = result.patterns.find(
+      (p) => p.category === 'preselected_options',
+    )
+    expect(fee?.evidence.capture?.file).toBe('step-1-view-1.jpg')
+    expect(offers?.evidence.capture?.file).toBe('step-1.jpg')
+    for (const capture of [fee?.evidence.capture, offers?.evidence.capture]) {
+      expect(capture?.scanId).toBe(result.id)
+      const box = capture?.box
+      expect(box).toBeDefined()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(1)
+      expect(
+        existsSync(
+          path.join(reportsDir, 'screenshots', result.id, capture!.file),
+        ),
+      ).toBe(true)
+    }
+    // The saved report outlines the finding shown on the page screenshot.
+    expect(readFileSync(result.htmlPath!, 'utf8')).toContain('class="step-box"')
+  }, 30_000)
+
+  test('does not repeat the homepage when a journey starts on it', async () => {
+    const quick = await engine.quickScan(`${baseUrl}/consent`)
+    const journey = await engine.deepScan(
+      `${baseUrl}/consent`,
+      COOKIE_CONSENT_WORKFLOW,
+    )
+    const summary = await engine.summarizeAudit(`${baseUrl}/`, [quick, journey])
+    expect(summary.workflowSteps).toHaveLength(
+      journey.workflowSteps?.length ?? 0,
+    )
+    expect(
+      summary.workflowSteps?.some(
+        (s) => s.action === 'Inspect the initial page',
+      ),
+    ).toBe(false)
+    // The opening check's findings remain part of the result.
+    expect(summary.patterns.some((p) => p.category === 'dark_consent')).toBe(
+      true,
+    )
+  }, 60_000)
 
   test('provides the PDF download offered by the quick-check result page', async () => {
     const result = await engine.quickScan(`${baseUrl}/checkout`)

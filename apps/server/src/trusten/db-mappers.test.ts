@@ -2,6 +2,19 @@ import { describe, expect, test } from 'bun:test'
 import { mapAuditJobRow, mapScanHistoryRow, mapScanRow } from './db-mappers'
 
 describe('PostgreSQL row mapping', () => {
+  test('treats saved extension checks without a screenshot as limited, not unavailable', () => {
+    const row = mapScanHistoryRow({
+      scan_type: 'quick',
+      workflow_steps: [
+        {
+          url: 'https://example.com/',
+          action: 'Inspect the page captured by the browser extension',
+          status: 'observed',
+        },
+      ],
+    })
+    expect(row.coverage).toBe('partial')
+  })
   test('marks deep scans with unavailable vision as partial history coverage', () => {
     const row = mapScanHistoryRow({
       scan_type: 'deep',

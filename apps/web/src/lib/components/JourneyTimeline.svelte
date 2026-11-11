@@ -29,6 +29,13 @@ function openStep(step: WorkflowStep) {
 function closeStep() {
   dialog?.close()
 }
+
+function openFinding(id: string) {
+  closeStep()
+  // Following a link to the hash already shown fires no hashchange.
+  if (location.hash === `#finding-${id}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
 </script>
 
 <section class="mt-12" aria-labelledby="journey-heading">
@@ -102,7 +109,7 @@ function closeStep() {
             <h4 class="mt-6 mb-2 text-lg font-bold">Concerns found here</h4>
             <ul class="menu rounded-box bg-base-200 p-2">
               {#each selected.patternsFound as pattern (pattern.id)}
-                <li><a href="#finding-{pattern.id}" onclick={closeStep}>{getPatternContent(pattern.category).name}</a></li>
+                <li><a href="#finding-{pattern.id}" onclick={() => openFinding(pattern.id)}>{getPatternContent(pattern.category).name}</a></li>
               {/each}
             </ul>
           {:else if content.status === 'complete'}

@@ -136,7 +136,7 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
           url: context.url,
           pageTitle: context.pageTitle,
           element: {
-            text: section.text.slice(0, 500),
+            text: this.clip(section.text, 500),
             html: section.html.slice(0, 700),
             selector: 'details:not([open])',
           },
@@ -159,7 +159,7 @@ export class ComparisonPreventionAnalyzer extends BaseAnalyzer {
               url: context.url,
               pageTitle: context.pageTitle,
               element: {
-                text: fp.text.slice(0, 200),
+                text: this.clip(fp.text, 200),
                 html: fp.html.slice(0, 300),
                 selector: 'small,[class*=fine-print],[class*=disclaimer]',
               },

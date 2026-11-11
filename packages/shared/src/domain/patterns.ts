@@ -103,7 +103,20 @@ export const ElementEvidenceSchema = z.object({
 })
 export type ElementEvidence = z.infer<typeof ElementEvidenceSchema>
 
+/**
+ * A screenshot taken for this finding. `file` lives in the screenshot folder of
+ * scan `scanId`; `box` marks the element as fractions (0–1) of the image, so
+ * the box and its image always travel together when findings merge.
+ */
+export const EvidenceCaptureSchema = z.object({
+  scanId: z.string(),
+  file: z.string(),
+  box: BoundingBoxSchema.optional(),
+})
+export type EvidenceCapture = z.infer<typeof EvidenceCaptureSchema>
+
 export const PatternEvidenceSchema = z.object({
+  capture: EvidenceCaptureSchema.optional(),
   screenshot: z.string().optional(),
   screenshotUrl: z.string().optional(),
   domSnapshot: z.string().optional(),

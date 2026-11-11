@@ -88,3 +88,25 @@ test('retail fine print is not a low stock claim', () => {
     hasCategoryEvidence('fake_scarcity', 'While supplies last — only 2 left!'),
   ).toBe(true)
 })
+
+test('keeps each finding screenshot paired with its own box when findings merge', () => {
+  const first = finding('step-1', 'TODAY ONLY')
+  first.evidence = {
+    capture: {
+      scanId: 'scan-1',
+      file: 'step-1.jpg',
+      box: { x: 0.1, y: 0.1, width: 0.2, height: 0.05 },
+    },
+  }
+  const second = finding('step-3', 'TODAY ONLY! Ends at midnight')
+  second.evidence = {
+    capture: {
+      scanId: 'scan-1',
+      file: 'step-3-view-1.jpg',
+      box: { x: 0.5, y: 0.8, width: 0.3, height: 0.1 },
+    },
+  }
+  const [merged] = consolidateFindings([first, second])
+  expect(merged.element?.text).toContain('Ends at midnight')
+  expect(merged.evidence.capture).toEqual(first.evidence.capture)
+})

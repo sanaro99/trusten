@@ -10,6 +10,7 @@ export {
   DarkPatternCategory,
   type DetectedPattern,
   type ElementEvidence,
+  type EvidenceCapture,
   type PatternEvidence,
   Regulation,
   type RegulatoryViolation,

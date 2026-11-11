@@ -40,3 +40,18 @@ test('keeps separately identified checked add-ons on short pages', async () => {
   })
   expect(result.patterns).toHaveLength(2)
 })
+
+test('quotes only the checkbox label, before or after the box', async () => {
+  const after = await new PreselectionAnalyzer().analyze({
+    ...context,
+    domSnapshot:
+      '<main><label><input type="checkbox" checked>Receive marketing emails</label><div style="height:3000px"></div><footer><p>Service fee $9 is added at checkout.</p></footer></main>',
+  })
+  expect(after.patterns[0]?.element?.text).toBe('Receive marketing emails')
+  const before = await new PreselectionAnalyzer().analyze({
+    ...context,
+    domSnapshot:
+      '<p>Your details</p><label>Receive marketing emails <input type="checkbox" checked></label><p>Continue to payment</p>',
+  })
+  expect(before.patterns[0]?.element?.text).toBe('Receive marketing emails')
+})

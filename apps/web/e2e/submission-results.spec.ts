@@ -151,17 +151,15 @@ test('completed full reports preserve uncertain findings, evidence counts, recor
   await expect(
     page.getByText('1 journey step checked.', { exact: true }),
   ).toBeVisible()
-  const otherFindings = page.getByText('A few other things worth a look (1)', {
-    exact: true,
-  })
-  await expect(otherFindings).toBeVisible()
-  await otherFindings.click()
   await expect(
-    page.getByRole('heading', {
-      name: '1. Pressure to decide quickly',
-      exact: true,
-    }),
+    page.getByText('We are less sure about these, so they are kept separate.'),
   ).toBeVisible()
+  const concern = page
+    .locator('button[aria-controls^="concern-"]')
+    .filter({ hasText: 'Pressure to decide quickly' })
+  await expect(concern).toHaveAttribute('aria-expanded', 'false')
+  await concern.click()
+  await expect(concern).toHaveAttribute('aria-expanded', 'true')
   await page.getByText('How we worked this out', { exact: true }).click()
   await expect(
     page.getByText('The timer may restart.', { exact: false }),
@@ -182,7 +180,9 @@ test('completed full reports preserve uncertain findings, evidence counts, recor
   await page.reload()
   await expect(page).toHaveURL(/\/scan\/reviewable-result\?cached=1$/)
   await expect(
-    page.getByText('A few other things worth a look (1)', { exact: true }),
+    page
+      .locator('button[aria-controls^="concern-"]')
+      .filter({ hasText: 'Pressure to decide quickly' }),
   ).toBeVisible()
 })
 

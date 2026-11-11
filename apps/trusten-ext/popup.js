@@ -140,9 +140,11 @@ function renderResults(data) {
     : 'Limited check'
   document.getElementById('coverageNote').textContent = complete
     ? 'This page only. Checkout and other journeys were not checked.'
-    : data.coverage?.missingVisual
-      ? 'Visual analysis is unavailable. These findings are useful, but this check is incomplete.'
-      : 'Page evidence or complete coverage is unavailable. Review these findings without relying on an overall grade.'
+    : data.coverage?.textOnly
+      ? 'We checked the words on this page, but no screenshot was captured, so visual tricks were not reviewed.'
+      : data.coverage?.missingVisual
+        ? 'Visual analysis is unavailable. These findings are useful, but this check is incomplete.'
+        : 'Page evidence or complete coverage is unavailable. Review these findings without relying on an overall grade.'
   document.getElementById('resultDomain').textContent = domain
   document.getElementById('resultSummary').textContent = verdictText(
     grade,

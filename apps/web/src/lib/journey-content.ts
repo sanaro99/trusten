@@ -107,13 +107,31 @@ const ACTIONS: Array<[RegExp, string, string]> = [
   ],
 ]
 
+/** A short name for the page itself, such as "Homepage" or "Checkout page". */
+export function pageName(rawUrl: string): string {
+  try {
+    const part = new URL(rawUrl).pathname.split('/').filter(Boolean).at(-1)
+    if (!part) return 'Homepage'
+    const words = decodeURIComponent(part)
+      .replace(/\.[a-z]{2,5}$/i, '')
+      .replace(/[-_+]+/g, ' ')
+      .trim()
+    if (!words || /^\d+$/.test(words)) return 'Website page'
+    const name = words.charAt(0).toUpperCase() + words.slice(1)
+    return /\bpage$/i.test(name) ? name : `${name} page`
+  } catch {
+    return 'Website page'
+  }
+}
+
 function friendlyAction(
   action: string,
+  url: string,
 ): Pick<JourneyStepContent, 'title' | 'description'> {
   const match = ACTIONS.find(([pattern]) => pattern.test(action))
   if (match) return { title: match[1], description: match[2] }
   return {
-    title: 'Review this part of the website',
+    title: pageName(url),
     description:
       'Checked this page for choices that could be unfair or confusing.',
   }
@@ -132,7 +150,7 @@ function pageLabel(rawUrl: string): string {
 }
 
 export function getJourneyStepContent(step: WorkflowStep): JourneyStepContent {
-  const action = friendlyAction(step.action)
+  const action = friendlyAction(step.action, step.url)
   const successful =
     step.status === 'reached' ||
     step.status === 'observed' ||

@@ -19,6 +19,7 @@ import type { BaseAnalyzer } from './analyzers/base-analyzer'
 import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
 import { capturePageState } from './browser/page-state'
+import { captureStepEvidence } from './finding-capture'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
 import { ScanIncompleteError } from './scan-incomplete-error'
@@ -147,6 +148,22 @@ export class TrustenEngine {
           }
         },
       )
+      // Measure and screenshot together, after the analyzers, so each box
+      // matches the picture it is drawn on.
+      const evidence = await captureStepEvidence(this.browser, pageId, {
+        scanId,
+        dir: screenshotDir,
+        stepNumber: 1,
+        patterns: livePatterns,
+      })
+      if (!evidence.screenshotPath) {
+        for (const pattern of livePatterns) {
+          pattern.evidence = {
+            ...pattern.evidence,
+            capture: { scanId, file: 'step-1.jpg' },
+          }
+        }
+      }
       const patterns = await this.mergeCachedFindings(url, livePatterns)
       const score = calculateScore(patterns)
 
@@ -306,10 +323,9 @@ export class TrustenEngine {
           if (preflightPatterns.length > 0) {
             const evidence = await this.captureStepScreenshot(
               pid,
+              scanId,
               screenshotDir,
               0,
-              workflow.steps.length,
-              'Inspect the initial page before clearing overlays',
               preflightPatterns,
             )
             workflowSteps.push({
@@ -500,21 +516,6 @@ export class TrustenEngine {
           allPatterns.push(...stepPatterns)
         }
 
-        // Cache this page's findings so a later Quick Scan of the same page can
-        // surface them instantly.
-        if (stepPatterns.length > 0) {
-          try {
-            await this.store.cachePageFindings(
-              normalizeUrlKey(currentUrl),
-              currentUrl,
-              stepPatterns,
-              scanId,
-            )
-          } catch {
-            /* non-fatal */
-          }
-        }
-
         if (opts.jobKey) {
           publish(opts.jobKey, {
             type: 'progress',
@@ -533,12 +534,26 @@ export class TrustenEngine {
             ? { screenshotB64: '', screenshotPath: '' }
             : await this.captureStepScreenshot(
                 pid,
+                scanId,
                 screenshotDir,
                 stepNumber,
-                workflow.steps.length,
-                stepDef.instruction,
                 stepPatterns,
               )
+
+        // Cache this page's findings, with their screenshots, so a later Quick
+        // Scan of the same page can surface them instantly.
+        if (stepPatterns.length > 0) {
+          try {
+            await this.store.cachePageFindings(
+              normalizeUrlKey(currentUrl),
+              currentUrl,
+              stepPatterns,
+              scanId,
+            )
+          } catch {
+            /* non-fatal */
+          }
+        }
 
         workflowSteps.push({
           stepNumber,
@@ -633,8 +648,23 @@ export class TrustenEngine {
     if (scans.length === 0)
       throw new ScanIncompleteError('No pages could be checked.')
     const patterns = dedupePatterns(scans.flatMap((scan) => scan.patterns))
+    // The opening quick check repeats the homepage that every journey starts
+    // on. Its findings stay in the result; only the repeated page is dropped.
+    const journeyPages = new Set(
+      scans
+        .filter((scan) => scan.scanType !== 'quick')
+        .flatMap((scan) => scan.workflowSteps ?? [])
+        .filter((step) => step.screenshotPath)
+        .map((step) => normalizeUrlKey(step.url)),
+    )
     const workflowSteps = [
-      ...scans.flatMap((scan) => scan.workflowSteps ?? []),
+      ...scans.flatMap((scan) =>
+        (scan.workflowSteps ?? []).filter(
+          (step) =>
+            scan.scanType !== 'quick' ||
+            !journeyPages.has(normalizeUrlKey(step.url)),
+        ),
+      ),
       ...failedSteps,
     ].map((step, index) => ({
       ...step,
@@ -744,6 +774,7 @@ export class TrustenEngine {
           navAdvanced: false,
           visualCheckAvailable,
           captureTruncated: capture.captureTruncated,
+          pageTextCaptured: Boolean(html.trim() || text.trim()),
         },
       ],
     }
@@ -1223,53 +1254,22 @@ export class TrustenEngine {
   }
 
   /**
-   * Annotate the page with bounding boxes, screenshot it, and save the JPEG.
-   * Annotation and the capture itself are both best-effort: a failure yields an
-   * empty screenshot rather than aborting the scan. The overlay is always
-   * cleaned up afterwards.
+   * Screenshot the step and attach to each finding the screenshot that shows
+   * it. Best-effort: a failure yields an empty screenshot, never a failed scan.
    */
   private async captureStepScreenshot(
     pageId: number,
+    scanId: string,
     screenshotDir: string,
     stepNumber: number,
-    totalSteps: number,
-    instruction: string,
     patterns: DetectedPattern[],
   ): Promise<{ screenshotB64: string; screenshotPath: string }> {
-    const { buildAnnotationScript, buildCleanupScript } = await import(
-      './report'
-    )
-    const [fs, path] = await Promise.all([
-      import('node:fs'),
-      import('node:path'),
-    ])
-
-    try {
-      await this.browser.evaluate(
-        pageId,
-        buildAnnotationScript(stepNumber, totalSteps, instruction, patterns),
-      )
-      await sleep(300)
-    } catch {
-      /* annotation is best-effort — still capture the raw page */
-    }
-
-    try {
-      const { data } = await this.browser.screenshot(pageId, {
-        format: 'jpeg',
-        quality: 82,
-        fullPage: false,
-      })
-      const screenshotFile = path.join(screenshotDir, `step-${stepNumber}.jpg`)
-      fs.writeFileSync(screenshotFile, Buffer.from(data, 'base64'))
-      return { screenshotB64: data, screenshotPath: screenshotFile }
-    } catch {
-      return { screenshotB64: '', screenshotPath: '' }
-    } finally {
-      await this.browser
-        .evaluate(pageId, buildCleanupScript())
-        .catch(() => undefined)
-    }
+    return captureStepEvidence(this.browser, pageId, {
+      scanId,
+      dir: screenshotDir,
+      stepNumber,
+      patterns,
+    })
   }
 
   /**

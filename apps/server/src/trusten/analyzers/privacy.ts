@@ -171,7 +171,7 @@ export class PrivacyAnalyzer extends BaseAnalyzer {
             url: context.url,
             pageTitle: context.pageTitle,
             element: {
-              text: bannerText.slice(0, 200),
+              text: this.clip(bannerText, 200),
               html: bannerHtml.slice(0, 400),
               selector: '[class*=cookie],[class*=consent],[class*=cmp]',
             },

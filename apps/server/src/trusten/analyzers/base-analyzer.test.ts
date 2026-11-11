@@ -48,3 +48,32 @@ test('a single-category model response cannot relabel urgency as choice hierarch
     client.analyzeForPatterns = original
   }
 })
+
+class QuoteAnalyzer extends FixtureAnalyzer {
+  quote(text: string, pattern: RegExp) {
+    return this.findKeywordMatches(text, [pattern])[0]?.context
+  }
+  shorten(text: string, max: number) {
+    return this.clip(text, max)
+  }
+}
+
+test('quotes the whole sentence around a match instead of cutting words', () => {
+  const analyzer = new QuoteAnalyzer()
+  const text =
+    'Free delivery on orders over $35. In-store pricing may vary from online prices. Only 2 left in stock!'
+  expect(analyzer.quote(text, /only \d+ left/i)).toBe('Only 2 left in stock!')
+  expect(analyzer.quote(text, /pricing may vary/i)).toBe(
+    'In-store pricing may vary from online prices.',
+  )
+})
+
+test('shortens long quotes at a word boundary', () => {
+  const analyzer = new QuoteAnalyzer()
+  const short = analyzer.shorten(
+    'Receive marketing offers from our partners every week',
+    30,
+  )
+  expect(short).toBe('Receive marketing offers from…')
+  expect(analyzer.shorten('  Two\n words ', 30)).toBe('Two words')
+})

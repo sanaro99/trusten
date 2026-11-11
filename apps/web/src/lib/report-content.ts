@@ -46,13 +46,15 @@ export function getReportSummary(
       total,
       eyebrow: 'Limited check',
       headline: 'We could only check part of this website',
-      sub: steps.some((step) => step.captureTruncated)
-        ? 'Only part of the loaded page fit in this capture. Review the findings below, but the overall grade is not conclusive.'
-        : coverage.missingVisual
-          ? `We captured the available pages, but visual analysis did not complete. The grade is not conclusive.${completed < total ? ` We completed ${completed} of ${total} journey steps.` : ''}`
-          : completed === 0
-            ? 'The website stopped us before we could complete any journey steps. The findings below are useful, but they do not describe the whole website.'
-            : `We completed ${completed} of ${total} journey steps. The findings below are useful, but the overall grade is not conclusive.`,
+      sub: coverage.textOnly
+        ? 'We checked the words on this page, but no screenshot was captured, so layout and visual tricks were not reviewed. The grade is not conclusive.'
+        : steps.some((step) => step.captureTruncated)
+          ? 'Only part of the loaded page fit in this capture. Review the findings below, but the overall grade is not conclusive.'
+          : coverage.missingVisual
+            ? `We captured the available pages, but visual analysis did not complete. The grade is not conclusive.${completed < total ? ` We completed ${completed} of ${total} journey steps.` : ''}`
+            : completed === 0
+              ? 'The website stopped us before we could complete any journey steps. The findings below are useful, but they do not describe the whole website.'
+              : `We completed ${completed} of ${total} journey steps. The findings below are useful, but the overall grade is not conclusive.`,
     }
   }
   if (coverage.scope === 'page') {

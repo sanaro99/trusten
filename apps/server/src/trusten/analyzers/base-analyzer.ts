@@ -113,6 +113,15 @@ export abstract class BaseAnalyzer {
     return text.slice(start, stop).trim()
   }
 
+  /** Shorten a quote at a word boundary, marking that it continues. */
+  protected clip(text: string, maxLength: number): string {
+    const clean = text.replace(/\s+/g, ' ').trim()
+    if (clean.length <= maxLength) return clean
+    const cut = clean.slice(0, maxLength)
+    const space = cut.lastIndexOf(' ')
+    return `${(space > maxLength / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:–-]+$/, '')}…`
+  }
+
   private findAllKeywordMatches(
     text: string,
     patterns: RegExp[],
@@ -128,9 +137,10 @@ export abstract class BaseAnalyzer {
       let match: RegExpExecArray | null
 
       while ((match = regex.exec(text)) !== null) {
-        const start = Math.max(0, match.index - 60)
-        const end = Math.min(text.length, match.index + match[0].length + 60)
-        const context = text.slice(start, end).trim()
+        const context = this.sentenceAround(text, {
+          index: match.index,
+          match: match[0],
+        })
 
         results.push({
           match: match[0],
