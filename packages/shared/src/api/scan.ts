@@ -51,6 +51,7 @@ export const WorkflowStepSchema = z.object({
   action: z.string(),
   url: z.string(),
   screenshot: z.string(),
+  /** Public URL of the step screenshot, not a server file path. */
   screenshotPath: z.string().optional(),
   patternsFound: z.array(DetectedPatternSchema),
   timestamp: z.string(),
@@ -72,9 +73,8 @@ export const ScanDetailSchema = z.object({
   patterns: z.array(DetectedPatternSchema),
   score: ScanScoreSchema,
   workflowSteps: z.array(WorkflowStepSchema).optional(),
-  // getTrustenScanById reads these straight off the SQLite row: a NULL
-  // column comes back as `null`, not `undefined`, whatever the server's own
-  // (unchecked) type cast claims.
+  // Public URLs of the saved report files (e.g. `/trusten/report/<id>/pdf`),
+  // never server file paths. A missing file comes back as `null`.
   pdfPath: z.string().nullable().optional(),
   htmlPath: z.string().nullable().optional(),
   videoPath: z.string().nullable().optional(),
