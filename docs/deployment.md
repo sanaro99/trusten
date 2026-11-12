@@ -24,6 +24,28 @@ Svelte checks, tests, and a production build. On a push to `main`, it publishes:
 - `ghcr.io/<github-owner>/trusten:latest` and `:sha-<commit>`
 - `ghcr.io/<github-owner>/trusten:proxy-latest` and `:proxy-sha-<commit>`
 
+### Versions and releases
+
+The release version lives in the root `package.json`. The same workflow runs
+release-please, which keeps a `chore(main): release X.Y.Z` pull request open.
+It works out the next version from the conventional commit messages merged
+into `main` (`fix:` raises the patch number, `feat:` the minor number, and a
+`!` the major number) and writes the changelog to `CHANGELOG.md`.
+
+Ordinary merges still deploy straight away through `latest`. Merging the
+release pull request also tags the commit `vX.Y.Z`, creates a GitHub release,
+and publishes `:vX.Y.Z` and `:proxy-vX.Y.Z` images.
+
+The running version and commit appear in the site footer and in `/health`:
+
+```json
+{"status":"ok","service":"trusten","database":"ready","version":"0.2.0","commit":"4fde293"}
+```
+
+TrueNAS keeps showing `v1.0.0` for an app installed from YAML. That number
+appears to be TrueNAS's own label for custom apps, and the app's YAML
+references `latest`, so TrueNAS does not show the release version.
+
 Merge this branch to `main` (or run the workflow manually). After its first
 successful run, open the Trusten package settings in GitHub Packages and change
 its visibility to **Public**. This is a one-time step.
@@ -152,7 +174,7 @@ Do not create routes for ports 3000 or 9200.
 ## 6. Verify the deployment
 
 1. Open `https://YOUR_TRUSTEN_HOSTNAME/health`; expect JSON with
-   `"status":"ok"`.
+   `"status":"ok"` and the `commit` you just merged.
 2. Open `https://YOUR_TRUSTEN_HOSTNAME`; expect the SvelteKit dashboard.
 3. Run a Quick Scan, then a Deep Scan with live viewing.
 4. Download a generated report and confirm it survives an app restart.
@@ -161,9 +183,9 @@ Do not create routes for ports 3000 or 9200.
 
 ## Rollback
 
-In the TrueNAS YAML, replace `latest` with `sha-<known-good-commit>` for both
-`web` and `api`, and replace `proxy-latest` with
-`proxy-sha-<known-good-commit>` for `proxy`. Save the app. Restore the moving
+In the TrueNAS YAML, replace `latest` with a known-good `vX.Y.Z` (or
+`sha-<commit>`) for both `web` and `api`, and replace `proxy-latest` with
+`proxy-vX.Y.Z` (or `proxy-sha-<commit>`) for `proxy`. Save the app. Restore the moving
 tags after the issue is resolved.
 
 An image rollback does not roll back a database schema. Deploy migrations that

@@ -18,6 +18,7 @@ import { trimTrailingSlash } from 'hono/trailing-slash'
 import { closeDb, getDb, initializeDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { PuppeteerDriver } from './browser/puppeteer-driver'
+import { readBuildInfo } from './build-info'
 import { loadTrustenConfig } from './config'
 import { createTrustenDashboardRoutes } from './dashboard/routes'
 import { ensureTrustenSchema, failIncompleteAuditJobs } from './db'
@@ -95,14 +96,27 @@ async function main(): Promise<void> {
   app.use(trimTrailingSlash())
 
   app.get('/', (c) => c.redirect('/trusten'))
-  app.get('/health/live', (c) => c.json({ status: 'ok', service: 'trusten' }))
+  const build = readBuildInfo()
+  app.get('/health/live', (c) =>
+    c.json({ status: 'ok', service: 'trusten', ...build }),
+  )
   app.get('/health', async (c) => {
     try {
       await getDb()`SELECT 1`
-      return c.json({ status: 'ok', service: 'trusten', database: 'ready' })
+      return c.json({
+        status: 'ok',
+        service: 'trusten',
+        database: 'ready',
+        ...build,
+      })
     } catch {
       return c.json(
-        { status: 'unavailable', service: 'trusten', database: 'unavailable' },
+        {
+          status: 'unavailable',
+          service: 'trusten',
+          database: 'unavailable',
+          ...build,
+        },
         503,
       )
     }
@@ -163,6 +177,7 @@ async function main(): Promise<void> {
   })
   logger.info('Trusten server listening', {
     url: `http://localhost:${server.port}/trusten`,
+    ...build,
   })
 
   // ── Graceful shutdown ──

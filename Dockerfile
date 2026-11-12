@@ -28,6 +28,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --chown=bun:bun . .
+# The commit is baked into the web build and reported by /health. The release
+# version itself comes from package.json, which release-please keeps current.
+ARG TRUSTEN_COMMIT=dev
+ENV TRUSTEN_COMMIT=$TRUSTEN_COMMIT
 USER bun
 RUN bun run build:web
 
