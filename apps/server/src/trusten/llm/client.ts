@@ -73,6 +73,13 @@ const FALLBACK_CHAIN: TrustenLLMProvider[] = [
 
 /** Per-call HTTP timeout. Short so a dead provider never stalls a scan. */
 const LLM_TIMEOUT_MS = Number(process.env.TRUSTEN_LLM_TIMEOUT_MS ?? 8000)
+/**
+ * Screenshot checks run on large vision models and routinely take longer than
+ * a text call, so they get their own, longer budget.
+ */
+const LLM_VISION_TIMEOUT_MS = Number(
+  process.env.TRUSTEN_LLM_VISION_TIMEOUT_MS ?? 45_000,
+)
 
 /**
  * Remember providers that just failed (network error / timeout) so the ~11
@@ -437,7 +444,11 @@ export class TrustenLLMClient {
     options: LLMCompletionOptions,
   ): Promise<string> {
     const request = this.buildRequest(config, options)
-    const timeout = options.timeoutMs ?? LLM_TIMEOUT_MS
+    const timeout =
+      options.timeoutMs ??
+      (messagesHaveImage(options.messages)
+        ? LLM_VISION_TIMEOUT_MS
+        : LLM_TIMEOUT_MS)
     try {
       return await this.sendRequest(
         request.url,

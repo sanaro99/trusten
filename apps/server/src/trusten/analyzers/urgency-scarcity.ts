@@ -66,6 +66,9 @@ const DATED_DEADLINE = new RegExp(
 const COUNTDOWN_WORDING =
   /\b(?:ends?\s+in|expires?\s+in|left|remaining|countdown|hurry|limited[\s-]time|(?:offer|deal|sale)\s+ends?|time\s+left)\b/i
 const CLOCK = /\b\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b/g
+// "00h:38m:41s" or "2h 05m 10s": hours, minutes and seconds spelled out are a
+// running timer, never a time of day.
+const UNIT_CLOCK = /\b\d{1,2}\s*h\s*:?\s*\d{1,2}\s*m\s*:?\s*\d{1,2}\s*s\b/i
 const TIME_OF_DAY_BEFORE =
   /\b(?:at|from|until|till|by|between|and|to|opens?|closes?|starts?|rest\s+for|for)\s*$/i
 const TIME_OF_DAY_AFTER =
@@ -235,7 +238,7 @@ export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
       if (hasSeconds && URGENCY_PATTERNS.some((p) => p.test(wide)))
         return clock[0]
     }
-    return null
+    return UNIT_CLOCK.exec(text)?.[0] ?? null
   }
 
   private detectScarcity(

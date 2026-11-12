@@ -26,6 +26,8 @@ interface Measurement {
 interface Target {
   selector: string
   text: string
+  /** Phrases quoted inside a description, tried when `text` is not on the page. */
+  quotes?: string[]
 }
 
 export function isValidCapture(capture: {
@@ -48,6 +50,22 @@ export function searchText(text: string): string {
   const cut = clean.slice(0, 80)
   const space = cut.lastIndexOf(' ')
   return space > 40 ? cut.slice(0, space) : cut
+}
+
+/**
+ * AI findings often describe the screen ("'Accept All Cookies' (black filled
+ * button)") instead of quoting it. The phrases in quotes are the page's own
+ * words, so they are what to look for.
+ */
+export function quotedPhrases(text: string): string[] {
+  const phrases: string[] = []
+  const pattern =
+    /(?<![\p{L}\p{N}])['"‘“]([^'"‘’“”\n]{3,80}?)['"’”](?![\p{L}\p{N}])/gu
+  for (const match of text.matchAll(pattern)) {
+    const phrase = match[1].replace(/\s+/g, ' ').trim()
+    if (phrase.length >= 3 && !phrases.includes(phrase)) phrases.push(phrase)
+  }
+  return phrases.slice(0, 4)
 }
 
 /**
@@ -105,7 +123,13 @@ export function buildMeasureScript(
     }
     // Some selectors are broad guesses; trust them only when the quote agrees.
     if (bySelector && (needle.length < 4 || norm(bySelector.textContent).indexOf(needle) !== -1)) return bySelector;
-    return (needle.length >= 4 && byText(needle)) || bySelector;
+    var hit = (needle.length >= 4 && byText(needle)) || bySelector;
+    var quotes = t.quotes || [];
+    for (var q = 0; !hit && q < quotes.length; q++) {
+      var phrase = norm(quotes[q]);
+      if (phrase.length >= 3) hit = byText(phrase);
+    }
+    return hit;
   }
   var found = targets.map(locate);
   if (${scrollTo === null ? 'false' : 'true'}) {
@@ -171,6 +195,7 @@ export async function captureStepEvidence(
   const targets: Target[] = pending.map((pattern) => ({
     selector: pattern.element?.selector ?? '',
     text: searchText(pattern.element?.text ?? ''),
+    quotes: quotedPhrases(pattern.element?.text ?? ''),
   }))
 
   const shoot = async (view: number) => {
