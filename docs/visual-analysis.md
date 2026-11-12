@@ -20,8 +20,9 @@ includes the account ID. A custom `CLOUDFLARE_BASE_URL` may supply the complete 
 endpoint instead. Each provider also supports its own `*_MODEL` and `*_BASE_URL` overrides.
 Groq's GPT-OSS models are text-only; use a vision model for screenshot analysis. Gemini 2.5
 Flash disables thinking so the output budget goes to the scan result. Gemini 3 overrides
-omit sampling controls and use low reasoning effort, matching Applination. Set
-`TRUSTEN_LLM_TIMEOUT_MS=30000` when using Gemini to allow for screenshot latency.
+omit sampling controls and use low reasoning effort, matching Applination. Screenshot
+checks use `TRUSTEN_LLM_VISION_TIMEOUT_MS` (45 seconds by default) because vision
+models answer more slowly than text requests.
 
 See the providers' current API documentation:
 [Cloudflare compatibility](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/),

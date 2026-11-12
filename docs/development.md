@@ -58,7 +58,8 @@ Do not hand-edit the development schema.
 | `NVIDIA_NIM_API_KEY` | — | NVIDIA NIM key (also `NVIDIA_NIM_BASE_URL`, `NVIDIA_NIM_MODEL`) |
 | `TRUSTEN_GEMINI_API_KEY` / `GEMINI_API_KEY` | — | Gemini key (also `GEMINI_BASE_URL`, `GEMINI_MODEL`) |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | localhost | Local Ollama |
-| `TRUSTEN_LLM_TIMEOUT_MS` | `8000` | Per-call LLM timeout |
+| `TRUSTEN_LLM_TIMEOUT_MS` | `8000` | Per-call LLM timeout for text requests |
+| `TRUSTEN_LLM_VISION_TIMEOUT_MS` | `45000` | Per-call LLM timeout for screenshot checks |
 | `TRUSTEN_IGNORE_ROBOTS` | — | `1` bypasses robots.txt (local testing) |
 | `TRUSTEN_RATE_WINDOW_MS` | `60000` | Per-domain scan rate-limit window |
 | `NODE_ENV` | — | `development` enables pretty logs |

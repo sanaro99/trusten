@@ -70,3 +70,25 @@ test('a countdown does not suppress a separate delivery deadline', async () => {
     true,
   )
 })
+
+test('flags a shipping countdown written with hour, minute and second units', async () => {
+  const result = await new UrgencyScarcityAnalyzer().analyze({
+    ...context,
+    domSnapshot:
+      '<div class="announcement">FREE 1-DAY SHIPPING! Get It Tomorrow! <span>00h:38m:41s</span></div>',
+    visibleText:
+      'FREE 1-DAY SHIPPING! On Orders Over $100! Get It Tomorrow! 00h:38m:41s Shop Now',
+  })
+  const timers = result.patterns.filter((p) => p.category === 'fake_urgency')
+  expect(timers).toHaveLength(1)
+  expect(timers[0].element?.text).toBe('00h:38m:41s')
+})
+
+test('a duration without seconds is not a running countdown', async () => {
+  const result = await new UrgencyScarcityAnalyzer().analyze({
+    ...context,
+    domSnapshot: '<p>Delivery takes about 2h 30m</p>',
+    visibleText: 'Delivery takes about 2h 30m',
+  })
+  expect(result.patterns).toHaveLength(0)
+})
