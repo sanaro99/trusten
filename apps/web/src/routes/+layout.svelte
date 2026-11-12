@@ -71,6 +71,9 @@ function isCurrent(path: string) {
 				<a class="link link-hover" href="/extension">Install the Chrome extension</a>
 			</nav>
 		</div>
-		<p class="footer-note mt-10 border-t border-base-300 pt-6 text-sm">Trusten shows what it could verify and says clearly when a check could not be completed.</p>
+		<div class="footer-note mt-10 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-t border-base-300 pt-6 text-sm">
+			<p>Trusten shows what it could verify and says clearly when a check could not be completed.</p>
+			<p class="text-base-content/60" data-testid="app-version">Version {__TRUSTEN_VERSION__} · {__TRUSTEN_COMMIT__}</p>
+		</div>
 	</footer>
 </div>

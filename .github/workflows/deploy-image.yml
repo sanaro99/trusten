@@ -10,6 +10,22 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Keeps a "chore: release vX.Y.Z" pull request open with the changelog.
+  # Merging it tags the release, and this same run publishes vX.Y.Z images.
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+
   verify:
     name: Verify release
     runs-on: ubuntu-latest
@@ -54,7 +70,10 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.target }} image
-    needs: verify
+    needs: [release, verify]
+    # A release-please failure must not block deploys; the version tag is
+    # simply skipped.
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -83,6 +102,7 @@ jobs:
           tags: |
             type=raw,value=${{ matrix.tag_prefix }}latest
             type=sha,format=short,prefix=${{ matrix.tag_prefix }}sha-
+            type=raw,value=${{ matrix.tag_prefix }}v${{ needs.release.outputs.version }},enable=${{ needs.release.outputs.created == 'true' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -90,5 +110,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TRUSTEN_COMMIT=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
