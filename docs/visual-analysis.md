@@ -21,8 +21,10 @@ endpoint instead. Each provider also supports its own `*_MODEL` and `*_BASE_URL`
 Groq's GPT-OSS models are text-only; use a vision model for screenshot analysis. Gemini 2.5
 Flash disables thinking so the output budget goes to the scan result. Gemini 3 overrides
 omit sampling controls and use low reasoning effort, matching Applination. Screenshot
-checks use `TRUSTEN_LLM_VISION_TIMEOUT_MS` (45 seconds by default) because vision
-models answer more slowly than text requests.
+checks use `TRUSTEN_LLM_VISION_TIMEOUT_MS` (25 seconds by default) because vision
+models answer more slowly than text requests. A check that times out is sent once
+more (`TRUSTEN_LLM_VISION_RETRIES`), because NVIDIA's hosted model occasionally
+hangs on a request it would otherwise answer in about five seconds.
 
 See the providers' current API documentation:
 [Cloudflare compatibility](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/),
