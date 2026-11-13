@@ -1,5 +1,6 @@
 <script lang="ts">
 import { page } from '$app/state'
+import DemoTour from '$lib/demo/DemoTour.svelte'
 import '@trusten/ui/tokens.css'
 import '../app.css'
 
@@ -10,10 +11,14 @@ function isCurrent(path: string) {
   if (path === '/') return page.url.pathname === '/'
   return page.url.pathname.startsWith(path)
 }
+
+// The practice shop imitates another website, so it gets no Trusten header.
+const bare = $derived(page.url.pathname.startsWith('/demo/shop'))
 </script>
 
 <div class="min-h-screen text-base-content">
 	<a class="btn btn-primary fixed left-4 top-3 z-50 -translate-y-24 focus:translate-y-0" href="#main-content">Skip to main content</a>
+	{#if !bare}
 	<header class="site-header sticky top-0 z-30">
 		<div class="navbar mx-auto min-h-20 max-w-6xl px-4 sm:px-6">
 			<div class="navbar-start">
@@ -29,6 +34,7 @@ function isCurrent(path: string) {
 						<li><a href="/extension" aria-current={isCurrent('/extension') ? 'page' : undefined}>Chrome extension</a></li>
 					<li><a href="/#common-tricks">Common tricks</a></li>
 					<li><a href="/#how-it-works">How it works</a></li>
+					<li><a href="/demo" aria-current={isCurrent('/demo') ? 'page' : undefined}>Demo</a></li>
 				</ul>
 			</nav>
 
@@ -44,15 +50,20 @@ function isCurrent(path: string) {
 						<li><a href="/extension" aria-current={isCurrent('/extension') ? 'page' : undefined} onclick={() => menuOpen = false}>Chrome extension</a></li>
 						<li><a href="/#common-tricks" onclick={() => menuOpen = false}>Common tricks</a></li>
 						<li><a href="/#how-it-works" onclick={() => menuOpen = false}>How it works</a></li>
+						<li><a href="/demo" aria-current={isCurrent('/demo') ? 'page' : undefined} onclick={() => menuOpen = false}>Demo</a></li>
 						<li class="mt-2 sm:hidden"><a class="bg-primary text-primary-content" href="/audit" onclick={() => menuOpen = false}>Check a site</a></li>
 					</ul>
 				</details>
 			</div>
 		</div>
 	</header>
+	{/if}
 
 	{@render children()}
 
+	<DemoTour />
+
+	{#if !bare}
 	<footer class="mx-auto mt-20 max-w-6xl px-6 py-12 text-base-content/70">
 		<div class="grid gap-9 md:grid-cols-[1.4fr_1fr_1fr]">
 			<div>
@@ -69,6 +80,7 @@ function isCurrent(path: string) {
 				<a class="link link-hover" href="/explore">Explore results</a>
 				<a class="link link-hover" href="/audit">Run a full check</a>
 				<a class="link link-hover" href="/extension">Install the Chrome extension</a>
+				<a class="link link-hover" href="/demo">See the demo</a>
 			</nav>
 		</div>
 		<div class="footer-note mt-10 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-t border-base-300 pt-6 text-sm">
@@ -76,4 +88,5 @@ function isCurrent(path: string) {
 			<p class="text-base-content/60" data-testid="app-version">Version {__TRUSTEN_VERSION__} · {__TRUSTEN_COMMIT__}</p>
 		</div>
 	</footer>
+	{/if}
 </div>

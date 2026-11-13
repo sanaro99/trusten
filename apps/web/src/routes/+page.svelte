@@ -2,6 +2,7 @@
 import type { ScanHistoryRow } from '@trusten/shared/api'
 import { goto } from '$app/navigation'
 import { ApiError, api, publicScanErrorMessage } from '$lib/api'
+import { beginTour } from '$lib/demo/tour-state.svelte'
 import { historyCoverageLabel } from '$lib/history-coverage'
 import { findSavedEvidence, validateWebsiteInput } from '$lib/submission'
 import { getTurnstileToken } from '$lib/turnstile'
@@ -131,6 +132,10 @@ async function check(event: SubmitEvent) {
       <p class="mt-6 text-base-content/70">
         Want us to follow more of the journey?
         <a class="link link-primary ml-1 font-bold" href="/audit">Run a full check <span class="ml-1" aria-hidden="true">&rarr;</span></a>
+      </p>
+      <p class="mt-2 text-base-content/70">
+        New here?
+        <button class="link link-primary ml-1 font-bold" type="button" onclick={beginTour}>Take the two-minute tour <span class="ml-1" aria-hidden="true">&rarr;</span></button>
       </p>
     </div>
 

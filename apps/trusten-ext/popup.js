@@ -308,32 +308,102 @@ function __trustenInjectOverlay(patterns, grade, scanId, dashboardOrigin) {
   var gradeColor = GRADE_COLOR[grade] || '#8f2d46'
   var dashUrl = `${dashboardOrigin}/scan/${encodeURIComponent(scanId)}`
 
-  // Highlight elements with CSS selectors
+  // Spacing differs between a quote and the page (table cells, line breaks),
+  // so text is compared with all whitespace removed.
+  function norm(s) {
+    return String(s || '')
+      .replace(/\s+/g, '')
+      .toLowerCase()
+  }
+  function shown(el) {
+    var r = el.getBoundingClientRect()
+    return r.width > 1 && r.height > 1
+  }
+  // A checkbox is tiny; its label is what a person reads.
+  function outlineTarget(el) {
+    if (el.tagName === 'INPUT' && el.labels && el.labels[0]) return el.labels[0]
+    return el.closest('label') || el
+  }
+  let elements = null
+  function byText(needle) {
+    if (!elements) {
+      elements = []
+      const all = document.body ? document.body.querySelectorAll('*') : []
+      for (let i = 0; i < all.length; i++) {
+        const tag = all[i].tagName
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') continue
+        elements.push([all[i], null])
+      }
+    }
+    const limit = (window.innerHeight || 800) * 1.5
+    let match = null
+    for (let j = 0; j < elements.length; j++) {
+      const el = elements[j][0]
+      // Descendants follow their ancestor: stop once past the first match.
+      if (match && !match.contains(el)) break
+      if (elements[j][1] === null) elements[j][1] = norm(el.textContent)
+      if (
+        elements[j][1].indexOf(needle) !== -1 &&
+        el !== document.body &&
+        shown(el) &&
+        el.getBoundingClientRect().height <= limit
+      )
+        match = el
+    }
+    return match
+  }
+  // Findings without a selector still quote the page: find that text.
+  function locate(p) {
+    const element = p.element || {}
+    if (element.selector) {
+      try {
+        const found = Array.from(document.querySelectorAll(element.selector))
+        const visible = found.find(shown)
+        if (visible) return outlineTarget(visible)
+      } catch (_e) {}
+    }
+    const text = String(element.text || '')
+    // Text across lines usually spans several elements: try the longest
+    // single line first, so the outline lands on one element, not its parent.
+    // Notes such as "[pre-checked]" are added by the check, not the page.
+    const clean = (line) => line.replace(/\s*\[[^\]]*\]\s*$/, '')
+    const tries = text
+      .split(/\n|;\s/)
+      .map(clean)
+      .sort((a, b) => b.length - a.length)
+      .concat([clean(text)])
+    const quoted = text.match(/["“‘']([^"“”‘’'\n]{4,80})["”’']/g) || []
+    quoted.forEach((q) => {
+      tries.push(q.slice(1, -1))
+    })
+    for (let t = 0; t < tries.length; t++) {
+      const needle = norm(tries[t]).slice(0, 120)
+      if (needle.length < 4) continue
+      const hit = byText(needle)
+      if (hit) return outlineTarget(hit)
+    }
+    return null
+  }
+
+  // Outline the elements behind each finding
+  var targets = patterns.map(locate)
   var highlighted = 0
-  patterns.forEach((p) => {
-    if (!p.element || !p.element.selector || highlighted >= 6) return
-    try {
-      document.querySelectorAll(p.element.selector).forEach((el) => {
-        if (highlighted >= 6) return
-        var rect = el.getBoundingClientRect()
-        if (rect.width === 0 || rect.height === 0) return
-        if (!originals.has(el))
-          originals.set(
-            el,
-            ['outline', 'outline-offset', 'box-shadow'].map((name) => [
-              name,
-              el.style.getPropertyValue(name),
-              el.style.getPropertyPriority(name),
-            ]),
-          )
-        el.setAttribute(HL_ATTR, '1')
-        var color = SEV_COLOR[p.severity] || '#ea580c'
-        el.style.outline = `3px solid ${color}`
-        el.style.outlineOffset = '2px'
-        el.style.boxShadow = `0 0 0 6px ${color}22`
-        highlighted++
-      })
-    } catch (_e) {}
+  targets.forEach((el, index) => {
+    if (!el || originals.has(el) || highlighted >= 10) return
+    originals.set(
+      el,
+      ['outline', 'outline-offset', 'box-shadow'].map((name) => [
+        name,
+        el.style.getPropertyValue(name),
+        el.style.getPropertyPriority(name),
+      ]),
+    )
+    el.setAttribute(HL_ATTR, '1')
+    var color = SEV_COLOR[patterns[index].severity] || '#ea580c'
+    el.style.setProperty('outline', `3px solid ${color}`, 'important')
+    el.style.setProperty('outline-offset', '2px', 'important')
+    el.style.setProperty('box-shadow', `0 0 0 6px ${color}33`, 'important')
+    highlighted++
   })
 
   // Build panel HTML
@@ -348,7 +418,7 @@ function __trustenInjectOverlay(patterns, grade, scanId, dashboardOrigin) {
 
   var patternRows = patterns
     .slice(0, 20)
-    .map((p, _i) => {
+    .map((p, i) => {
       var color = SEV_COLOR[p.severity] || '#aaa'
       var bg = SEV_BG[p.severity] || '#f8fafc'
       var cat = CAT_LABEL[p.category] || 'Choice worth reviewing'
@@ -370,6 +440,11 @@ function __trustenInjectOverlay(patterns, grade, scanId, dashboardOrigin) {
         '<div style="font-size:11px;color:#475569;line-height:1.45">' +
         esc(desc) +
         '</div>' +
+        (targets[i]
+          ? '<button type="button" data-trusten-show="' +
+            i +
+            '" style="margin-top:6px;background:none;border:0;padding:0;color:#493777;font-family:inherit;font-size:11px;font-weight:700;line-height:1.4;display:block;text-decoration:underline;cursor:pointer">Show on page</button>'
+          : '') +
         '</div>'
       )
     })
@@ -444,6 +519,12 @@ function __trustenInjectOverlay(patterns, grade, scanId, dashboardOrigin) {
   panel
     .querySelector('[aria-label="Close Trusten highlights"]')
     .addEventListener('click', removeAll)
+  panel.querySelectorAll('[data-trusten-show]').forEach((button) => {
+    button.addEventListener('click', () => {
+      var el = targets[Number(button.getAttribute('data-trusten-show'))]
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+  })
 
   function onEsc(e) {
     if (e.key === 'Escape') {
@@ -590,11 +671,18 @@ async function runScan() {
   const url = currentTab.url
 
   const pageContent = await captureLivePage(currentTab)
+  if (!pageContent) {
+    showError(
+      'Trusten cannot read this page',
+      'Chrome does not let extensions read some pages, such as the Chrome Web Store, PDF files, and other extensions. Open the website in a normal tab, then try again.',
+    )
+    return
+  }
 
   let data
   try {
     // 2a. Preferred: analyze-page (live DOM, sees logged-in state)
-    if (pageContent) {
+    {
       const res = await fetch(
         `${settings.serverOrigin}/trusten/api/analyze-page`,
         {

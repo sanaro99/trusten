@@ -23,7 +23,12 @@ export const GET: RequestHandler = async ({ url }) => {
     ['icons/icon48.png', Buffer.from(icon48.split(',')[1], 'base64')],
     ['icons/icon128.png', Buffer.from(icon128.split(',')[1], 'base64')],
   ])
-  const archive = await buildExtensionZip(url.origin, url.origin, entries)
+  const archive = await buildExtensionZip(
+    url.origin,
+    url.origin,
+    entries,
+    __TRUSTEN_VERSION__,
+  )
   return new Response(new Uint8Array(archive), {
     headers: {
       'Content-Type': 'application/zip',
