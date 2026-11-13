@@ -104,6 +104,73 @@ test('overlay closes on CSP pages and restores existing website highlighting', a
   }
 })
 
+test('overlay outlines findings that only quote the page text', async () => {
+  const page = await browser.newPage()
+  try {
+    await page.setContent(
+      '<main><div id="product"><p id="stock">Only 2 left in stock. Order soon!</p><p id="viewers">27 people are looking at this right now</p><p>Sold 1,284 times today</p></div><label id="plan-label"><input id="plan" type="checkbox" checked> Add protection plan</label><table><tbody><tr id="fee"><td>Service fee</td><td>$6.50</td></tr></tbody></table></main>',
+    )
+    const source = await readFile(path.join(directory, 'popup.js'), 'utf8')
+    const fnStart = source.indexOf('function __trustenInjectOverlay(')
+    const fnEnd = source.indexOf('\n//', fnStart)
+    const findings = [
+      {
+        severity: 'high',
+        category: 'fake_scarcity',
+        description: 'Stock',
+        element: { selector: '', text: 'Only 2 left in stock. Order soon!' },
+      },
+      // Two lines from two elements: outline one of them, not their container.
+      {
+        severity: 'high',
+        category: 'fake_social_proof',
+        description: 'Viewers',
+        element: {
+          selector: '',
+          text: '27 people are looking at this right now\nSold 1,284 times',
+        },
+      },
+      {
+        severity: 'high',
+        category: 'preselected_options',
+        description: 'Plan',
+        element: {
+          selector: '#plan',
+          text: 'Add protection plan [pre-checked]',
+        },
+      },
+      {
+        severity: 'low',
+        category: 'trick_wording',
+        description: 'Absent',
+        element: { selector: '', text: 'Nothing like this is on the page' },
+      },
+      // Table cells have no space between them on the page.
+      {
+        severity: 'high',
+        category: 'drip_pricing',
+        description: 'Fee',
+        element: { selector: '', text: 'Service fee\t$6.50' },
+      },
+    ]
+    await page.evaluate(
+      `${source.slice(fnStart, fnEnd)}\n__trustenInjectOverlay(${JSON.stringify(findings)}, 'C', 'scan-1', 'https://trusten.example')`,
+    )
+    assert.deepEqual(
+      await page.$$eval('[data-trusten-hl]', (els) => els.map((el) => el.id)),
+      ['stock', 'viewers', 'plan-label', 'fee'],
+    )
+    assert.equal(
+      await page.$$eval('[data-trusten-show]', (els) => els.length),
+      4,
+    )
+    await page.click('[aria-label="Close Trusten highlights"]')
+    assert.equal(await page.$$eval('[data-trusten-hl]', (els) => els.length), 0)
+  } finally {
+    await page.close()
+  }
+})
+
 test('unpacked extension captures live page, renders server result and opens current report URL', async () => {
   let captured
   const server = createServer((request, response) => {

@@ -57,11 +57,18 @@ proxy. No authentication or bot-verification requirement is bypassed.
   clearly labels the limited check and withholds the overall grade. The screenshot is saved
   with the report when available. The popup shows the three most important concerns first.
 - **Highlight these choices** outlines matching elements and opens an evidence panel on the
-  page. The close button, Escape key, and popup toggle remove the highlights and restore
-  the page's original styles. Trusten's own panel is removed before another capture.
-- If the live-content endpoint returns **404**, or Chrome cannot capture a protected page,
-  the extension tries the existing URL-based `/quick-scan` endpoint. That fallback cannot
-  reproduce your signed-in state and remains subject to the service's admission rules.
+  page. A finding without a CSS selector is found by the page text it quotes (each line,
+  then the whole quote, ignoring spacing), and a checkbox outlines its label. **Show on
+  page** in the panel scrolls to a finding. The close button, Escape key, and popup toggle
+  remove the highlights and restore the page's original styles. Trusten's own panel is
+  removed before another capture.
+- If Chrome will not let the extension read a page (the Chrome Web Store, PDF files, other
+  extensions), the popup says so instead of checking it on the server.
+- If the live-content endpoint returns **404** (an older service), the extension tries the
+  URL-based `/quick-scan` endpoint. That fallback cannot reproduce your signed-in state and
+  remains subject to the service's admission rules.
+- The downloaded extension's version matches the Trusten release, so a stale copy is easy
+  to spot on `chrome://extensions`.
 - Chrome internal pages and non-HTTP(S) URLs are rejected locally. Server rejections are
   shown in the popup, so rate limits and incomplete checks are not presented as results.
 
@@ -85,6 +92,8 @@ node --test apps/trusten-ext/browser.test.mjs
 
 The browser checks use the server workspace's Puppeteer and its installed Chrome to load an
 actual unpacked extension, capture a live fixture, render the API response, follow current
-report links, decode icons, and close highlights on a page with a restrictive script policy.
+report links, decode icons, outline findings that only quote page text, and close
+highlights on a page with a restrictive script policy. The practice shop at `/demo/shop`
+is a reliable page to try the whole flow by hand.
 
 Capture preserves site-default checkbox states separately from current user selections. A current opt-in alone is not evidence that the website selected it by default.

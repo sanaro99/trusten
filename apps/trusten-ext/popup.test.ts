@@ -17,12 +17,14 @@ async function popup({
   },
   status = 200,
   changeTabDuringCapture = false,
+  unreadable = false,
 }: {
   url?: string
   settings?: Record<string, string>
   response?: object
   status?: number
   changeTabDuringCapture?: boolean
+  unreadable?: boolean
 } = {}) {
   const elements = new Map<string, any>()
   function element(id: string) {
@@ -68,6 +70,7 @@ async function popup({
       scripting: {
         executeScript: async () => {
           captures++
+          if (unreadable) throw new Error('Cannot access contents of the page')
           return [
             {
               result: {
@@ -119,6 +122,16 @@ describe('extension popup', () => {
     expect(app.captures()).toBe(0)
     expect(app.element('stateError').style.display).toBe('block')
     expect(app.element('errorMsg').textContent).toMatch(/website|http/i)
+  })
+
+  test('explains a page Chrome will not let it read, without a server check', async () => {
+    const app = await popup({ unreadable: true })
+    await vm.runInContext('runScan()', app.context)
+    expect(app.requests).toHaveLength(0)
+    expect(app.element('stateError').style.display).toBe('block')
+    expect(app.element('errorTitle').textContent).toBe(
+      'Trusten cannot read this page',
+    )
   })
 
   test('explains server rejection instead of hiding its reason', async () => {

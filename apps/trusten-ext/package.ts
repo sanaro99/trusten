@@ -24,10 +24,17 @@ function origin(value: string): string {
   return url.origin
 }
 
+/** Chrome accepts one to four dot-separated numbers, e.g. "0.2.0". */
+export function manifestVersion(version: string | undefined): string | null {
+  const core = version?.trim().split(/[-+]/)[0] ?? ''
+  return /^\d{1,5}(\.\d{1,5}){0,3}$/.test(core) ? core : null
+}
+
 export async function extensionEntries(
   serviceOrigin: string,
   dashboardOrigin = serviceOrigin,
   supplied?: Map<string, Buffer>,
+  version?: string,
 ): Promise<Map<string, Buffer>> {
   const service = origin(serviceOrigin)
   const dashboard = origin(dashboardOrigin)
@@ -37,6 +44,9 @@ export async function extensionEntries(
       entries.set(name, await readFile(new URL(name, import.meta.url)))
   const manifest = JSON.parse(entries.get('manifest.json')!.toString())
   manifest.host_permissions = [`${service}/*`]
+  // The extension shares the Trusten release number, so a stale copy is easy to spot.
+  const release = manifestVersion(version)
+  if (release) manifest.version = release
   entries.set('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2)))
   const config = entries
     .get('config.js')!
@@ -103,9 +113,10 @@ export async function buildExtensionZip(
   serviceOrigin: string,
   dashboardOrigin = serviceOrigin,
   supplied?: Map<string, Buffer>,
+  version?: string,
 ): Promise<Buffer> {
   return zipEntries(
-    await extensionEntries(serviceOrigin, dashboardOrigin, supplied),
+    await extensionEntries(serviceOrigin, dashboardOrigin, supplied, version),
   )
 }
 
@@ -116,6 +127,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const dashboard =
     process.argv[3] || (process.argv[2] ? service : 'http://localhost:5173')
   const destination = process.argv[4] || 'trusten-extension.zip'
-  await writeFile(destination, await buildExtensionZip(service, dashboard))
+  const root = JSON.parse(
+    await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+  )
+  await writeFile(
+    destination,
+    await buildExtensionZip(service, dashboard, undefined, root.version),
+  )
   console.log(`Created ${destination}`)
 }

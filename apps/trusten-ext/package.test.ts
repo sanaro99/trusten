@@ -22,3 +22,19 @@ test('download bundle contains a working manifest and hosting origin defaults', 
   expect(zip.subarray(-22, -18).toString('hex')).toBe('504b0506')
   expect(zip.readUInt16LE(zip.length - 12)).toBe(entries.size)
 })
+
+test('download bundle carries the Trusten release number', async () => {
+  const { extensionEntries, manifestVersion } = await import('./package')
+  const entries = await extensionEntries(
+    'https://trusten.example',
+    undefined,
+    undefined,
+    '0.2.0',
+  )
+  expect(JSON.parse(entries.get('manifest.json')!.toString()).version).toBe(
+    '0.2.0',
+  )
+  expect(manifestVersion('1.4.0-beta.1')).toBe('1.4.0')
+  expect(manifestVersion('dev')).toBeNull()
+  expect(manifestVersion(undefined)).toBeNull()
+})

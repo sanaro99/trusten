@@ -80,6 +80,7 @@ mode → Load unpacked) to Quick Scan the page you're viewing.
 - [Detection](docs/detection.md) — analyzers, categories, scoring, regulatory mapping
 - [API](docs/api.md) — HTTP + WebSocket endpoints
 - [Browser extension](docs/extension.md)
+- [Demo mode](docs/demo.md) — guided tour, demo hub, and practice shop
 - [Development](docs/development.md) — setup, configuration, scripts, conventions
 - [Deployment](docs/deployment.md) — CI/CD and private TrueNAS rollout
 
