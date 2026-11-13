@@ -75,11 +75,24 @@ const FALLBACK_CHAIN: TrustenLLMProvider[] = [
 const LLM_TIMEOUT_MS = Number(process.env.TRUSTEN_LLM_TIMEOUT_MS ?? 8000)
 /**
  * Screenshot checks run on large vision models and routinely take longer than
- * a text call, so they get their own, longer budget.
+ * a text call, so they get their own, longer budget per attempt.
  */
 const LLM_VISION_TIMEOUT_MS = Number(
-  process.env.TRUSTEN_LLM_VISION_TIMEOUT_MS ?? 45_000,
+  process.env.TRUSTEN_LLM_VISION_TIMEOUT_MS ?? 25_000,
 )
+/**
+ * NVIDIA's hosted vision model usually answers in about five seconds but
+ * occasionally hangs. A hung request is abandoned and sent once more, which
+ * nearly always succeeds quickly.
+ */
+const LLM_VISION_RETRIES = Math.max(
+  0,
+  Number(process.env.TRUSTEN_LLM_VISION_RETRIES ?? 1),
+)
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError'
+}
 
 /**
  * Remember providers that just failed (network error / timeout) so the ~11
@@ -444,18 +457,30 @@ export class TrustenLLMClient {
     options: LLMCompletionOptions,
   ): Promise<string> {
     const request = this.buildRequest(config, options)
+    const vision = messagesHaveImage(options.messages)
     const timeout =
-      options.timeoutMs ??
-      (messagesHaveImage(options.messages)
-        ? LLM_VISION_TIMEOUT_MS
-        : LLM_TIMEOUT_MS)
+      options.timeoutMs ?? (vision ? LLM_VISION_TIMEOUT_MS : LLM_TIMEOUT_MS)
+    // Callers with their own budget (such as navigation) keep a single attempt.
+    const retries =
+      vision && options.timeoutMs === undefined ? LLM_VISION_RETRIES : 0
     try {
-      return await this.sendRequest(
-        request.url,
-        request.headers,
-        request.body,
-        timeout,
-      )
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await this.sendRequest(
+            request.url,
+            request.headers,
+            request.body,
+            timeout,
+          )
+        } catch (error) {
+          if (!isTimeout(error) || attempt >= retries) throw error
+          logger.warn('Trusten LLM screenshot request timed out, retrying', {
+            provider: config.provider,
+            model: request.model,
+            timeoutMs: timeout,
+          })
+        }
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       if (

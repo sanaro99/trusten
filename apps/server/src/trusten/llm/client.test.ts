@@ -483,6 +483,70 @@ test('the default Nvidia model is a current model that reads screenshots', async
   }
 })
 
+function timesOutFirst(count: number) {
+  let calls = 0
+  return captureRequests(() => {
+    calls++
+    if (calls <= count)
+      throw new DOMException('The operation timed out.', 'TimeoutError')
+    return Response.json({ choices: [{ message: { content: 'answered' } }] })
+  })
+}
+
+test('a screenshot request that hangs once is sent again and succeeds', async () => {
+  const wire = timesOutFirst(1)
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'nvidia-nim',
+      apiKey: 'nim-fixture-key',
+    })
+    await expect(
+      client.complete({ messages: imageMessages, requireImage: true }),
+    ).resolves.toBe('answered')
+    expect(wire.requests).toHaveLength(2)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('a screenshot request is retried only once', async () => {
+  const wire = timesOutFirst(5)
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'nvidia-nim',
+      apiKey: 'nim-fixture-key',
+    })
+    await expect(
+      client.complete({ messages: imageMessages, requireImage: true }),
+    ).rejects.toThrow()
+    expect(wire.requests).toHaveLength(2)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('text requests and callers with their own time budget are not retried', async () => {
+  for (const options of [
+    { messages: [{ role: 'user' as const, content: 'Hello' }] },
+    { messages: imageMessages, requireImage: true, timeoutMs: 20_000 },
+  ]) {
+    const wire = timesOutFirst(5)
+    try {
+      const client = new TrustenLLMClient({
+        provider: 'nvidia-nim',
+        apiKey: 'nim-fixture-key',
+      })
+      await expect(client.complete(options)).rejects.toThrow()
+      // Text requests may still move on to the local Ollama fallback.
+      expect(
+        wire.requests.filter((r) => r.url.includes('nvidia.com')),
+      ).toHaveLength(1)
+    } finally {
+      wire.restore()
+    }
+  }
+})
+
 const retiredBody = {
   type: 'about:blank',
   title: 'Gone',
