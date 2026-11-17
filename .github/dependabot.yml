@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Trusten loads untrusted sites in Puppeteer's bundled Chrome, so keep that
+  # browser current. Other dependencies are updated by hand.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-name: puppeteer
+      - dependency-name: puppeteer-core
+    groups:
+      puppeteer:
+        patterns:
+          - puppeteer
+          - puppeteer-core
+    commit-message:
+      prefix: fix
+      include: scope

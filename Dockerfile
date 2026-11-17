@@ -23,7 +23,7 @@ RUN bun install --frozen-lockfile
 
 USER root
 RUN apt-get update && \
-    bun apps/server/node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js \
+    bun apps/server/node_modules/puppeteer/lib/puppeteer/node/cli.js \
       browsers install chrome --install-deps && \
     rm -rf /var/lib/apt/lists/*
 
@@ -44,7 +44,11 @@ ENV NODE_ENV=production \
     PORT=3000
 
 # Catch Chromium startup failures in the image before a user starts a scan.
-RUN cd apps/server && bun -e "import puppeteer from 'puppeteer'; const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'] }); await browser.close()"
+# Build steps run under Docker's default seccomp profile, which blocks the
+# namespaces Chromium's sandbox needs, so this smoke test alone starts it
+# without the sandbox. It opens no page. At runtime the sandbox is on; the api
+# container needs deploy/chrome-seccomp.json (see docs/deployment.md).
+RUN cd apps/server && TRUSTEN_CHROME_SANDBOX=off bun -e "import puppeteer from 'puppeteer'; import { chromeLaunchOptions } from './src/trusten/browser/chrome-launch'; const browser = await puppeteer.launch(chromeLaunchOptions()); await browser.close()"
 
 EXPOSE 3000 9200
 CMD ["bun", "run", "start"]

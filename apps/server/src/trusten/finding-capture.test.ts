@@ -71,10 +71,8 @@ describe.skipIf(process.env.TRUSTEN_BROWSER_TESTS !== '1')(
   () => {
     test('outline an AI finding through the phrase it quotes', async () => {
       const puppeteer = (await import('puppeteer')).default
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox'],
-      })
+      const { chromeLaunchOptions } = await import('./browser/chrome-launch')
+      const browser = await puppeteer.launch(chromeLaunchOptions())
       try {
         const page = await browser.newPage()
         await page.setViewport({ width: 1000, height: 800 })
