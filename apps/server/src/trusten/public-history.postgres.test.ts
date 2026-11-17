@@ -194,4 +194,29 @@ describe.skipIf(!databaseUrl)('public audit history in PostgreSQL', () => {
       await tx.unsafe(`DROP SCHEMA ${schema} CASCADE`)
     })
   })
+
+  test('keeps unverified extension results out of public history and grades', async () => {
+    const domain = `extension-${crypto.randomUUID()}.example`
+    const before = await getGlobalStats()
+    const server = scan(domain, 'quick')
+    await saveTrustenScan(server)
+    const forged: ScanResult = {
+      ...scan(domain, 'quick'),
+      source: 'extension',
+      score: { numeric: 16, grade: 'F', categoryBreakdown: {}, summary: '' },
+    }
+    await saveTrustenScan(forged)
+
+    expect((await getDomainSummary(domain))?.latestGrade).toBe('A')
+    expect((await getDomainSummary(domain))?.scanCount).toBe(1)
+    expect(
+      (await getTrustenScansByDomain(domain)).map((row) => row.id),
+    ).toEqual([server.id])
+    expect(
+      (await getTrustenScanHistory(500)).some((row) => row.id === forged.id),
+    ).toBe(false)
+    expect((await getGlobalStats()).totalScans).toBe(before.totalScans + 1)
+    // The person who ran the check can still open it by id.
+    expect((await getTrustenScanById(forged.id))?.source).toBe('extension')
+  })
 })

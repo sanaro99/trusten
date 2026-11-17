@@ -9,14 +9,32 @@ import { DetectedPatternSchema, GradeSchema } from '../domain'
 
 const trimmedUrl = z.string().trim().min(1, 'url is required')
 
+/** The extension sends at most 500k of HTML and 50k of text; allow headroom. */
+export const ANALYZE_PAGE_LIMITS = {
+  url: 2_048,
+  html: 600_000,
+  text: 60_000,
+  pageTitle: 1_000,
+  screenshotBase64: 8_000_000,
+} as const
+
 export const AnalyzePageRequestSchema = z.object({
-  url: trimmedUrl,
-  html: z.string().min(1, 'html is required'),
-  text: z.string().default(''),
-  pageTitle: z.string().default(''),
+  url: trimmedUrl.max(ANALYZE_PAGE_LIMITS.url, 'url is too long'),
+  html: z
+    .string()
+    .min(1, 'html is required')
+    .max(ANALYZE_PAGE_LIMITS.html, 'html is too large'),
+  text: z
+    .string()
+    .max(ANALYZE_PAGE_LIMITS.text, 'text is too large')
+    .default(''),
+  pageTitle: z
+    .string()
+    .max(ANALYZE_PAGE_LIMITS.pageTitle, 'pageTitle is too long')
+    .default(''),
   screenshotBase64: z
     .string()
-    .max(8_000_000)
+    .max(ANALYZE_PAGE_LIMITS.screenshotBase64, 'screenshot is too large')
     .regex(/^\/9j\/[A-Za-z0-9+/]*={0,2}$/, 'Expected a base64 JPEG screenshot')
     .optional(),
   captureTruncated: z.boolean().optional(),
@@ -69,6 +87,12 @@ export const ScanDetailSchema = z.object({
   url: z.string(),
   domain: z.string(),
   scanType: z.string(),
+  /**
+   * `extension`: analyzed from page content a browser extension submitted.
+   * Trusten did not load the page itself, so the result is unverified and is
+   * kept out of public history. Older rows and server scans omit it.
+   */
+  source: z.enum(['server', 'extension']).optional(),
   startedAt: z.string(),
   completedAt: z.string(),
   patterns: z.array(DetectedPatternSchema),

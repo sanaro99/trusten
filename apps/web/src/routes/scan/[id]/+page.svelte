@@ -52,6 +52,12 @@ const checkedDate = $derived(
     <ul><li><a href="/">Dashboard</a></li><li><a href="/explore">Results</a></li><li>{data.scan.domain}</li></ul>
   </div>
 
+  {#if data.scan.source === 'extension'}
+    <div class="alert alert-warning mt-5" role="note">
+      This result was made from page content sent by a browser extension. Trusten did not load the page itself, so it is not verified and is not part of {data.scan.domain}'s public results.
+    </div>
+  {/if}
+
   {#if data.cached}
     <div class="alert alert-info mt-5" role="status">
       Saved result from {new Date(data.scan.completedAt).toLocaleString()}.

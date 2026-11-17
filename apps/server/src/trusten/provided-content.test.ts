@@ -111,6 +111,8 @@ test('extension capture keeps reviewable evidence and deduplicates text and visu
       { screenshotBase64: jpeg.toString('base64') },
     )
     expect(result.patterns).toHaveLength(1)
+    expect(result.source).toBe('extension')
+    expect(saved[0].source).toBe('extension')
     expect(result.workflowSteps).toHaveLength(1)
     expect(result.workflowSteps?.[0].visualCheckAvailable).toBe(true)
     const screenshotPath = saved[0].workflowSteps[0].screenshotPath
