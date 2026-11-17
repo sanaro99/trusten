@@ -39,6 +39,10 @@ services:
       ORIGIN: https://REPLACE_TRUSTEN_HOSTNAME
       TRUSTEN_INTERNAL_API_ORIGIN: http://api:9200
       PUBLIC_TURNSTILE_SITE_KEY: REPLACE_TURNSTILE_SITE_KEY
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
@@ -68,6 +72,14 @@ services:
     volumes:
       - /mnt/REPLACE_APPS_POOL/trusten:/data
     shm_size: "2gb"
+    # Chromium loads untrusted sites with its sandbox on. The seccomp profile is
+    # Docker's default plus the namespace calls that sandbox needs; copy
+    # deploy/chrome-seccomp.json to this path on the host.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=/mnt/REPLACE_APPS_POOL/appconfig/chrome-seccomp.json
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9200/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
