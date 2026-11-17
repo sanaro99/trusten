@@ -6,6 +6,8 @@ import type { WorkflowStep } from './workflow'
 
 export type ScanType = 'quick' | 'deep'
 
+export type ScanSource = 'server' | 'extension'
+
 export interface ScanResult {
   id: string
   url: string
@@ -13,6 +15,12 @@ export interface ScanResult {
   scanType: ScanType
   /** Internal homepage/workflow artifact belonging to a public audit. */
   parentAuditId?: string | null
+  /**
+   * Who loaded the page. `extension` results come from client-submitted
+   * content, are unverified, and never appear in public history. Defaults to
+   * `server`.
+   */
+  source?: ScanSource
   startedAt: string
   completedAt: string
   patterns: DetectedPattern[]

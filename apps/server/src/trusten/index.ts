@@ -757,6 +757,7 @@ export class TrustenEngine {
       url,
       domain,
       scanType: 'quick',
+      source: 'extension',
       startedAt,
       completedAt: new Date().toISOString(),
       patterns,
