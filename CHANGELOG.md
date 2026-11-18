@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.1](https://github.com/sanaro99/trusten/compare/v0.2.0...v0.2.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **security:** keep extension submissions out of public grades ([8fb07f5](https://github.com/sanaro99/trusten/commit/8fb07f5dedb812c0a7c014e9d92bf287ec7932ff))
+* **security:** keep extension submissions out of public grades ([d558124](https://github.com/sanaro99/trusten/commit/d558124ecb53b1acfae3b62a6fbd531415e93878))
+* **server:** block path traversal in step screenshot route ([b47ec65](https://github.com/sanaro99/trusten/commit/b47ec6546c453bd2471bf89a49e60dced19cce15))
+* **server:** block path traversal in step screenshot route ([07f2780](https://github.com/sanaro99/trusten/commit/07f27808587b6b6aa9d52ffc9358f58e3de6dfa7))
+* **server:** run Chromium sandboxed on current Puppeteer ([d550cd6](https://github.com/sanaro99/trusten/commit/d550cd63341cb61d0ded08e6403a70d02264656d))
+* **server:** run Chromium sandboxed on current Puppeteer ([9dc3518](https://github.com/sanaro99/trusten/commit/9dc3518f405c1e5b1cb0bb9bddf9c04a76648063))
+* stop false "Limited check" results and unfair grades ([#32](https://github.com/sanaro99/trusten/issues/32)) ([e4299d6](https://github.com/sanaro99/trusten/commit/e4299d6482d355c66b1fca548333cd017bc0d800))
+
 ## [0.2.0](https://github.com/sanaro99/trusten/compare/v0.1.0...v0.2.0) (2026-11-13)
 
 
