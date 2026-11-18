@@ -9,7 +9,8 @@
  *   the previous) and the category cannot take more than 1.5x its strongest
  *   finding, so a banner repeated on every page cannot sink a site on its own.
  *   Distinct kinds of trick add up fully.
- * - Serious concerns cap the score at 59; important concerns cap it at 79.
+ * - Confident serious concerns cap the score at 59; confident important
+ *   concerns cap it at 79. Uncertain findings never cap the grade.
  *
  * Grade mapping:
  *   A: 80-100  (minor issues at most)
@@ -58,9 +59,12 @@ export function calculateScore(patterns: DetectedPattern[]): DarkPatternScore {
     0,
   )
 
-  const ceiling = patterns.some((p) => p.severity === 'critical')
+  // Only findings Trusten is confident about can cap the grade. Uncertain ones
+  // are shown as "less sure" and still count, at half weight, below.
+  const confident = patterns.filter((p) => p.confidence >= CONFIDENT)
+  const ceiling = confident.some((p) => p.severity === 'critical')
     ? 59
-    : patterns.some((p) => p.severity === 'high')
+    : confident.some((p) => p.severity === 'high')
       ? 79
       : 100
   const numeric = Math.min(

@@ -35,6 +35,7 @@ const URGENCY_PATTERNS = [
 
 const SCARCITY_PATTERNS = [
   /\bonly\s+\d+\s+left\b/i,
+  /\bonly\s+\d+\s+(?:rooms?|seats?|tickets?|spots?|places?)\s+left\b/i,
   /\b\d+\s+(?:items?|units?|left)\s+in\s+stock\b/i,
   /\blow\s+(?:stock|inventory)\b/i,
   /\balmost\s+(?:gone|sold\s+out)\b/i,
@@ -52,6 +53,10 @@ const SOCIAL_PROOF_PATTERNS = [
   /\b[\d,]+\s+watching\s+(?:now|this)\b/i,
   /\b[\d,]+\s+(?:others?\s+)?(?:viewed|looked\s+at)\s+this\b/i,
   /\b#\d+\s+(?:best\s*)?seller\b/i,
+  // "23 people are looking at this hotel right now"
+  /\b[\d,]+\s+(?:people|others|travell?ers|guests|shoppers|customers|users)\s+(?:are\s+)?(?:looking\s+at|viewing|watching)\s+(?:this|it|right\s+now|now)\b/i,
+  // "Booked 41 times in the last 24 hours" or "Sold 1,284 times today"
+  /\b(?:booked|bought|sold|purchased|ordered|reserved)\s+[\d,]+\s+times\b[^.]{0,30}?\b(?:today|(?:in\s+the\s+)?(?:last|past)\b)/i,
 ]
 
 // "Sale ends December 31" names a checkable deadline; it is not pressure.

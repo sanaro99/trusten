@@ -65,3 +65,8 @@ test('a less certain finding weighs half', () => {
   ]).numeric
   expect(100 - unsure).toBe((100 - sure) / 2)
 })
+test('an uncertain finding counts but cannot cap the grade', () => {
+  const score = calculateScore([finding('critical', 'fake_urgency', 0.5)])
+  expect(score.numeric).toBeGreaterThan(59)
+  expect(score.numeric).toBeLessThan(100)
+})

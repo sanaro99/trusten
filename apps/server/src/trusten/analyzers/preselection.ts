@@ -25,6 +25,17 @@ const CONSENT_CHECKBOX_TEXT_PATTERNS = [
   /\bpartner\s+(?:offers?|communications?)\b/i,
 ]
 
+// A pre-ticked agreement to terms is worth knowing, but it is not marketing
+// or data-sharing consent.
+const TERMS_ONLY_PATTERN =
+  /\b(?:terms|conditions|privacy\s+(?:policy|notice|statement)|eula|user\s+agreement)\b/i
+
+// Pre-ticked boxes that add something the user may not want: a paid extra,
+// a donation, a membership, or messages. Other pre-ticked boxes ("Remember
+// me", "Billing address same as shipping", search filters) are conveniences.
+const ADD_ON_PATTERN =
+  /[$€£¥₹]\s?\d|\d\s?(?:usd|eur|gbp)\b|\b(?:add(?:ed)?|include|insurance|protection|protect|warranty|guarantee|donat\w*|tip|round\s+up|gift\s+wrap|membership|member|subscri\w*|newsletter|offers?|promotions?|marketing|deals?|upgrade|premium|priority|express|auto[\s-]?renew\w*|renew\w*|trial|plan|coverage|carbon|offset|charity|sms|text\s+messages?|notifications?|emails?)\b/i
+
 const HIDDEN_DEFAULT_SIGNALS = [
   /\bby\s+default[,\s]+you(?:'re|\s+are)\s+(?:opted|subscribed|enrolled)\b/i,
   /\b(?:automatically|by\s+default)\s+(?:enrolled|opted|subscribed)\b/i,
@@ -62,23 +73,26 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
     const patterns: DetectedPattern[] = []
 
     // Find all pre-checked checkboxes
-    const checkedBoxes: string[] = []
+    const checkedBoxes: Array<{ html: string; index: number }> = []
     const checkedRegex = new RegExp(CHECKED_CHECKBOX_PATTERN.source, 'gi')
     let match: RegExpExecArray | null
 
     while ((match = checkedRegex.exec(html)) !== null) {
       if (
         /\btype\s*=\s*["']?checkbox\b/i.test(match[0]) &&
-        /\schecked(?:\s|=|\/?>)/i.test(match[0])
+        /\schecked(?:\s|=|\/?>)/i.test(match[0]) &&
+        // A locked box ("Strictly necessary, always active") is not a choice.
+        !/\sdisabled(?:\s|=|\/?>)/i.test(match[0])
       )
-        checkedBoxes.push(match[0])
+        checkedBoxes.push({ html: match[0], index: match.index })
     }
 
     if (checkedBoxes.length === 0) return []
 
     // For each checked box, look for consent-like text nearby
-    for (const boxHtml of checkedBoxes.slice(0, 3)) {
-      const boxIndex = html.indexOf(boxHtml)
+    // Identical boxes share the same markup, so keep each match's position.
+    for (const { html: boxHtml, index: boxIndex } of checkedBoxes) {
+      if (patterns.length >= 3) break
       const surroundingHtml = html.slice(
         Math.max(0, boxIndex - 200),
         Math.min(html.length, boxIndex + boxHtml.length + 300),
@@ -110,11 +124,40 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
           )
       }
 
+      // Classify by the box's own label when there is one; nearby text can
+      // belong to a different control.
+      const choiceText = labelText || surroundingText
       const isConsentCheckbox = CONSENT_CHECKBOX_TEXT_PATTERNS.some((p) =>
-        p.test(surroundingText),
+        p.test(choiceText),
       )
+      const isTermsOnly =
+        isConsentCheckbox &&
+        TERMS_ONLY_PATTERN.test(choiceText) &&
+        !CONSENT_CHECKBOX_TEXT_PATTERNS.slice(1).some((p) => p.test(choiceText))
 
-      if (isConsentCheckbox) {
+      if (isTermsOnly) {
+        patterns.push(
+          this.buildPattern({
+            category: DarkPatternCategory.PRESELECTED_OPTIONS,
+            severity: 'medium',
+            confidence: 0.75,
+            description:
+              'An agreement checkbox is ticked before you read it. Open the linked terms before continuing; agreeing should be your own choice.',
+            url: context.url,
+            pageTitle: context.pageTitle,
+            element: {
+              text: labelText || this.clip(surroundingText, 200),
+              html: boxHtml,
+              selector: boxHtml.match(/\bid=["']([^"']+)["']/i)?.[1]
+                ? '[id=' +
+                  JSON.stringify(boxHtml.match(/\bid=["']([^"']+)["']/i)![1]) +
+                  ']'
+                : 'input[type="checkbox"][checked]',
+            },
+            evidence: { domSnapshot: surroundingHtml.slice(0, 500) },
+          }),
+        )
+      } else if (isConsentCheckbox) {
         patterns.push(
           this.buildPattern({
             category: DarkPatternCategory.PRESELECTED_OPTIONS,
@@ -135,8 +178,8 @@ export class PreselectionAnalyzer extends BaseAnalyzer {
             evidence: { domSnapshot: surroundingHtml.slice(0, 500) },
           }),
         )
-      } else if (checkedBoxes.length > 0) {
-        // Even non-consent pre-checked boxes (e.g., insurance add-ons) are problematic
+      } else if (ADD_ON_PATTERN.test(labelText || surroundingText)) {
+        // Pre-checked extras (insurance, donations, memberships) are problematic
         patterns.push(
           this.buildPattern({
             category: DarkPatternCategory.PRESELECTED_OPTIONS,

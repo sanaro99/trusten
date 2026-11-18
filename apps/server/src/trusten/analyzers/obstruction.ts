@@ -25,6 +25,10 @@ const FORCED_CONTINUITY_PATTERNS = [
   /\byou'?ll\s+be\s+(?:charged|billed)\s+\$[\d,.]+\s+(?:per|every|each)\b/i,
   /\btrial\s+ends?.*(?:charged|billed|converted)/i,
   /\bfree\s+trial.*(?:credit\s+card|payment\s+method)\b/i,
+  // "$1 for 4 weeks, then $19.99" or "Free for 7 days, then $14.99/month"
+  /(?:[$£€]\s*[\d.,]+|\bfree)\s+(?:for\s+(?:the\s+first\s+)?\d+\s+(?:days?|weeks?|months?)|trial)\b[^.]{0,40}?\bthen\s+[$£€]\s*[\d.,]+/i,
+  // "You will be charged $24/month after the trial unless you cancel"
+  /\bcharged\s+[$£€]?\s*[\d.,]+[^.]{0,40}?\bafter\s+(?:the|your)\s+(?:free\s+)?trial\b/i,
 ]
 
 // ─── Roach motel: hard-to-cancel signals ───
@@ -39,6 +43,9 @@ const HARD_TO_CANCEL_SIGNALS = [
   /\bcancell?ation\s+(?:fee|charge|penalty)\b/i,
   /\bearly\s+termination\s+fee\b/i,
   /\bno\s+refund\s+on\s+(?:cancel|cancell)/i,
+  // "Cancel anytime by calling us" or "To cancel, call us Monday to Friday"
+  /\bcancel\w*\b[^.]{0,30}?\bby\s+(?:calling|phone|telephone|mail|post|letter)\b/i,
+  /\bto\s+cancel,?\s+(?:please\s+)?(?:call|phone|ring|write\s+to|visit)\b/i,
 ]
 
 const SELF_SERVICE_CANCEL =

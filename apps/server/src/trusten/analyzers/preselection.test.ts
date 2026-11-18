@@ -55,3 +55,48 @@ test('quotes only the checkbox label, before or after the box', async () => {
   })
   expect(before.patterns[0]?.element?.text).toBe('Receive marketing emails')
 })
+
+test('ignores pre-ticked conveniences and locked boxes', async () => {
+  for (const label of [
+    'Remember me',
+    'Keep me signed in',
+    'Billing address same as shipping',
+    'Save this card for faster checkout',
+    'In stock only',
+  ]) {
+    const result = await new PreselectionAnalyzer().analyze({
+      ...context,
+      visibleText: label,
+      domSnapshot: `<label><input type="checkbox" checked> ${label}</label>`,
+    })
+    expect(result.patterns).toHaveLength(0)
+  }
+  const locked = await new PreselectionAnalyzer().analyze({
+    ...context,
+    visibleText: 'Strictly necessary (always active)',
+    domSnapshot:
+      '<label><input type="checkbox" checked disabled> Strictly necessary (always active)</label>',
+  })
+  expect(locked.patterns).toHaveLength(0)
+})
+
+test('treats a pre-ticked terms agreement as worth knowing, not serious', async () => {
+  const result = await new PreselectionAnalyzer().analyze({
+    ...context,
+    visibleText: 'I agree to the Terms',
+    domSnapshot:
+      '<label><input type="checkbox" checked> I agree to the Terms</label>',
+  })
+  expect(result.patterns.map((p) => p.severity)).toEqual(['medium'])
+})
+
+test('finds a paid extra after identical pre-ticked filter boxes', async () => {
+  const result = await new PreselectionAnalyzer().analyze({
+    ...context,
+    visibleText: 'In stock only Free delivery Add gift wrap ($4.99)',
+    domSnapshot:
+      '<label><input type="checkbox" checked> In stock only</label><label><input type="checkbox" checked> Free delivery</label><label><input type="checkbox" checked> Add gift wrap ($4.99)</label>',
+  })
+  expect(result.patterns).toHaveLength(1)
+  expect(result.patterns[0].element?.text).toContain('gift wrap')
+})
