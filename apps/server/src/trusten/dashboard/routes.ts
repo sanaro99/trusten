@@ -6,12 +6,14 @@
  */
 
 import {
+  ANALYZE_PAGE_LIMITS,
   AnalyzePageRequestSchema,
   AuditRequestSchema,
   QuickScanRequestSchema,
 } from '@trusten/shared/api'
 import { assessScanCoverage } from '@trusten/shared/domain'
 import { type Context, Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { logger } from '../../lib/logger'
 import { discoverWorkflows } from '../agent/discovery'
 import type { BrowserDriver } from '../browser/driver'
@@ -42,6 +44,10 @@ import type {
   JobCapabilityScope,
 } from '../security/job-capability'
 import {
+  ProvidedContentLimiter,
+  providedContentLimitsFromEnv,
+} from '../security/provided-content-limit'
+import {
   type PublicScanAdmission,
   PublicScanAdmissionError,
   type PublicScanAdmissionGrant,
@@ -61,12 +67,19 @@ interface Config {
   recentQuickScan?: typeof getRecentPublicQuickScan
   recentAuditJob?: typeof getRecentCompletedAuditJob
   findScan?: typeof getTrustenScanById
+  /** Per-client cap on extension submissions to `/api/analyze-page`. */
+  providedContentLimiter?: ProvidedContentLimiter
 }
 
 function reportsDirectory(): string {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? ''
   return process.env.TRUSTEN_REPORTS_DIR ?? `${home}/Desktop/trusten-reports`
 }
+
+/** Largest JSON body `/api/analyze-page` reads: every field at its cap. */
+const ANALYZE_PAGE_MAX_BODY_BYTES =
+  Object.values(ANALYZE_PAGE_LIMITS).reduce((sum, limit) => sum + limit, 0) +
+  64_000
 
 const DEMO_SESSION_COOKIE = 'trusten_demo'
 const RECENT_RESULT_MS = 10 * 60_000
@@ -323,42 +336,70 @@ export function createTrustenDashboardRoutes(config: Config) {
 
   // Analyze pre-captured content — accepts HTML/text from a browser extension or any client.
   // Does not navigate to the URL; runs analyzers on the supplied content directly.
-  app.post('/api/analyze-page', async (c) => {
-    const parsed = await parseBody(c, AnalyzePageRequestSchema)
-    if (!parsed.ok) return c.json(parsed.body, 400)
-    const { url, html, text, pageTitle, screenshotBase64, captureTruncated } =
-      parsed.data
+  // Anyone can submit any HTML for any URL here, so the result is saved as an
+  // unverified `extension` scan: it is returned to the caller and viewable by
+  // id, but never counted in public history, domain grades or statistics.
+  const providedContentLimiter =
+    config.providedContentLimiter ??
+    new ProvidedContentLimiter(providedContentLimitsFromEnv())
+  app.post(
+    '/api/analyze-page',
+    bodyLimit({
+      maxSize: ANALYZE_PAGE_MAX_BODY_BYTES,
+      onError: (c) => c.json({ error: 'Page capture is too large' }, 413),
+    }),
+    async (c) => {
+      const limit = providedContentLimiter.take(clientIp(c.req.raw.headers))
+      if (!limit.allowed) {
+        c.header('Retry-After', String(limit.retryAfterSeconds))
+        return c.json(
+          {
+            error:
+              'Too many page checks from this connection. Please wait and try again.',
+            code: 'EXTENSION_RATE_LIMITED',
+          },
+          429,
+        )
+      }
 
-    if (!parseHostname(url)) return c.json({ error: 'Invalid URL' }, 400)
+      const parsed = await parseBody(c, AnalyzePageRequestSchema)
+      if (!parsed.ok) return c.json(parsed.body, 400)
+      const { url, html, text, pageTitle, screenshotBase64, captureTruncated } =
+        parsed.data
 
-    try {
-      const engine = new TrustenEngine(config.browser, config.executionDir)
-      const result = await engine.analyzeProvidedContent(
-        url,
-        html,
-        text,
-        pageTitle,
-        { screenshotBase64, captureTruncated },
-      )
-      return c.json({
-        scanId: result.id,
-        domain: result.domain,
-        grade: result.score.grade,
-        score: result.score.numeric,
-        patternCount: result.patterns.length,
-        summary: result.score.summary,
-        categoryBreakdown: result.score.categoryBreakdown,
-        patterns: result.patterns,
-        coverage: assessScanCoverage(result.scanType, result.workflowSteps),
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      logger.error('Trusten analyze-page failed', { url, error: msg })
-      if (err instanceof ScanIncompleteError)
-        return c.json({ code: err.code, error: msg }, 422)
-      return c.json({ error: publicErrorMessage(err) }, 500)
-    }
-  })
+      if (!parseHostname(url)) return c.json({ error: 'Invalid URL' }, 400)
+
+      try {
+        const engine = new TrustenEngine(config.browser, config.executionDir)
+        const result = await engine.analyzeProvidedContent(
+          url,
+          html,
+          text,
+          pageTitle,
+          { screenshotBase64, captureTruncated },
+        )
+        return c.json({
+          scanId: result.id,
+          domain: result.domain,
+          grade: result.score.grade,
+          score: result.score.numeric,
+          patternCount: result.patterns.length,
+          summary: result.score.summary,
+          categoryBreakdown: result.score.categoryBreakdown,
+          patterns: result.patterns,
+          coverage: assessScanCoverage(result.scanType, result.workflowSteps),
+          source: 'extension',
+          verified: false,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        logger.error('Trusten analyze-page failed', { url, error: msg })
+        if (err instanceof ScanIncompleteError)
+          return c.json({ code: err.code, error: msg }, 422)
+        return c.json({ error: publicErrorMessage(err) }, 500)
+      }
+    },
+  )
 
   // Quick scan — runs immediately, returns scan ID
   app.post('/api/quick-scan', async (c) => {

@@ -100,6 +100,11 @@ Reports/screenshots/videos land in `~/Desktop/trusten-reports/`; relational
 state is stored in the PostgreSQL database selected by `DATABASE_URL`.
 Set `TRUSTEN_REPORTS_DIR` to override that artifact directory.
 
+Chromium runs with its sandbox on. It refuses to start that way as root, so
+run the server and browser tests as a normal user. Only on a trusted machine
+where that is not possible (for example a root-only container), set
+`TRUSTEN_CHROME_SANDBOX=off`; never scan untrusted sites like that.
+
 Real Chromium regressions are opt-in:
 
 ```powershell

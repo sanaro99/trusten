@@ -110,6 +110,28 @@ Never commit the real `.env` file or paste its secrets into chat.
 
 ## 3. Install the TrueNAS app
 
+The API container loads untrusted websites in Chromium with its sandbox on.
+Docker's default seccomp profile blocks the user namespaces that sandbox needs,
+so the `api` service uses `deploy/chrome-seccomp.json`: Docker's default
+profile plus `clone`, `unshare`, `setns`, and `chroot`. Copy it next to the
+environment file once (and again whenever it changes):
+
+```sh
+sudo curl -fsSL -o /mnt/YOUR_APPS_POOL/appconfig/chrome-seccomp.json \
+  https://raw.githubusercontent.com/<github-owner>/trusten/main/deploy/chrome-seccomp.json
+sudo chmod 644 /mnt/YOUR_APPS_POOL/appconfig/chrome-seccomp.json
+```
+
+The Compose file also drops every Linux capability and sets
+`no-new-privileges` for the `api` and `web` containers. Chromium is started
+with a minimal environment, so `DATABASE_URL`, LLM keys, and other secrets in
+`trusten.env` are not passed to browser processes.
+
+If the profile is missing, the API container does not start. If the host
+blocks unprivileged user namespaces, scans fail with "Chromium could not start
+its sandbox". Do not work around that with `TRUSTEN_CHROME_SANDBOX=off` in
+production; fix the host setting instead.
+
 In **Apps -> Discover -> menu -> Install via YAML**:
 
 1. Set the application name to `trusten`.

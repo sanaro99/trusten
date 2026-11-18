@@ -29,6 +29,12 @@ import { publish } from '../live/hub'
 import { ScanIncompleteError } from '../scan-incomplete-error'
 import type { AuthorizedTarget } from '../security/target-policy'
 import type { CookieInfo, NetworkRequest } from '../types'
+import {
+  CHROME_SANDBOX_ENV,
+  chromeLaunchOptions,
+  chromeSandboxEnabled,
+  explainChromeLaunchError,
+} from './chrome-launch'
 import type {
   BrowserDriver,
   DriverPageInfo,
@@ -148,13 +154,15 @@ export class PuppeteerDriver implements BrowserDriver {
     if (this.browser?.connected) return this.browser
     if (this.browser) this.discardBrowser(this.browser)
     if (!this.browserLaunch) {
+      if (!chromeSandboxEnabled()) {
+        logger.warn(
+          `Chromium sandbox is disabled (${CHROME_SANDBOX_ENV}); do not scan untrusted sites this way`,
+        )
+      }
       this.browserLaunch = puppeteer
-        .launch({
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-blink-features=AutomationControlled',
-          ],
+        .launch(chromeLaunchOptions())
+        .catch((error: unknown) => {
+          throw explainChromeLaunchError(error)
         })
         .then((browser) => {
           this.browser = browser
@@ -536,7 +544,7 @@ export class PuppeteerDriver implements BrowserDriver {
     const el = await page.$(`[data-trusten-id="${elementId}"]`)
     if (!el) throw new Error(`Element ${elementId} not found`)
     // Triple-click selects existing content; typing then replaces it.
-    await el.click({ clickCount: 3 }).catch(() => undefined)
+    await el.click({ count: 3 }).catch(() => undefined)
     await page.keyboard.type(value)
     return undefined
   }

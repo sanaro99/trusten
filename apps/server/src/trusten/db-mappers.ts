@@ -68,6 +68,7 @@ export function mapScanRow(r: Row): ScanResult {
     domain: r.domain as string,
     scanType: r.scan_type as 'quick' | 'deep',
     parentAuditId: (r.parent_audit_id as string | null) ?? null,
+    source: r.source === 'extension' ? 'extension' : 'server',
     startedAt: iso(r.started_at),
     completedAt: iso(r.completed_at),
     patterns: json<DetectedPattern[]>(r.patterns, []),

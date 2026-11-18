@@ -7,7 +7,7 @@ Base URL: `http://localhost:9200`. The dashboard and APIs are served under `/tru
 | Method | Endpoint | Body / params | Purpose |
 |---|---|---|---|
 | POST | `/trusten/api/quick-scan` | `{ url }` | Navigate headlessly + scan one page. Honors robots/rate-limit. |
-| POST | `/trusten/api/analyze-page` | `{ url, html, text? }` | Scan caller-supplied DOM (extension path); no navigation. |
+| POST | `/trusten/api/analyze-page` | `{ url, html, text?, pageTitle?, screenshotBase64? }` | Scan caller-supplied DOM (extension path); no navigation. Results are unverified (`source: "extension"`): viewable by id but never counted in history, stats or domain grades. Limited to 10 per minute and 60 per hour per client (`TRUSTEN_EXTENSION_PER_MINUTE`, `TRUSTEN_EXTENSION_PER_HOUR`); `html` up to 600,000 characters, `text` 60,000. |
 | POST | `/trusten/api/audit` | `{ url, mode?, workflows?, watch? }` | Start an async multi-workflow Deep Scan. `mode`: `fixed` (default) or `discover`. |
 | GET | `/trusten/api/audit/:jobId` | — | Poll audit status: `status`, `currentStep`, `completedWorkflows`, `plan`, `scanIds`. |
 

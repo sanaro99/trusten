@@ -33,6 +33,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL migrations', () => {
       '005_scan_attempt_throttle.sql',
       '006_scan_reservation_retention.sql',
       '007_public_audit_history.sql',
+      '008_unverified_extension_scans.sql',
     ])
     expect(
       rows.every((row) => /^[0-9a-f]{64}$/.test(String(row.checksum))),
