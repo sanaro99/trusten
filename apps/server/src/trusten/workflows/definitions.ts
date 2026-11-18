@@ -14,6 +14,24 @@
 
 import type { ScanWorkflow } from '../types'
 
+/** Buttons that show a product or booking can be added from this page. */
+const ADD_TO_CART_CONTROLS = [
+  'add to cart',
+  'add to bag',
+  'add to basket',
+  'add to trolley',
+  'buy now',
+  'reserve',
+  'book now',
+]
+
+/** Signs that the page already is the basket or booking summary. */
+const CART_PAGE = {
+  path: '(^|/)(cart|basket|bag|trolley)(/|$)',
+  heading:
+    '^(your |my |shopping )*(cart|basket|bag|trolley)\\b|^your (trip|booking|order)\\b|^order summary\\b',
+}
+
 export const CHECKOUT_WORKFLOW: ScanWorkflow = {
   id: 'checkout',
   name: 'Checkout Flow',
@@ -24,6 +42,8 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
       id: 'find-product',
       expectsNavigation: true,
       fillSearch: 'shirt',
+      continueIfPresent: { control: ADD_TO_CART_CONTROLS },
+      fallbackClickFirst: { control: ['cart', 'basket', 'bag', 'trolley'] },
       instruction:
         'Find the site\'s main search or browse functionality and search for a popular product or service relevant to this site. For travel sites: search for a trip. For e-commerce: search for "shirt" or a common product. For streaming: look for a plan.',
       aiGoal:
@@ -42,6 +62,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
       id: 'select-product',
       expectsNavigation: true,
       clickFirst: true,
+      alreadyOn: { control: ADD_TO_CART_CONTROLS },
       instruction:
         'Select the first or cheapest product/flight/hotel from the results page and open its detail page.',
       aiGoal:
@@ -64,7 +85,10 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
         'add to cart',
         'add to bag',
         'add to basket',
+        'add to trolley',
         'buy now',
+        'reserve',
+        'book now',
         'select',
       ],
       instruction:
@@ -85,6 +109,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
       id: 'cart-review',
       expectsNavigation: true,
       clickText: ['cart', 'basket', 'bag', 'view cart', 'your trip'],
+      alreadyOn: CART_PAGE,
       instruction:
         'Navigate to the cart or order summary page and review what is present.',
       aiGoal:
@@ -101,6 +126,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'checkout-start',
+      optionalIfMissing: true,
       expectsNavigation: true,
       clickText: ['proceed to checkout', 'checkout', 'continue', 'book now'],
       instruction:
@@ -132,7 +158,15 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
       instruction: 'Navigate to the account or profile settings page.',
       aiGoal:
         'Find and click on the account settings, profile settings, or membership management area. Look for a user/account icon, avatar, "My Account", "Profile", "Account Settings", or similar in the header or navigation. Click it to open the account menu or settings page.',
-      clickText: ['my account', 'account', 'profile', 'settings', 'sign in'],
+      clickText: [
+        'my account',
+        'account',
+        'profile',
+        'settings',
+        'sign in',
+        'log in',
+        'login',
+      ],
       analyzersToRun: ['ObstructionAnalyzer', 'VisualAnalyzer'],
       timeout: 40,
       screenshotBefore: false,
@@ -140,6 +174,7 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'find-cancel',
+      optionalIfMissing: true,
       expectsNavigation: true,
       instruction:
         'Look for a "Cancel subscription", "Cancel membership", "Delete account", or "Manage subscription" option.',
@@ -164,6 +199,7 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'cancel-flow',
+      optionalIfMissing: true,
       expectsNavigation: true,
       instruction:
         'Begin the cancellation process and observe every retention tactic, guilt trip, and friction point.',
@@ -287,6 +323,8 @@ export const COOKIE_CONSENT_WORKFLOW: ScanWorkflow = {
         'cookie settings',
         'customize',
         'more options',
+        'manage options',
+        'more choices',
         'preferences',
         'settings',
         'reject all',
@@ -366,6 +404,7 @@ export const PRICING_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'select-plan',
+      optionalIfMissing: true,
       expectsNavigation: true,
       clickText: [
         'get started',
@@ -486,6 +525,8 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
       expectsNavigation: true,
       navigate: '{baseUrl}',
       fillSearch: 'shirt',
+      continueIfPresent: { control: ADD_TO_CART_CONTROLS },
+      fallbackClickFirst: { control: ['cart', 'basket', 'bag', 'trolley'] },
       instruction:
         "Use the site's main search or browse to find a relevant product or service.",
       aiGoal:
@@ -504,6 +545,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
       id: 'select-product',
       expectsNavigation: true,
       clickFirst: true,
+      alreadyOn: { control: ADD_TO_CART_CONTROLS },
       instruction:
         'Select the first or cheapest result and open its detail page.',
       aiGoal:
@@ -526,7 +568,10 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
         'add to cart',
         'add to bag',
         'add to basket',
+        'add to trolley',
         'buy now',
+        'reserve',
+        'book now',
         'select',
       ],
       instruction:
@@ -547,6 +592,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
       id: 'cart-review',
       expectsNavigation: true,
       clickText: ['cart', 'basket', 'bag', 'view cart', 'your trip'],
+      alreadyOn: CART_PAGE,
       instruction:
         'Review the cart or order summary for unexpected items, hidden fees, or price changes from the product page.',
       aiGoal:
@@ -563,6 +609,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     },
     {
       id: 'checkout',
+      optionalIfMissing: true,
       expectsNavigation: true,
       clickText: ['proceed to checkout', 'checkout', 'continue', 'book now'],
       instruction:

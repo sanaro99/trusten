@@ -18,13 +18,15 @@ import { BaseAnalyzer } from './base-analyzer'
 // These are phrases typically found on "decline" buttons or links.
 
 const CONFIRMSHAM_NEGATIVE_PATTERNS = [
-  /no[,\s]+(?:thanks?[,\s]+)?i\s+don'?t\s+want/i,
-  /i\s+(?:already\s+)?(?:have\s+enough|don'?t\s+(?:want|need|care\s+about))/i,
+  /no[,\s]+(?:thanks?[,\s]+)?i\s+don['’]?t\s+want/i,
+  /i\s+(?:already\s+)?(?:have\s+enough|don['’]?t\s+(?:want|need|care\s+about))/i,
   /i\s+prefer\s+(?:to\s+)?(?:pay|miss|skip|stay|remain)\b/i,
   /no[,\s]+(?:thanks?[,\s]+)?i\s+(?:prefer|like|love|want\s+to\s+keep)/i,
-  /i(?:'ll)?\s+(?:pass|skip|miss\s+out)/i,
-  /i\s+(?:hate|don'?t\s+like)\s+(?:saving|deals?|discounts?|money)/i,
-  /no[,\s]+i\s+(?:hate|dislike|don'?t\s+care)/i,
+  /i(?:['’]ll)?\s+(?:pass|skip|miss\s+out)/i,
+  /i\s+(?:hate|don['’]?t\s+like)\s+(?:saving|deals?|discounts?|money)/i,
+  // "No thanks, I don't like being informed"
+  /no[,\s]+(?:thanks?[,\s]+)?i\s+(?:don['’]?t|do\s+not)\s+(?:like|enjoy|care\s+(?:about|for))\s+(?:being|to\s+be|getting|staying|knowing|learning|saving|winning)\b/i,
+  /no[,\s]+i\s+(?:hate|dislike|don['’]?t\s+care)/i,
 ]
 
 // ─── Trick wording patterns ───
@@ -46,7 +48,7 @@ const WEAK_DECLINE_PATTERNS = [
 ]
 
 const DECLINE_WORDING =
-  /\b(?:no,?\s+thanks?|no\s+thank\s+you|not\s+now|maybe\s+later|remind\s+me\s+later|skip|decline|dismiss|i'?ll\s+pass|don'?t\s+(?:want|need)|cancel|close)\b/i
+  /\b(?:no,?\s+thanks?|no\s+thank\s+you|not\s+now|maybe\s+later|remind\s+me\s+later|skip|decline|dismiss|i'?ll\s+pass|don['’]?t\s+(?:want|need)|cancel|close)\b/i
 const SKIP_LINK =
   /\bskip\s+(?:to\s+)?(?:the\s+)?(?:main\s+)?(?:content|navigation|nav|menu|search)\b/i
 
@@ -192,7 +194,7 @@ export class MisdirectionAnalyzer extends BaseAnalyzer {
     // Marketing copy that might contain subtle confirmshaming
     return (
       /\bno[,\s]+(?:thanks?|thank\s+you)\b/i.test(text) ||
-      /\bi(?:'ll)?\s+(?:stay|keep|remain)\b/i.test(text) ||
+      /\bi(?:['’]ll)?\s+(?:stay|keep|remain)\b/i.test(text) ||
       /\bi\s+(?:already\s+)?(?:get|have|know)\b/i.test(text)
     )
   }

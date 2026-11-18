@@ -94,6 +94,19 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
           html = page(
             '<main><h1>Checkout</h1><p>Service fee $9 is added at checkout.</p><label><input type="checkbox" checked>Receive marketing offers</label><input name="card" aria-label="Card number"><button>Place order</button></main>',
           )
+        } else if (url.pathname === '/to-locked') {
+          html = page(
+            '<main><h1>Shop</h1><a href="/browse-locked">Browse</a></main>',
+          )
+        } else if (url.pathname === '/browse-locked') {
+          html = page(
+            '<main><h1>Catalog</h1><p>Only 2 left in stock</p><a href="/locked">Account</a></main>',
+          )
+        } else if (url.pathname === '/locked') {
+          return new Response(page('<main><h1>Access denied</h1></main>'), {
+            status: 403,
+            headers: { 'content-type': 'text/html' },
+          })
         } else if (url.pathname === '/long-page') {
           html = page(
             '<main><h1>Checkout</h1><label><input type="checkbox" checked>Receive marketing offers</label><div style="height:3000px"></div></main><footer><p>Service fee $9 is added at checkout.</p></footer>',
@@ -285,10 +298,37 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
       result.workflowSteps
         ?.filter((s) => s.stepNumber > 0)
         .map((s) => s.status),
-    ).toEqual(['not-reached', 'skipped'])
+    ).toEqual(['unavailable', 'unavailable'])
     const unseen = result.workflowSteps?.find((s) => s.stepNumber === 2)
     expect(unseen?.screenshotPath).toBeFalsy()
     expect(unseen?.patternsFound).toEqual([])
+  }, 60_000)
+
+  test('keeps earlier journey evidence when a later page is refused', async () => {
+    const step = (id: string, text: string) => ({
+      id,
+      instruction: `Open ${text}`,
+      clickText: [text],
+      expectsNavigation: true,
+      analyzersToRun: ['UrgencyScarcityAnalyzer'],
+      timeout: 5,
+      screenshotBefore: false,
+      screenshotAfter: true,
+    })
+    const result = await engine.deepScan(`${baseUrl}/to-locked`, {
+      id: 'locked-account',
+      name: 'Locked account',
+      description: '',
+      steps: [step('browse', 'Browse'), step('account', 'Account')],
+    })
+    expect(result.workflowSteps?.map((s) => s.status)).toEqual([
+      'reached',
+      'not-reached',
+    ])
+    expect(result.workflowSteps?.[1].navReason).toContain('HTTP 403')
+    expect(result.patterns.some((p) => p.category === 'fake_scarcity')).toBe(
+      true,
+    )
   }, 60_000)
 
   test('rejects bot challenge content during a deep scan', async () => {

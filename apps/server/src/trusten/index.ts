@@ -275,10 +275,16 @@ export class TrustenEngine {
       // neither can act we report honestly rather than re-analyzing the homepage.
       const llmReady = getTrustenLLM().isConfigured()
       const journeyLog: string[] = []
-      // URLs already analyzed this scan — the LLM-backed visual pass runs at most
-      // once per distinct page (deterministic analyzers still run on repeats).
-      const analyzedUrls = new Set<string>()
+      // Page states already analyzed this scan, with whether their screenshot
+      // check succeeded. The visual pass runs once per distinct page state
+      // (deterministic analyzers still run on repeats); a repeat inherits the
+      // earlier result, and a failed visual check is retried.
+      const visualBySignature = new Map<string, boolean>()
       let funnelBroken = false
+      // A step has reached a new page, so a later miss is a real stop.
+      let reachedAnyStep = false
+      // The journey's entry point is missing from this website.
+      let journeyUnavailable = false
       // Last real web address, so steps never report Chrome's error page URL.
       let lastPageUrl = url
       logger.info('Trusten deep scan navigation mode', {
@@ -318,7 +324,15 @@ export class TrustenEngine {
         ) {
           const context = await this.captureContext(pid)
           this.assertUsableContext(context)
-          const preflightPatterns = await this.runAllAnalyzers(context)
+          let preflightVisual = false
+          const preflightPatterns = await this.runAnalyzers(
+            ALL_ANALYZERS,
+            context,
+            (analyzer, result) => {
+              if (analyzer.name === 'VisualAnalyzer')
+                preflightVisual = result.metadata?.visualCheckAvailable === true
+            },
+          )
           allPatterns.push(...preflightPatterns)
           if (preflightPatterns.length > 0) {
             const evidence = await this.captureStepScreenshot(
@@ -338,6 +352,7 @@ export class TrustenEngine {
               timestamp: new Date().toISOString(),
               status: 'observed',
               navAdvanced: false,
+              visualCheckAvailable: preflightVisual,
             })
           }
           await dismissCookieBanners(this.browser, pid)
@@ -351,13 +366,16 @@ export class TrustenEngine {
         let navAdvanced = false
         let deterministicActionPerformed = false
         let navReason = ''
+        let missingPage = false
+        let foundControl = false
 
         if (funnelBroken && !stepDef.navigate) {
           // A prior funnel step never advanced — running this dependent step
           // would just re-analyze the same (earlier) page. Skip it honestly.
-          status = 'skipped'
-          navReason =
-            'Skipped: an earlier funnel step did not advance, so this page was never reached'
+          status = journeyUnavailable ? 'unavailable' : 'skipped'
+          navReason = journeyUnavailable
+            ? 'This website does not appear to offer this part of the journey'
+            : 'Skipped: an earlier funnel step did not advance, so this page was never reached'
           logger.info(`Trusten step ${stepNumber} skipped`, {
             reason: navReason,
           })
@@ -366,17 +384,67 @@ export class TrustenEngine {
           // the current page in place; no navigation needed (and no LLM spent).
           status = 'observed'
           navReason = 'Observed the current page (no navigation expected)'
+        } else if (
+          stepDef.alreadyOn &&
+          (await this.pageShows(pid, stepDef.alreadyOn))
+        ) {
+          // e.g. Add to cart already opened the cart, so there is no cart link
+          // left to click. The goal is met; check this page in place.
+          status = 'observed'
+          navReason = 'Already on this part of the journey'
         } else {
           // Funnel step: try the FAST deterministic path first; only fall back
           // to the LLM navigator if the deterministic action did not advance.
           let advancedNow = false
-          if (stepDef.navigate) funnelBroken = false
+          if (stepDef.navigate) {
+            funnelBroken = false
+            journeyUnavailable = false
+          }
           if (hasDeterministic) {
+            const outcome: { missingPage?: boolean; foundControl?: boolean } =
+              {}
             deterministicActionPerformed = await this.executeStepNavigation(
               pid,
               stepDef,
               url,
+              outcome,
             )
+            missingPage = outcome.missingPage === true
+            // A search box, button or link was found and used. Returning to
+            // the start page alone does not count.
+            foundControl =
+              outcome.foundControl === true ||
+              (deterministicActionPerformed &&
+                !stepDef.fillSearch &&
+                !stepDef.clickText?.length &&
+                !stepDef.clickFirst)
+            if (
+              !foundControl &&
+              !missingPage &&
+              stepDef.continueIfPresent &&
+              (await this.pageShows(pid, stepDef.continueIfPresent))
+            ) {
+              status = 'observed'
+              navReason =
+                'This page already lets the journey continue, so no move was needed'
+            } else if (
+              !foundControl &&
+              !missingPage &&
+              stepDef.fallbackClickFirst &&
+              (await this.pageShows(pid, stepDef.fallbackClickFirst))
+            ) {
+              deterministicActionPerformed = await this.executeStepNavigation(
+                pid,
+                {
+                  ...stepDef,
+                  navigate: undefined,
+                  fillSearch: undefined,
+                  clickText: undefined,
+                  clickFirst: true,
+                },
+                url,
+              )
+            }
             if (this.browser.waitForIdle) {
               await this.browser
                 .waitForIdle(pid, { timeout: 5000 })
@@ -387,12 +455,19 @@ export class TrustenEngine {
             advancedNow =
               deterministicActionPerformed &&
               midState.signature !== before.signature
-            navReason = advancedNow
+            navReason ||= advancedNow
               ? 'Deterministic navigation'
               : 'Deterministic action did not advance'
           }
 
-          if (!advancedNow && llmReady && stepDef.aiGoal) {
+          if (status === 'observed') {
+            // Already on a page that continues the journey.
+          } else if (
+            !advancedNow &&
+            llmReady &&
+            stepDef.aiGoal &&
+            !missingPage
+          ) {
             // Deterministic path stalled — let the LLM navigator take over.
             const resolvedGoal = resolveGoalTemplate(
               stepDef.aiGoal,
@@ -486,6 +561,27 @@ export class TrustenEngine {
           }
         }
 
+        // The journey's first move found nothing to click: the website does
+        // not seem to offer this journey (no basket, no pricing page, no
+        // cookie banner). That is not a blocked check.
+        if (
+          status === 'not-reached' &&
+          (!reachedAnyStep || stepDef.optionalIfMissing) &&
+          !landedOnBrowserError &&
+          (missingPage ||
+            (!foundControl &&
+              !!(
+                stepDef.fillSearch ||
+                stepDef.clickText?.length ||
+                stepDef.clickFirst
+              )))
+        ) {
+          status = 'unavailable'
+          journeyUnavailable = true
+          navReason =
+            'This website does not appear to offer this part of the journey'
+        }
+
         // Only analyze when we actually navigated (or legitimately observed the
         // current page). Skipped / no-navigation steps would just re-analyze an
         // already-covered page and inflate duplicate findings.
@@ -493,27 +589,52 @@ export class TrustenEngine {
         let visualCheckAvailable = false
         if (status === 'reached' || status === 'observed') {
           const urlKey = currentState.signature
-          const isNewPage = !analyzedUrls.has(urlKey)
-          analyzedUrls.add(urlKey)
+          const earlierVisual = visualBySignature.get(urlKey)
 
-          const context = await this.captureContext(pid)
-          this.assertUsableContext(context)
-          // Run the costly LLM-backed visual pass only the first time we see a
-          // page; on repeats, deterministic analyzers only.
-          const names = isNewPage
-            ? stepDef.analyzersToRun
-            : stepDef.analyzersToRun.filter((n) => n !== 'VisualAnalyzer')
-          const targetAnalyzers = getAnalyzers(names)
-          stepPatterns = await this.runAnalyzers(
-            targetAnalyzers,
-            context,
-            (analyzer, result) => {
-              if (analyzer.name === 'VisualAnalyzer')
-                visualCheckAvailable =
-                  result.metadata?.visualCheckAvailable === true
-            },
-          )
-          allPatterns.push(...stepPatterns)
+          let context: AnalyzerContext | null = null
+          try {
+            context = await this.captureContext(pid)
+            this.assertUsableContext(context)
+          } catch (error) {
+            // An error or verification page part-way through a journey ends
+            // this journey, but the steps already checked keep their evidence.
+            if (!(error instanceof ScanIncompleteError)) throw error
+            context = null
+            funnelBroken = true
+            const missingPage =
+              error.httpStatus === 404 || error.httpStatus === 410
+            status =
+              missingPage && !reachedAnyStep ? 'unavailable' : 'not-reached'
+            if (status === 'unavailable') journeyUnavailable = true
+            navReason = error.message
+            logger.info(`Trusten step ${stepNumber} stopped on its page`, {
+              status,
+              reason: error.message,
+            })
+          }
+
+          if (context) {
+            // Run the costly LLM-backed visual pass only once per page state;
+            // on repeats, reuse its result unless it failed the first time.
+            const rerunVisual = earlierVisual !== true
+            const names = rerunVisual
+              ? stepDef.analyzersToRun
+              : stepDef.analyzersToRun.filter((n) => n !== 'VisualAnalyzer')
+            visualCheckAvailable = earlierVisual === true
+            const targetAnalyzers = getAnalyzers(names)
+            stepPatterns = await this.runAnalyzers(
+              targetAnalyzers,
+              context,
+              (analyzer, result) => {
+                if (analyzer.name === 'VisualAnalyzer')
+                  visualCheckAvailable =
+                    result.metadata?.visualCheckAvailable === true
+              },
+            )
+            visualBySignature.set(urlKey, visualCheckAvailable)
+            allPatterns.push(...stepPatterns)
+            if (status === 'reached') reachedAnyStep = true
+          }
         }
 
         if (opts.jobKey) {
@@ -530,6 +651,7 @@ export class TrustenEngine {
         const { screenshotB64, screenshotPath } =
           status === 'skipped' ||
           status === 'no-navigation' ||
+          status === 'unavailable' ||
           landedOnBrowserError
             ? { screenshotB64: '', screenshotPath: '' }
             : await this.captureStepScreenshot(
@@ -876,6 +998,7 @@ export class TrustenEngine {
         [401, 403, 429].includes(pageInfo.httpStatus)
           ? 'SITE_BLOCKED'
           : 'PAGE_LOAD_FAILED',
+        pageInfo.httpStatus,
       )
     const url = pageInfo?.url ?? ''
     const pageTitle = pageInfo?.title ?? ''
@@ -1273,6 +1396,34 @@ export class TrustenEngine {
     })
   }
 
+  /** Whether the current page already shows one of the given signals. */
+  private async pageShows(
+    pageId: number,
+    presence: import('./types').PagePresence,
+  ): Promise<boolean> {
+    const script = `(function () {
+      const p = ${JSON.stringify(presence)};
+      const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      if (p.path && new RegExp(p.path, 'i').test(location.pathname)) return true;
+      if (p.heading) {
+        const re = new RegExp(p.heading, 'i');
+        if ([...document.querySelectorAll('h1, h2')].some((h) => visible(h) && re.test((h.textContent || '').trim()))) return true;
+      }
+      if (p.control && p.control.length) {
+        const wanted = p.control.map((c) => c.toLowerCase());
+        const label = (el) => (el.getAttribute('aria-label') || el.textContent || el.value || '').toLowerCase().trim();
+        return [...document.querySelectorAll('a, button, [role="button"], input[type="submit"], input[type="button"]')]
+          .some((el) => visible(el) && !el.disabled && wanted.some((w) => label(el).includes(w)));
+      }
+      return false;
+    })()`
+    try {
+      return (await this.browser.evaluate(pageId, script)).value === true
+    } catch {
+      return false
+    }
+  }
+
   /**
    * Execute the navigation actions for a workflow step:
    * 1. Navigate to a URL if specified
@@ -1283,6 +1434,7 @@ export class TrustenEngine {
     pageId: number,
     stepDef: import('./types').WorkflowStepDefinition,
     baseUrl: string,
+    outcome: { missingPage?: boolean; foundControl?: boolean } = {},
   ): Promise<boolean> {
     let actionPerformed = false
     // 1. Navigate to explicit URL
@@ -1296,6 +1448,11 @@ export class TrustenEngine {
         actionPerformed = true
         await this.waitForPageLoad(pageId)
       } catch (err) {
+        if (
+          err instanceof ScanIncompleteError &&
+          (err.httpStatus === 404 || err.httpStatus === 410)
+        )
+          outcome.missingPage = true
         logger.warn('Trusten: navigate failed', { target, error: String(err) })
       }
     }
@@ -1356,6 +1513,7 @@ export class TrustenEngine {
         const fillResult = await this.browser.evaluate(pageId, fillScript)
         if (fillResult.value === true) {
           actionPerformed = true
+          outcome.foundControl = true
           logger.info('Trusten: filled search', { query: stepDef.fillSearch })
         } else {
           logger.warn('Trusten: no search input found', {
@@ -1408,6 +1566,7 @@ export class TrustenEngine {
         const result = await this.browser.evaluate(pageId, clickFirstScript)
         if (result.value === true || typeof result.value === 'string') {
           actionPerformed = true
+          outcome.foundControl = true
           logger.info('Trusten: clicked first result', {
             matched: result.value,
           })
@@ -1454,6 +1613,7 @@ export class TrustenEngine {
         const result = await this.browser.evaluate(pageId, script)
         if (result.value === true || typeof result.value === 'string') {
           actionPerformed = true
+          outcome.foundControl = true
           logger.info('Trusten: clicked element', {
             text,
             matched: result.value,

@@ -91,7 +91,7 @@ const checkedDate = $derived(
     </div>
   </header>
 
-  {#if summary.limited}
+  {#if summary.extensionHelps}
     <a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>
   {/if}
 

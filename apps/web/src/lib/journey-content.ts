@@ -167,6 +167,16 @@ export function getJourneyStepContent(step: WorkflowStep): JourneyStepContent {
       pageLabel: pageLabel(step.url),
     }
   }
+  if (step.status === 'unavailable') {
+    return {
+      ...action,
+      status: 'pending',
+      statusLabel: 'Not on this website',
+      outcome:
+        'Trusten did not find this part of the journey on the website, so it is not counted against the check.',
+      pageLabel: pageLabel(step.url),
+    }
+  }
   if (step.status === 'skipped') {
     return {
       ...action,

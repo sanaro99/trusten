@@ -11,10 +11,13 @@ interface Props {
   steps: WorkflowStep[]
 }
 
-let { scanId, steps }: Props = $props()
+let { scanId, steps: allSteps }: Props = $props()
 let selected = $state<WorkflowStep>()
 let dialog = $state<HTMLDialogElement>()
 
+// Journeys the website does not offer are summarized, not drawn as failures.
+const steps = $derived(allSteps.filter((step) => step.status !== 'unavailable'))
+const notOffered = $derived(allSteps.length - steps.length)
 const reached = $derived(completedJourneySteps(steps))
 
 function screenshotUrl(step: WorkflowStep): string {
@@ -46,6 +49,11 @@ function openFinding(id: string) {
       <p class="mt-2 mb-0 max-w-measure text-base-content/65">
         We completed {reached} of {steps.length} steps. Choose a step to see the page evidence and what happened.
       </p>
+      {#if notOffered > 0}
+        <p class="mt-1 mb-0 max-w-measure text-sm text-base-content/60">
+          Some journeys, such as a basket or a pricing page, were not found on this website, so they are not counted.
+        </p>
+      {/if}
     </div>
     <div class="badge badge-lg badge-neutral">{reached}/{steps.length} completed</div>
   </div>

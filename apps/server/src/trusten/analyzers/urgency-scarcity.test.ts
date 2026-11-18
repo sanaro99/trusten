@@ -92,3 +92,30 @@ test('a duration without seconds is not a running countdown', async () => {
   })
   expect(result.patterns).toHaveLength(0)
 })
+
+test('flags live viewer and booking counters as popularity claims', async () => {
+  for (const text of [
+    '23 people are looking at this hotel right now',
+    'Booked 41 times in the last 24 hours',
+    'Sold 1,284 times today',
+  ]) {
+    const result = await new UrgencyScarcityAnalyzer().analyze({
+      ...context,
+      domSnapshot: `<p>${text}</p>`,
+      visibleText: text,
+    })
+    expect(
+      result.patterns.some((p) => p.category === 'fake_social_proof'),
+    ).toBe(true)
+  }
+})
+
+test('does not treat review counts as live popularity counters', async () => {
+  const text = '4.6 out of 5 stars from 1,203 verified reviews'
+  const result = await new UrgencyScarcityAnalyzer().analyze({
+    ...context,
+    domSnapshot: `<p>${text}</p>`,
+    visibleText: text,
+  })
+  expect(result.patterns).toHaveLength(0)
+})

@@ -16,13 +16,26 @@ const steps = (statuses: WorkflowStep['status'][]): WorkflowStep[] =>
   }))
 
 describe('getReportSummary', () => {
+  test('offers the Chrome extension only when the website blocked the check', () => {
+    const blocked = steps(['observed', 'not-reached'])
+    blocked[1].navReason = 'Target page returned HTTP 403'
+    expect(getReportSummary('A', 0, blocked).extensionHelps).toBe(true)
+    const stalled = steps(['observed', 'not-reached'])
+    expect(getReportSummary('A', 0, stalled).extensionHelps).toBe(false)
+  })
+  test('names stopped journey steps before the screenshot check', () => {
+    const partial = steps(['observed', 'reached', 'not-reached'])
+    partial[1].visualCheckAvailable = false
+    const summary = getReportSummary('B', 1, partial)
+    expect(summary.sub).toContain('2 of 3 journey steps')
+  })
   test('does not call a visually incomplete journey fair', () => {
     const incomplete = steps(['observed', 'reached'])
     incomplete[1].visualCheckAvailable = false
     const summary = getReportSummary('A', 0, incomplete)
     expect(summary.limited).toBe(true)
     expect(summary.headline).not.toMatch(/fair/)
-    expect(summary.sub).toContain('visual')
+    expect(summary.sub).toContain('screenshot check')
   })
   test('describes homepage-only observations as a page check', () => {
     const summary = getReportSummary('A', 0, steps(['observed', 'observed']))

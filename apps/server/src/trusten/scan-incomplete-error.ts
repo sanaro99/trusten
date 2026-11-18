@@ -9,6 +9,8 @@ export class ScanIncompleteError extends Error {
   constructor(
     message: string,
     readonly code: ScanIncompleteCode = 'SCAN_INCOMPLETE',
+    /** HTTP status of the page that could not be checked, when known. */
+    readonly httpStatus?: number,
   ) {
     super(message)
     this.name = 'ScanIncompleteError'

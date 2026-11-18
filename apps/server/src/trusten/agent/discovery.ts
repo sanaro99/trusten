@@ -393,7 +393,7 @@ function retailJourney(
 
 function consentJourney(map: SiteMap): ScanWorkflow | null {
   const controls = [...new Set(map.consentControls || [])].filter((label) =>
-    /manage (?:preferences|cookies)|cookie settings|customize|more options/i.test(
+    /manage (?:preferences|cookies|options)|cookie settings|customi[sz]e|more (?:options|choices)/i.test(
       label,
     ),
   )

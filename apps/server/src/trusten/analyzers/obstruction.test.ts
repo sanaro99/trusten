@@ -69,3 +69,33 @@ describe('observed subscription obstruction', () => {
     expect(patterns.some((p) => p.category === 'forced_continuity')).toBe(true)
   })
 })
+
+describe('subscription traps', () => {
+  test('flags an intro price that turns into a full price', async () => {
+    const patterns = await analyze(
+      '$1 for 4 weeks, then $19.99 every 4 weeks. Subscribe now.',
+    )
+    expect(patterns.some((p) => p.category === 'forced_continuity')).toBe(true)
+  })
+  test('flags a charge after a trial', async () => {
+    const patterns = await analyze(
+      'Credit card required. You will be charged $24/user/month after the trial unless you cancel.',
+    )
+    expect(patterns.some((p) => p.category === 'forced_continuity')).toBe(true)
+  })
+  test('flags cancelling only by phone', async () => {
+    for (const text of [
+      'Cancel anytime by calling us.',
+      'To cancel, call us Monday to Friday, 9am to 11am.',
+    ]) {
+      const patterns = await analyze(text)
+      expect(patterns.some((p) => p.category === 'hard_to_cancel')).toBe(true)
+    }
+  })
+  test('does not flag a clear free trial with self-service cancel', async () => {
+    const patterns = await analyze(
+      'Try it free for 14 days, no card required. Cancel anytime from your account settings.',
+    )
+    expect(patterns).toHaveLength(0)
+  })
+})

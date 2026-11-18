@@ -9,6 +9,24 @@ const captured = {
 }
 
 describe('scan coverage', () => {
+  test('journeys the website does not offer do not make a check limited', () => {
+    const coverage = assessScanCoverage('deep', [
+      captured,
+      { ...captured, status: 'reached', url: 'https://example.com/pricing' },
+      { url: 'https://example.com/', status: 'unavailable' },
+      { url: 'https://example.com/', status: 'unavailable' },
+    ])
+    expect(coverage.status).toBe('complete')
+    expect(coverage.total).toBe(2)
+    expect(coverage.unavailable).toBe(2)
+  })
+  test('a check where every journey was unavailable is still limited', () => {
+    expect(
+      assessScanCoverage('deep', [
+        { url: 'https://example.com/', status: 'unavailable' },
+      ]).status,
+    ).toBe('partial')
+  })
   test('a text-only extension check is limited, not unverifiable', () => {
     const coverage = assessScanCoverage('quick', [
       {

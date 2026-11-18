@@ -61,6 +61,8 @@ Do not hand-edit the development schema.
 | `TRUSTEN_LLM_TIMEOUT_MS` | `8000` | Per-call LLM timeout for text requests |
 | `TRUSTEN_LLM_VISION_TIMEOUT_MS` | `25000` | Per-attempt LLM timeout for screenshot checks |
 | `TRUSTEN_LLM_VISION_RETRIES` | `1` | Extra attempts when a screenshot check times out |
+| `TRUSTEN_LLM_CONCURRENCY` | `3` | AI requests sent to one provider at a time; the rest wait in a queue |
+| `TRUSTEN_LLM_RATE_LIMIT_WAIT_MS` | `20000` | Longest Retry-After a rate-limited (429) request waits out before one retry |
 | `TRUSTEN_IGNORE_ROBOTS` | — | `1` bypasses robots.txt (local testing) |
 | `TRUSTEN_RATE_WINDOW_MS` | `60000` | Per-domain scan rate-limit window |
 | `NODE_ENV` | — | `development` enables pretty logs |
