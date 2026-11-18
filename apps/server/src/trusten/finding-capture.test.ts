@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import path from 'node:path'
 import {
   buildMeasureScript,
   captureDirectory,
   captureFileName,
+  defaultStepScreenshotPath,
   isValidCapture,
+  parseStepNumber,
   quotedPhrases,
   searchText,
 } from './finding-capture'
@@ -106,3 +109,25 @@ describe.skipIf(process.env.TRUSTEN_BROWSER_TESTS !== '1')(
     }, 30_000)
   },
 )
+
+describe('default step screenshot path', () => {
+  const reports = path.resolve('/srv/reports')
+
+  test('builds the path inside the scan folder', () => {
+    expect(defaultStepScreenshotPath('scan-1-ab', 3, reports)).toBe(
+      path.join(reports, 'screenshots', 'scan-1-ab', 'step-3.jpg'),
+    )
+  })
+
+  test('refuses ids that could leave the screenshots folder', () => {
+    for (const id of ['../../secret', 'scan-1/../../x', '..\\x', '', '.'])
+      expect(defaultStepScreenshotPath(id, 1, reports)).toBeNull()
+  })
+
+  test('accepts only plain step numbers from a URL', () => {
+    expect(parseStepNumber('0')).toBe(0)
+    expect(parseStepNumber('12')).toBe(12)
+    for (const raw of ['', '-1', '1.5', '01', '1e2', ' 1', '0x1', '99999'])
+      expect(parseStepNumber(raw)).toBeNull()
+  })
+})
