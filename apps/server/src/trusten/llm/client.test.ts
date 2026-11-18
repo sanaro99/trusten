@@ -578,3 +578,78 @@ for (const requireImage of [true, false])
       wire.restore()
     }
   })
+
+test('a rate-limited request waits out Retry-After once instead of failing', async () => {
+  let calls = 0
+  const wire = captureRequests(() => {
+    calls++
+    return calls === 1
+      ? new Response('{"error":"quota"}', {
+          status: 429,
+          headers: { 'retry-after': '0' },
+        })
+      : Response.json({ choices: [{ message: { content: 'after wait' } }] })
+  })
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'groq',
+      apiKey: 'groq-fixture-key',
+    })
+    await expect(
+      client.complete({ messages: [{ role: 'user', content: 'Hello' }] }),
+    ).resolves.toBe('after wait')
+    expect(wire.requests).toHaveLength(2)
+    // A busy provider is not benched: the next request is still sent.
+    await expect(
+      client.complete({ messages: [{ role: 'user', content: 'Again' }] }),
+    ).resolves.toBe('after wait')
+  } finally {
+    wire.restore()
+  }
+})
+
+test('an identical request reuses the earlier answer', async () => {
+  const wire = captureRequests()
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'groq',
+      apiKey: 'groq-fixture-key',
+    })
+    const options = { messages: [{ role: 'user' as const, content: 'Same' }] }
+    await client.complete(options)
+    await client.complete(options)
+    expect(wire.requests).toHaveLength(1)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('parallel requests to one provider are sent a few at a time', async () => {
+  let active = 0
+  let peak = 0
+  const implementation = Object.assign(
+    async () => {
+      active++
+      peak = Math.max(peak, active)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      active--
+      return Response.json({ choices: [{ message: { content: 'ok' } }] })
+    },
+    { preconnect: fetch.preconnect },
+  )
+  const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(implementation)
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'groq',
+      apiKey: 'groq-fixture-key',
+    })
+    await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        client.complete({ messages: [{ role: 'user', content: `Page ${i}` }] }),
+      ),
+    )
+    expect(peak).toBeLessThanOrEqual(3)
+  } finally {
+    fetchSpy.mockRestore()
+  }
+})

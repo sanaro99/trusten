@@ -10,6 +10,7 @@
  * base URLs, auth headers, and default models.
  */
 
+import { createHash } from 'node:crypto'
 import { logger } from '../../lib/logger'
 import type { TrustenLLMConfig, TrustenLLMProvider } from '../types'
 
@@ -100,6 +101,53 @@ function isTimeout(error: unknown): boolean {
  * each eat a full timeout against the same dead endpoint.
  */
 const UNREACHABLE_TTL_MS = 60_000
+
+/**
+ * A page check fires several analyzers at once, and a full check visits many
+ * pages, which used to burst past free-tier rate limits. Requests to one
+ * provider are queued to this many at a time.
+ */
+const LLM_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.TRUSTEN_LLM_CONCURRENCY ?? 3),
+)
+/** Longest wait a rate-limited (429) request will sit out before one retry. */
+const LLM_RATE_LIMIT_WAIT_MS = Number(
+  process.env.TRUSTEN_LLM_RATE_LIMIT_WAIT_MS ?? 20_000,
+)
+/** Used when a 429 response gives no Retry-After. */
+const DEFAULT_RATE_LIMIT_PAUSE_MS = 5_000
+/**
+ * Identical requests (the same page checked again later in a journey) reuse
+ * the earlier answer: fewer requests, and the same page gets the same result.
+ */
+const RESPONSE_CACHE_TTL_MS = 10 * 60_000
+const RESPONSE_CACHE_MAX = 300
+
+/** A non-2xx provider response; keeps the status and any Retry-After delay. */
+class LLMHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message)
+  }
+}
+
+function isRateLimited(error: unknown): error is LLMHttpError {
+  return error instanceof LLMHttpError && error.status === 429
+}
+
+function retryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined
+  const seconds = Number(header)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  const date = Date.parse(header)
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now())
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const STRIKE_THRESHOLD = Number(process.env.TRUSTEN_LLM_STRIKES ?? 3)
 
 function messagesHaveImage(messages: LLMMessage[]): boolean {
@@ -300,6 +348,66 @@ export class TrustenLLMClient {
   private readonly unreachableUntil = new Map<TrustenLLMProvider, number>()
   private readonly failureStrikes = new Map<TrustenLLMProvider, number>()
   private readonly textOnlyModels = new Set<string>()
+  private readonly inFlight = new Map<TrustenLLMProvider, number>()
+  private readonly queued = new Map<TrustenLLMProvider, Array<() => void>>()
+  private readonly pausedUntil = new Map<TrustenLLMProvider, number>()
+  private readonly responses = new Map<string, { value: string; at: number }>()
+
+  /** Wait for a free request slot (and any rate-limit pause) on a provider. */
+  private async acquire(provider: TrustenLLMProvider): Promise<void> {
+    while ((this.inFlight.get(provider) ?? 0) >= LLM_CONCURRENCY) {
+      await new Promise<void>((resolve) => {
+        const queue = this.queued.get(provider) ?? []
+        queue.push(resolve)
+        this.queued.set(provider, queue)
+      })
+    }
+    this.inFlight.set(provider, (this.inFlight.get(provider) ?? 0) + 1)
+    const pause = (this.pausedUntil.get(provider) ?? 0) - Date.now()
+    if (pause > 0) await wait(pause)
+  }
+
+  private release(provider: TrustenLLMProvider): void {
+    this.inFlight.set(
+      provider,
+      Math.max(0, (this.inFlight.get(provider) ?? 1) - 1),
+    )
+    this.queued.get(provider)?.shift()?.()
+  }
+
+  private cacheKey(options: LLMCompletionOptions): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify([
+          options.provider ?? '',
+          options.messages,
+          options.maxTokens ?? null,
+          options.temperature ?? null,
+          options.requireImage ?? false,
+        ]),
+      )
+      .digest('hex')
+  }
+
+  private cachedResponse(key: string): string | undefined {
+    const hit = this.responses.get(key)
+    if (!hit) return undefined
+    if (Date.now() - hit.at > RESPONSE_CACHE_TTL_MS) {
+      this.responses.delete(key)
+      return undefined
+    }
+    return hit.value
+  }
+
+  private remember(key: string, value: string): void {
+    this.responses.delete(key)
+    this.responses.set(key, { value, at: Date.now() })
+    while (this.responses.size > RESPONSE_CACHE_MAX) {
+      const oldest = this.responses.keys().next().value
+      if (oldest === undefined) break
+      this.responses.delete(oldest)
+    }
+  }
 
   private isUnreachable(provider: TrustenLLMProvider): boolean {
     const until = this.unreachableUntil.get(provider)
@@ -442,7 +550,11 @@ export class TrustenLLMClient {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error')
-      throw new Error(`LLM request failed (${response.status}): ${errorText}`)
+      throw new LLMHttpError(
+        `LLM request failed (${response.status}): ${errorText}`,
+        response.status,
+        retryAfterMs(response.headers.get('retry-after')),
+      )
     }
 
     const data = (await response.json()) as ChatCompletionResponse
@@ -463,16 +575,42 @@ export class TrustenLLMClient {
     // Callers with their own budget (such as navigation) keep a single attempt.
     const retries =
       vision && options.timeoutMs === undefined ? LLM_VISION_RETRIES : 0
+    let rateLimitRetried = false
     try {
       for (let attempt = 0; ; attempt++) {
         try {
-          return await this.sendRequest(
-            request.url,
-            request.headers,
-            request.body,
-            timeout,
-          )
+          await this.acquire(config.provider)
+          try {
+            return await this.sendRequest(
+              request.url,
+              request.headers,
+              request.body,
+              timeout,
+            )
+          } finally {
+            this.release(config.provider)
+          }
         } catch (error) {
+          if (isRateLimited(error)) {
+            // Sit out the provider's limit once, and hold back the queued
+            // requests too, rather than failing the check.
+            const pause = error.retryAfterMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS
+            if (rateLimitRetried || pause > LLM_RATE_LIMIT_WAIT_MS) throw error
+            rateLimitRetried = true
+            this.pausedUntil.set(
+              config.provider,
+              Math.max(
+                this.pausedUntil.get(config.provider) ?? 0,
+                Date.now() + pause,
+              ),
+            )
+            logger.warn('Trusten LLM rate limited, waiting before retry', {
+              provider: config.provider,
+              waitMs: pause,
+            })
+            attempt--
+            continue
+          }
           if (!isTimeout(error) || attempt >= retries) throw error
           logger.warn('Trusten LLM screenshot request timed out, retrying', {
             provider: config.provider,
@@ -511,6 +649,9 @@ export class TrustenLLMClient {
     if (options.requireImage && !messagesHaveImage(options.messages)) {
       throw new Error('Trusten vision request requires a screenshot')
     }
+    const key = this.cacheKey(options)
+    const cached = this.cachedResponse(key)
+    if (cached !== undefined) return cached
     const primary = options.provider ?? this.config.provider
     let lastError: unknown = new Error(
       options.requireImage
@@ -530,6 +671,7 @@ export class TrustenLLMClient {
       try {
         const content = await this.completeWithProvider(config, options)
         this.markReachable(provider)
+        this.remember(key, content)
         return content
       } catch (error) {
         lastError = error
@@ -541,7 +683,10 @@ export class TrustenLLMClient {
             model: config.model ?? PROVIDER_DEFAULTS[provider].defaultModel,
             hint: 'Set a current model with the provider _MODEL setting',
           })
-        } else if (!isImageRejection(msg)) this.markUnreachable(provider)
+        } else if (!isImageRejection(msg) && !isRateLimited(error))
+          // A rate limit means the provider works but is busy; it is paused
+          // above, not treated as down.
+          this.markUnreachable(provider)
         logger.warn('Trusten LLM provider request failed', {
           provider,
           model: config.model ?? PROVIDER_DEFAULTS[provider].defaultModel,
