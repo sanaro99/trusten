@@ -437,7 +437,10 @@ test('the audit result limits its verdict when the overview succeeded but a link
     page.locator('.badge').filter({ hasText: 'Limited check' }),
   ).toBeVisible()
   await expect(
-    page.getByText('We completed 1 of 4 journey steps before the website stopped us.', { exact: false }),
+    page.getByText(
+      'We completed 1 of 4 journey steps before the website stopped us.',
+      { exact: false },
+    ),
   ).toBeVisible()
   await expect(
     page.getByRole('heading', { name: 'This website looks fair', exact: true }),
