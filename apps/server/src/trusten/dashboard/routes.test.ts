@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import type { BrowserDriver } from '../browser/driver'
 import type { BotVerifier } from '../security/bot-verifier'
 import { FakeBotVerifier } from '../security/bot-verifier'
@@ -9,8 +12,12 @@ import {
 import { PublicScanAdmission } from '../security/public-scan-admission'
 import { createTrustenDashboardRoutes } from './routes'
 
-function app(botVerifier: BotVerifier = new FakeBotVerifier()) {
+function app(
+  botVerifier: BotVerifier = new FakeBotVerifier(),
+  extra: Partial<Parameters<typeof createTrustenDashboardRoutes>[0]> = {},
+) {
   return createTrustenDashboardRoutes({
+    ...extra,
     browser: {} as BrowserDriver,
     executionDir: process.cwd(),
     secureCookies: false,
@@ -127,5 +134,66 @@ describe('public scan route admission', () => {
     })
 
     expect(remoteIp).toBe('192.0.2.10')
+  })
+})
+
+describe('step screenshot route', () => {
+  let root: string
+  let previousReportsDir: string | undefined
+  let lookups: string[]
+  const scanApp = () =>
+    app(undefined, {
+      findScan: async (id: string) => {
+        lookups.push(id)
+        return null
+      },
+    })
+
+  beforeAll(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'trusten-shot-'))
+    const reportsDir = path.join(root, 'reports')
+    mkdirSync(path.join(reportsDir, 'screenshots', 'scan-123-abc'), {
+      recursive: true,
+    })
+    writeFileSync(
+      path.join(reportsDir, 'screenshots', 'scan-123-abc', 'step-1.jpg'),
+      'inside',
+    )
+    mkdirSync(path.join(root, 'secret', 'x'), { recursive: true })
+    writeFileSync(path.join(root, 'secret', 'x', 'step-1.jpg'), 'outside')
+    previousReportsDir = process.env.TRUSTEN_REPORTS_DIR
+    process.env.TRUSTEN_REPORTS_DIR = reportsDir
+  })
+
+  afterAll(() => {
+    if (previousReportsDir === undefined) delete process.env.TRUSTEN_REPORTS_DIR
+    else process.env.TRUSTEN_REPORTS_DIR = previousReportsDir
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('serves a saved step screenshot for a well-formed scan id', async () => {
+    lookups = []
+    const response = await scanApp().request(
+      '/report/scan-123-abc/screenshot/1',
+    )
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('inside')
+  })
+
+  test.each([
+    '/report/..%2F..%2Fsecret%2Fx/screenshot/1',
+    '/report/..%2Fsecret%2Fx/screenshot/1',
+    '/report/scan-1%2F..%2F..%2F..%2Fsecret%2Fx/screenshot/1',
+    '/report/..%5C..%5Csecret%5Cx/screenshot/1',
+    '/report/not-a-scan/screenshot/1',
+    '/report/scan-123-abc/screenshot/1.5',
+    '/report/scan-123-abc/screenshot/-1',
+    '/report/scan-123-abc/screenshot/01',
+  ])('refuses %s without reading the file or the database', async (url) => {
+    lookups = []
+    const response = await scanApp().request(url)
+    expect(response.status).toBe(404)
+    expect(await response.text()).not.toContain('outside')
+    expect(lookups).toEqual([])
   })
 })

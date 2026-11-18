@@ -27,7 +27,13 @@ import {
   getTrustenScansByDomain,
   updateAuditJob,
 } from '../db'
-import { captureDirectory, isValidCapture } from '../finding-capture'
+import {
+  captureDirectory,
+  defaultStepScreenshotPath,
+  isValidCapture,
+  isValidScanId,
+  parseStepNumber,
+} from '../finding-capture'
 import { TrustenEngine } from '../index'
 import { closeChannel, publish } from '../live/hub'
 import { ScanIncompleteError } from '../scan-incomplete-error'
@@ -54,6 +60,12 @@ interface Config {
   secureCookies?: boolean
   recentQuickScan?: typeof getRecentPublicQuickScan
   recentAuditJob?: typeof getRecentCompletedAuditJob
+  findScan?: typeof getTrustenScanById
+}
+
+function reportsDirectory(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? ''
+  return process.env.TRUSTEN_REPORTS_DIR ?? `${home}/Desktop/trusten-reports`
 }
 
 const DEMO_SESSION_COOKIE = 'trusten_demo'
@@ -181,6 +193,7 @@ export function createTrustenDashboardRoutes(config: Config) {
   const app = new Hono()
   const findQuickScan = config.recentQuickScan ?? getRecentPublicQuickScan
   const findAuditJob = config.recentAuditJob ?? getRecentCompletedAuditJob
+  const findScan = config.findScan ?? getTrustenScanById
 
   // Finding screenshot — validated file name inside the scan's own folder
   app.get('/report/:id/capture/:file', async (c) => {
@@ -213,34 +226,20 @@ export function createTrustenDashboardRoutes(config: Config) {
   // Step screenshot — served directly from the saved file
   app.get('/report/:id/screenshot/:step', async (c) => {
     const id = c.req.param('id')
-    const step = Number(c.req.param('step'))
-    const scan = await getTrustenScanById(id)
+    const step = parseStepNumber(c.req.param('step'))
+    // Reject anything that is not a scan id before it reaches a file path.
+    if (!isValidScanId(id) || step === null)
+      return c.text('Screenshot not found', 404)
+    const scan = await findScan(id)
 
     const wfStep = scan?.workflowSteps?.find((s) => s.stepNumber === step) as
       | { screenshotPath?: string; stepNumber: number }
       | undefined
 
-    const filePath = wfStep?.screenshotPath
-
-    if (!filePath) {
-      // Try standard path pattern as fallback
-      const home = process.env.USERPROFILE ?? process.env.HOME ?? ''
-      const reportsDir =
-        process.env.TRUSTEN_REPORTS_DIR ?? `${home}/Desktop/trusten-reports`
-      const guessPath = `${reportsDir}/screenshots/${id}/step-${step}.jpg`
-      try {
-        const fs = await import('node:fs')
-        const data = fs.readFileSync(guessPath)
-        return new Response(data, {
-          headers: {
-            'Content-Type': 'image/jpeg',
-            'Cache-Control': 'public, max-age=86400',
-          },
-        })
-      } catch {
-        return c.text('Screenshot not found', 404)
-      }
-    }
+    const filePath =
+      wfStep?.screenshotPath ||
+      defaultStepScreenshotPath(id, step, reportsDirectory())
+    if (!filePath) return c.text('Screenshot not found', 404)
 
     try {
       const fs = await import('node:fs')
@@ -249,10 +248,11 @@ export function createTrustenDashboardRoutes(config: Config) {
         headers: {
           'Content-Type': 'image/jpeg',
           'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
         },
       })
     } catch {
-      return c.text('Screenshot file not accessible', 404)
+      return c.text('Screenshot not found', 404)
     }
   })
 

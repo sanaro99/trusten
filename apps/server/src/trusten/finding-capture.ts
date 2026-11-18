@@ -7,6 +7,7 @@
  * records which screenshot shows it and where the element sits in that image.
  */
 
+import path from 'node:path'
 import { logger } from '../lib/logger'
 import type { BrowserDriver } from './browser/driver'
 import type { BoundingBox, DetectedPattern, EvidenceCapture } from './types'
@@ -35,6 +36,33 @@ export function isValidCapture(capture: {
   file: string
 }): boolean {
   return SCAN_ID.test(capture.scanId) && CAPTURE_FILE.test(capture.file)
+}
+
+export function isValidScanId(scanId: string): boolean {
+  return SCAN_ID.test(scanId)
+}
+
+/** A step number from a URL: a plain non-negative integer, nothing else. */
+export function parseStepNumber(raw: string): number | null {
+  if (!/^(?:0|[1-9]\d{0,3})$/.test(raw)) return null
+  return Number(raw)
+}
+
+/**
+ * Where a step screenshot is expected when the scan's saved steps do not say:
+ * `<reportsDir>/screenshots/<scanId>/step-<n>.jpg`. Returns null unless the
+ * scan id is well formed and the resolved path stays inside that folder.
+ */
+export function defaultStepScreenshotPath(
+  scanId: string,
+  stepNumber: number,
+  reportsDir: string,
+): string | null {
+  if (!isValidScanId(scanId)) return null
+  if (!Number.isInteger(stepNumber) || stepNumber < 0) return null
+  const root = path.resolve(reportsDir, 'screenshots')
+  const file = path.resolve(root, scanId, captureFileName(stepNumber, 0))
+  return file.startsWith(root + path.sep) ? file : null
 }
 
 export function captureFileName(stepNumber: number, view: number): string {
