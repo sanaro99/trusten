@@ -255,8 +255,10 @@ function reportCoverageNote(
     return 'Page evidence is unavailable. Run a new check before relying on this result.'
   if (coverage.textOnly)
     return 'Trusten checked the words on this page, but no screenshot was captured, so visual tricks were not reviewed. The grade is not conclusive.'
+  if (coverage.status !== 'complete' && coverage.completed < coverage.total)
+    return 'The website stopped Trusten before every step was reached. This result only describes the pages Trusten could check.'
   if (coverage.missingVisual)
-    return 'The visual analysis did not complete. The grade is not conclusive.'
+    return 'The screenshot check did not run on every page, so layout tricks may be missed. The grade is not conclusive.'
   if (coverage.status !== 'complete')
     return 'This result only describes the pages Trusten could check.'
   if (coverage.scope === 'page')
@@ -299,7 +301,7 @@ export function generateReportHtml(
         <div class="coverage-icon" aria-hidden="true">${limited ? '!' : '&#10003;'}</div>
         <div>
           <div class="coverage-title">${limited ? 'Limited check' : coverage.scope === 'page' ? 'Page check only' : 'Journey completed'}</div>
-          <div class="coverage-copy">${completedSteps} of ${workflowSteps.length} steps completed. ${coverageNote}</div>
+          <div class="coverage-copy">${completedSteps} of ${coverage.total} steps completed. ${coverageNote}</div>
         </div>
       </div>`
     : `<div class="coverage-card coverage-limited">
@@ -458,6 +460,7 @@ const STEP_STATUS_STYLE: Record<string, [string, string, string]> = {
   'not-reached': ["Couldn't continue", '#925113', '#f8edda'],
   skipped: ['Not attempted', '#5f596e', '#e8e3f1'],
   'no-navigation': ["Couldn't continue", '#8f2d46', '#f5e5eb'],
+  unavailable: ['Not on this website', '#5f596e', '#e8e3f1'],
 }
 
 function stepStatusBadge(step: WorkflowStep): string {
@@ -467,7 +470,10 @@ function stepStatusBadge(step: WorkflowStep): string {
 }
 
 function renderStep(step: WorkflowStep): string {
-  const skipped = step.status === 'skipped' || step.status === 'no-navigation'
+  const skipped =
+    step.status === 'skipped' ||
+    step.status === 'no-navigation' ||
+    step.status === 'unavailable'
   const action = publicStepAction(step.action)
   const outcome = publicStepOutcome(step)
   const imgHtml = step.screenshot
@@ -599,6 +605,9 @@ function publicStepOutcome(step: WorkflowStep): string {
   }
   if (step.status === 'no-navigation') {
     return 'Trusten could not continue this part of the journey.'
+  }
+  if (step.status === 'unavailable') {
+    return 'This part of the journey was not found on the website, so it is not counted.'
   }
   return ''
 }

@@ -346,6 +346,7 @@ export class PuppeteerDriver implements BrowserDriver {
           [401, 403, 429].includes(response.status())
             ? 'SITE_BLOCKED'
             : 'PAGE_LOAD_FAILED',
+          response.status(),
         )
       }
     } catch (err) {
@@ -434,6 +435,10 @@ export class PuppeteerDriver implements BrowserDriver {
       if (response && response.status() >= 400)
         throw new ScanIncompleteError(
           `Target page returned HTTP ${response.status()}`,
+          [401, 403, 429].includes(response.status())
+            ? 'SITE_BLOCKED'
+            : 'PAGE_LOAD_FAILED',
+          response.status(),
         )
     } catch (err) {
       if (entry.policyViolation) throw entry.policyViolation

@@ -33,12 +33,18 @@ export interface ScanCoverage {
   missingVisual: boolean
   /** Only page text was checked: no screenshot was captured. */
   textOnly: boolean
+  /** Steps of journeys this website does not offer (not counted in total). */
+  unavailable: number
 }
 
 export function assessScanCoverage(
   scanType: string,
-  steps: readonly CoverageStep[] = [],
+  allSteps: readonly CoverageStep[] = [],
 ): ScanCoverage {
+  // A journey the website does not offer (no basket on a news site) is not a
+  // gap in the check, so it neither counts toward nor against coverage.
+  const steps = allSteps.filter((step) => step.status !== 'unavailable')
+  const unavailable = allSteps.length - steps.length
   const completedSteps = steps.filter(
     (step) =>
       !step.status || step.status === 'observed' || step.status === 'reached',
@@ -69,7 +75,9 @@ export function assessScanCoverage(
       ? 'page'
       : 'journey'
   let status: CoverageStatus = 'complete'
-  if (evidenced.length === 0 && !textOnly) {
+  if (steps.length === 0 && unavailable > 0) {
+    status = 'partial'
+  } else if (evidenced.length === 0 && !textOnly) {
     status = blocked
       ? 'blocked'
       : completed === 0 && steps.length > 0
@@ -92,5 +100,6 @@ export function assessScanCoverage(
     total: steps.length,
     missingVisual: missingVisual || textOnly,
     textOnly,
+    unavailable,
   }
 }

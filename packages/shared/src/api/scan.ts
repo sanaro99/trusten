@@ -61,6 +61,7 @@ export const WorkflowStepStatusSchema = z.enum([
   'not-reached',
   'skipped',
   'no-navigation',
+  'unavailable',
 ])
 
 /** Mirrors WorkflowStep in apps/server/src/trusten/types/workflow.ts. */

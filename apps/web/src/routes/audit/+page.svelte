@@ -340,7 +340,7 @@ async function waitForResult(
         <button class="btn" type="button" onclick={startOver}>Check another site</button>
       </div>
       <ReportAssets scan={result} />
-      {#if heading.limited}<a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>{/if}
+      {#if heading.extensionHelps}<a class="link link-primary mt-4 inline-flex min-h-11 items-center font-bold" href="/extension">Get the Trusten Chrome extension</a>{/if}
 
       <FindingInspector
         scanId={result.id}

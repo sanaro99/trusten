@@ -63,7 +63,7 @@ describe('generateReportHtml', () => {
       }),
     )
     expect(html).toContain('Limited check')
-    expect(html).toContain('visual analysis')
+    expect(html).toContain('screenshot check')
     expect(html).toContain('No conclusive grade for this check')
     expect(html).not.toContain('<div class="grade">B</div>')
     expect(html).not.toContain('This website looks mostly fair')
