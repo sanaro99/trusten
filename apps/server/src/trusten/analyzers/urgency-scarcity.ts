@@ -92,6 +92,7 @@ const TIMER_SELECTORS = [
 
 export class UrgencyScarcityAnalyzer extends BaseAnalyzer {
   name = 'UrgencyScarcityAnalyzer'
+  override readonly usesTextLLM = true
   categories = [
     DarkPatternCategory.FAKE_URGENCY,
     DarkPatternCategory.FAKE_SCARCITY,

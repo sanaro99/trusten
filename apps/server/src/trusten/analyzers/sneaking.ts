@@ -51,6 +51,7 @@ const BAIT_SWITCH_PATTERNS = [
 
 export class SneakingAnalyzer extends BaseAnalyzer {
   name = 'SneakingAnalyzer'
+  override readonly usesTextLLM = true
   categories = [
     DarkPatternCategory.BASKET_SNEAKING,
     DarkPatternCategory.DRIP_PRICING,

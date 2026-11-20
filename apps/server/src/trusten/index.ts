@@ -16,6 +16,7 @@ import {
 import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
+import { PageLLMBatch } from './analyzers/page-llm-batch'
 import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
 import { capturePageState } from './browser/page-state'
@@ -1264,17 +1265,26 @@ export class TrustenEngine {
     context: AnalyzerContext,
     onResult?: (analyzer: BaseAnalyzer, result: AnalyzerResult) => void,
   ): Promise<DetectedPattern[]> {
+    // The text analyzers share one AI request for this page.
+    const textAnalyzers = analyzers.filter((a) => a.usesTextLLM)
+    const llmBatch = new PageLLMBatch(textAnalyzers.length)
+    const pageContext: AnalyzerContext = { ...context, llmBatch }
     const results = await Promise.allSettled(
       analyzers.map((analyzer) =>
-        analyzer.analyze(context).catch((err) => {
-          logger.warn(`Trusten analyzer ${analyzer.name} failed`, {
-            error: err instanceof Error ? err.message : String(err),
+        analyzer
+          .analyze(pageContext)
+          .catch((err) => {
+            logger.warn(`Trusten analyzer ${analyzer.name} failed`, {
+              error: err instanceof Error ? err.message : String(err),
+            })
+            return {
+              patterns: [],
+              metadata: { visualCheckAvailable: false },
+            } satisfies AnalyzerResult
           })
-          return {
-            patterns: [],
-            metadata: { visualCheckAvailable: false },
-          } satisfies AnalyzerResult
-        }),
+          .finally(() => {
+            if (analyzer.usesTextLLM) llmBatch.done()
+          }),
       ),
     )
 

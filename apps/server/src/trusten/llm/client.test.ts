@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
-import { TrustenLLMClient } from './client'
+import { retryDelayFromBody, TrustenLLMClient } from './client'
 
 const screenshot = Buffer.from('image bytes').toString('base64')
 
@@ -579,7 +579,7 @@ for (const requireImage of [true, false])
     }
   })
 
-test('a rate-limited request waits out Retry-After once instead of failing', async () => {
+test('a rate-limited request waits out Retry-After instead of failing', async () => {
   let calls = 0
   const wire = captureRequests(() => {
     calls++
@@ -651,5 +651,261 @@ test('parallel requests to one provider are sent a few at a time', async () => {
     expect(peak).toBeLessThanOrEqual(3)
   } finally {
     fetchSpy.mockRestore()
+  }
+})
+
+function fakeClock() {
+  let now = 1_000_000
+  const sleeps: number[] = []
+  return {
+    sleeps,
+    now: () => now,
+    sleep: async (ms: number) => {
+      sleeps.push(ms)
+      now += ms
+    },
+  }
+}
+
+const quota = (headers: Record<string, string> = {}) =>
+  new Response('{"error":"quota"}', { status: 429, headers })
+const ok = (content = 'ok') =>
+  Response.json({ choices: [{ message: { content } }] })
+
+test('repeated 429s without Retry-After back off with doubling waits until the provider answers', async () => {
+  let calls = 0
+  const wire = captureRequests(() => (++calls <= 3 ? quota() : ok('finally')))
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'groq', apiKey: 'groq-fixture-key' },
+      { ...clock, requestsPerMinute: () => 0 },
+    )
+    await expect(
+      client.complete({ messages: [{ role: 'user', content: 'Hi' }] }),
+    ).resolves.toBe('finally')
+    expect(wire.requests).toHaveLength(4)
+    expect(clock.sleeps).toEqual([5_000, 10_000, 20_000])
+  } finally {
+    wire.restore()
+  }
+})
+
+test('Retry-After sets the wait, even past the default backoff', async () => {
+  let calls = 0
+  const wire = captureRequests(() =>
+    ++calls === 1 ? quota({ 'retry-after': '42' }) : ok(),
+  )
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'groq', apiKey: 'groq-fixture-key' },
+      { ...clock, requestsPerMinute: () => 0 },
+    )
+    await client.complete({ messages: [{ role: 'user', content: 'Hi' }] })
+    expect(clock.sleeps).toEqual([42_000])
+  } finally {
+    wire.restore()
+  }
+})
+
+test('a rate limit longer than the wait limit moves on to the next provider at once', async () => {
+  process.env.NVIDIA_NIM_API_KEY = 'nvidia-fixture-key'
+  const wire = captureRequests((url) =>
+    url.includes('groq') ? quota({ 'retry-after': '3600' }) : ok('fallback'),
+  )
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'groq', apiKey: 'groq-fixture-key' },
+      { ...clock, requestsPerMinute: () => 0 },
+    )
+    await expect(
+      client.complete({ messages: [{ role: 'user', content: 'Hi' }] }),
+    ).resolves.toBe('fallback')
+    expect(clock.sleeps).toEqual([])
+  } finally {
+    wire.restore()
+  }
+})
+
+test('a provider that keeps answering 429 is never benched', async () => {
+  let groqCalls = 0
+  const wire = captureRequests((url) => {
+    if (!url.includes('groq')) return new Response('down', { status: 503 })
+    groqCalls++
+    return groqCalls <= 20 ? quota() : ok('back')
+  })
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'groq', apiKey: 'groq-fixture-key' },
+      { ...clock, requestsPerMinute: () => 0, rateLimitRetries: 0 },
+    )
+    // Twenty rate-limited requests in a row: well past the failure strikes
+    // that bench a provider that is down.
+    for (let i = 0; i < 20; i++) {
+      await expect(
+        client.complete({ messages: [{ role: 'user', content: `Try ${i}` }] }),
+      ).rejects.toThrow()
+    }
+    await expect(
+      client.complete({ messages: [{ role: 'user', content: 'Again' }] }),
+    ).resolves.toBe('back')
+    expect(groqCalls).toBe(21)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('a provider that is down is still benched after a few failures', async () => {
+  const wire = captureRequests(() => new Response('down', { status: 503 }))
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'groq', apiKey: 'groq-fixture-key' },
+      { ...clock, requestsPerMinute: () => 0 },
+    )
+    for (let i = 0; i < 4; i++) {
+      await client
+        .complete({ messages: [{ role: 'user', content: `Try ${i}` }] })
+        .catch(() => {})
+    }
+    expect(wire.requests.filter((r) => r.url.includes('groq'))).toHaveLength(3)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('requests are paced to the provider per-minute limit instead of hitting 429', async () => {
+  const wire = captureRequests()
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'gemini', apiKey: 'gemini-fixture-key' },
+      { ...clock, requestsPerMinute: () => 2 },
+    )
+    const start = clock.now()
+    const sentAt: number[] = []
+    for (let i = 0; i < 5; i++) {
+      await client.complete({ messages: [{ role: 'user', content: `P${i}` }] })
+      sentAt.push(clock.now() - start)
+    }
+    expect(wire.requests).toHaveLength(5)
+    expect(sentAt).toEqual([0, 0, 60_000, 60_000, 120_000])
+  } finally {
+    wire.restore()
+  }
+})
+
+test('parallel requests cannot overbook the per-minute limit', async () => {
+  let now = 0
+  const sentAt: number[] = []
+  const wire = captureRequests(() => {
+    sentAt.push(now)
+    return ok()
+  })
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'gemini', apiKey: 'gemini-fixture-key' },
+      {
+        concurrency: 10,
+        requestsPerMinute: () => 3,
+        now: () => now,
+        // Time only moves when a waiting request sleeps.
+        sleep: async (ms) => {
+          await Promise.resolve()
+          now += ms
+        },
+      },
+    )
+    await Promise.all(
+      Array.from({ length: 7 }, (_, i) =>
+        client.complete({ messages: [{ role: 'user', content: `P${i}` }] }),
+      ),
+    )
+    expect(wire.requests).toHaveLength(7)
+    // No rolling minute ever holds more than three requests.
+    expect(sentAt.slice(0, 3)).toEqual([0, 0, 0])
+    for (let i = 3; i < sentAt.length; i++)
+      expect(sentAt[i] - sentAt[i - 3]).toBeGreaterThanOrEqual(60_000)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('each provider has a free-tier pace by default, and TRUSTEN_LLM_RPM overrides it', async () => {
+  const previous = process.env.TRUSTEN_LLM_RPM
+  const wire = captureRequests()
+  try {
+    delete process.env.TRUSTEN_LLM_RPM
+    const run = async () => {
+      const clock = fakeClock()
+      const client = new TrustenLLMClient(
+        { provider: 'gemini', apiKey: 'gemini-fixture-key' },
+        clock,
+      )
+      for (let i = 0; i < 12; i++)
+        await client.complete({ messages: [{ role: 'user', content: `${i}` }] })
+      return clock.sleeps
+    }
+    // Gemini's free tier allows 10 requests a minute: the 11th waits.
+    expect(await run()).toEqual([60_000])
+    process.env.TRUSTEN_LLM_RPM = '0'
+    expect(await run()).toEqual([])
+  } finally {
+    if (previous === undefined) delete process.env.TRUSTEN_LLM_RPM
+    else process.env.TRUSTEN_LLM_RPM = previous
+    wire.restore()
+  }
+})
+
+test('pattern analysis asks for a repeatable answer', async () => {
+  const wire = captureRequests(() => ok('{"patterns":[]}'))
+  try {
+    const client = new TrustenLLMClient({
+      provider: 'groq',
+      apiKey: 'groq-fixture-key',
+    })
+    await client.analyzeForPatterns({ analysisType: 'x', context: 'page' })
+    expect(wire.requests[0]?.body.temperature).toBe(0)
+  } finally {
+    wire.restore()
+  }
+})
+
+test('the wait a provider names in its error body is honored', async () => {
+  expect(
+    retryDelayFromBody(
+      '[{"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"37s"}]}}]',
+    ),
+  ).toBe(37_000)
+  expect(
+    retryDelayFromBody(
+      'Rate limit reached for model. Please try again in 7.5s. Need more tokens?',
+    ),
+  ).toBe(7_500)
+  expect(retryDelayFromBody('Please try again in 1m30s.')).toBe(90_000)
+  expect(retryDelayFromBody('Please try again in 450ms.')).toBe(450)
+  expect(retryDelayFromBody('quota exceeded')).toBeUndefined()
+
+  let calls = 0
+  const wire = captureRequests(() =>
+    ++calls === 1
+      ? new Response('{"error":{"details":[{"retryDelay":"12s"}]}}', {
+          status: 429,
+        })
+      : ok(),
+  )
+  const clock = fakeClock()
+  try {
+    const client = new TrustenLLMClient(
+      { provider: 'gemini', apiKey: 'gemini-fixture-key' },
+      { ...clock, requestsPerMinute: () => 0 },
+    )
+    await client.complete({ messages: [{ role: 'user', content: 'Hi' }] })
+    expect(clock.sleeps).toEqual([12_000])
+  } finally {
+    wire.restore()
   }
 })

@@ -70,6 +70,7 @@ const CANCEL_PRESENT_PATTERNS = [
 
 export class ObstructionAnalyzer extends BaseAnalyzer {
   name = 'ObstructionAnalyzer'
+  override readonly usesTextLLM = true
   categories = [
     DarkPatternCategory.ROACH_MOTEL,
     DarkPatternCategory.FORCED_CONTINUITY,

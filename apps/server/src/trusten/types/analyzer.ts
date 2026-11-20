@@ -1,5 +1,6 @@
 /** Trusten — Input context handed to analyzers and the result they return. */
 
+import type { PageLLMBatch } from '../analyzers/page-llm-batch'
 import type { DetectedPattern } from './patterns'
 
 export interface NetworkRequest {
@@ -30,6 +31,8 @@ export interface AnalyzerContext {
   networkRequests: NetworkRequest[]
   cookies: CookieInfo[]
   previousStepContext?: AnalyzerContext
+  /** Shares one AI text request among the analyzers checking this page. */
+  llmBatch?: PageLLMBatch
 }
 
 export interface AnalyzerResult {

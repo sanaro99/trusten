@@ -31,6 +31,11 @@ import type {
 export abstract class BaseAnalyzer {
   abstract name: string
   abstract categories: DarkPatternCategory[]
+  /**
+   * Whether this analyzer may ask for an AI text check. Those that do share
+   * one request per page (see PageLLMBatch).
+   */
+  readonly usesTextLLM: boolean = false
 
   abstract analyze(context: AnalyzerContext): Promise<AnalyzerResult>
 
@@ -290,10 +295,17 @@ export abstract class BaseAnalyzer {
     } = params
 
     try {
-      const raw = await getTrustenLLM().analyzeForPatterns({
-        analysisType,
-        context: text.slice(0, maxChars),
-      })
+      const pageText = text.slice(0, maxChars)
+      const raw = context.llmBatch
+        ? await context.llmBatch.request({
+            analyzer: this.name,
+            analysisType,
+            text: pageText,
+          })
+        : await getTrustenLLM().analyzeForPatterns({
+            analysisType,
+            context: pageText,
+          })
 
       const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as {
         patterns?: Array<{

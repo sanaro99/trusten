@@ -111,12 +111,52 @@ const LLM_CONCURRENCY = Math.max(
   1,
   Number(process.env.TRUSTEN_LLM_CONCURRENCY ?? 3),
 )
-/** Longest wait a rate-limited (429) request will sit out before one retry. */
+/** Longest single wait a rate-limited (429) request will sit out. */
 const LLM_RATE_LIMIT_WAIT_MS = Number(
-  process.env.TRUSTEN_LLM_RATE_LIMIT_WAIT_MS ?? 20_000,
+  process.env.TRUSTEN_LLM_RATE_LIMIT_WAIT_MS ?? 60_000,
 )
-/** Used when a 429 response gives no Retry-After. */
+/** How many times one request waits out a 429 before trying the next provider. */
+const LLM_RATE_LIMIT_RETRIES = Math.max(
+  0,
+  Number(process.env.TRUSTEN_LLM_RATE_LIMIT_RETRIES ?? 4),
+)
+/** First backoff when a 429 response gives no Retry-After; doubles each time. */
 const DEFAULT_RATE_LIMIT_PAUSE_MS = 5_000
+const RATE_WINDOW_MS = 60_000
+/**
+ * Requests per minute each provider's free tier allows. Requests are paced to
+ * stay under it, so a scan waits briefly instead of collecting 429s.
+ * TRUSTEN_LLM_RPM overrides this for every provider (0 turns pacing off).
+ */
+const FREE_TIER_RPM: Record<TrustenLLMProvider, number> = {
+  cloudflare: 300,
+  groq: 30,
+  gemini: 10,
+  'nvidia-nim': 40,
+  openrouter: 20,
+  ollama: 0,
+}
+
+function requestsPerMinute(provider: TrustenLLMProvider): number {
+  const override = process.env.TRUSTEN_LLM_RPM
+  if (override !== undefined && override.trim() !== '') {
+    const value = Number(override)
+    if (Number.isFinite(value) && value >= 0) return value
+  }
+  return FREE_TIER_RPM[provider]
+}
+
+/** Queue and rate-limit settings; tests pass small values and a fake clock. */
+export interface TrustenLLMLimits {
+  concurrency: number
+  /** Requests per rolling minute for a provider; 0 means no pacing. */
+  requestsPerMinute: (provider: TrustenLLMProvider) => number
+  rateLimitRetries: number
+  rateLimitMaxWaitMs: number
+  rateLimitBaseWaitMs: number
+  now: () => number
+  sleep: (ms: number) => Promise<void>
+}
 /**
  * Identical requests (the same page checked again later in a journey) reuse
  * the earlier answer: fewer requests, and the same page gets the same result.
@@ -147,7 +187,24 @@ function retryAfterMs(header: string | null): number | undefined {
   return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now())
 }
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Some providers (Gemini, Groq) put the wait in the error body instead of a
+ * Retry-After header: `"retryDelay": "37s"` or "Please try again in 7.5s".
+ */
+export function retryDelayFromBody(body: string): number | undefined {
+  const match =
+    body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/) ??
+    body.match(/try again in\s+(?:(\d+)m)?(\d+(?:\.\d+)?)(ms|s)\b/i)
+  if (!match) return undefined
+  if (match.length === 2) return Math.ceil(Number(match[1]) * 1000)
+  const minutes = Number(match[1] ?? 0)
+  const amount = Number(match[2])
+  const ms = match[3].toLowerCase() === 'ms' ? amount : amount * 1000
+  return Math.ceil(minutes * 60_000 + ms)
+}
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms))
 const STRIKE_THRESHOLD = Number(process.env.TRUSTEN_LLM_STRIKES ?? 3)
 
 function messagesHaveImage(messages: LLMMessage[]): boolean {
@@ -351,11 +408,16 @@ export class TrustenLLMClient {
   private readonly inFlight = new Map<TrustenLLMProvider, number>()
   private readonly queued = new Map<TrustenLLMProvider, Array<() => void>>()
   private readonly pausedUntil = new Map<TrustenLLMProvider, number>()
+  private readonly recentStarts = new Map<TrustenLLMProvider, number[]>()
   private readonly responses = new Map<string, { value: string; at: number }>()
+  private readonly limits: TrustenLLMLimits
 
-  /** Wait for a free request slot (and any rate-limit pause) on a provider. */
+  /**
+   * Wait for a free request slot on a provider, then for any rate-limit pause
+   * and for room in the provider's per-minute budget.
+   */
   private async acquire(provider: TrustenLLMProvider): Promise<void> {
-    while ((this.inFlight.get(provider) ?? 0) >= LLM_CONCURRENCY) {
+    while ((this.inFlight.get(provider) ?? 0) >= this.limits.concurrency) {
       await new Promise<void>((resolve) => {
         const queue = this.queued.get(provider) ?? []
         queue.push(resolve)
@@ -363,8 +425,32 @@ export class TrustenLLMClient {
       })
     }
     this.inFlight.set(provider, (this.inFlight.get(provider) ?? 0) + 1)
-    const pause = (this.pausedUntil.get(provider) ?? 0) - Date.now()
-    if (pause > 0) await wait(pause)
+    for (;;) {
+      const pause = (this.pausedUntil.get(provider) ?? 0) - this.limits.now()
+      const delay = pause > 0 ? pause : this.reserveRequest(provider)
+      if (delay <= 0) return
+      await this.limits.sleep(delay)
+    }
+  }
+
+  /**
+   * Book a request in the provider's rolling one-minute window. Returns 0 when
+   * booked, otherwise how long until the oldest booking leaves the window.
+   * Checking and booking happen together, so parallel callers cannot overbook.
+   */
+  private reserveRequest(provider: TrustenLLMProvider): number {
+    const rpm = this.limits.requestsPerMinute(provider)
+    if (!(rpm > 0)) return 0
+    const now = this.limits.now()
+    const starts = (this.recentStarts.get(provider) ?? []).filter(
+      (at) => now - at < RATE_WINDOW_MS,
+    )
+    this.recentStarts.set(provider, starts)
+    if (starts.length < rpm) {
+      starts.push(now)
+      return 0
+    }
+    return Math.max(1, starts[0] + RATE_WINDOW_MS - now)
   }
 
   private release(provider: TrustenLLMProvider): void {
@@ -426,7 +512,17 @@ export class TrustenLLMClient {
     this.unreachableUntil.delete(provider)
   }
 
-  constructor(config?: TrustenLLMConfig) {
+  constructor(config?: TrustenLLMConfig, limits?: Partial<TrustenLLMLimits>) {
+    this.limits = {
+      concurrency: LLM_CONCURRENCY,
+      requestsPerMinute,
+      rateLimitRetries: LLM_RATE_LIMIT_RETRIES,
+      rateLimitMaxWaitMs: LLM_RATE_LIMIT_WAIT_MS,
+      rateLimitBaseWaitMs: DEFAULT_RATE_LIMIT_PAUSE_MS,
+      now: Date.now,
+      sleep: wait,
+      ...limits,
+    }
     const environment = config
       ? resolveExplicitConfig(config.provider)
       : resolveConfig()
@@ -553,7 +649,8 @@ export class TrustenLLMClient {
       throw new LLMHttpError(
         `LLM request failed (${response.status}): ${errorText}`,
         response.status,
-        retryAfterMs(response.headers.get('retry-after')),
+        retryAfterMs(response.headers.get('retry-after')) ??
+          (response.status === 429 ? retryDelayFromBody(errorText) : undefined),
       )
     }
 
@@ -575,7 +672,7 @@ export class TrustenLLMClient {
     // Callers with their own budget (such as navigation) keep a single attempt.
     const retries =
       vision && options.timeoutMs === undefined ? LLM_VISION_RETRIES : 0
-    let rateLimitRetried = false
+    let rateLimitWaits = 0
     try {
       for (let attempt = 0; ; attempt++) {
         try {
@@ -592,21 +689,30 @@ export class TrustenLLMClient {
           }
         } catch (error) {
           if (isRateLimited(error)) {
-            // Sit out the provider's limit once, and hold back the queued
-            // requests too, rather than failing the check.
-            const pause = error.retryAfterMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS
-            if (rateLimitRetried || pause > LLM_RATE_LIMIT_WAIT_MS) throw error
-            rateLimitRetried = true
+            // Sit out the provider's limit, holding back the queued requests
+            // too, rather than failing the check. Without a Retry-After the
+            // wait doubles each time. A wait past the limit (such as a daily
+            // quota) moves on to the next provider instead.
+            const pause =
+              error.retryAfterMs ??
+              this.limits.rateLimitBaseWaitMs * 2 ** rateLimitWaits
+            if (
+              rateLimitWaits >= this.limits.rateLimitRetries ||
+              pause > this.limits.rateLimitMaxWaitMs
+            )
+              throw error
+            rateLimitWaits++
             this.pausedUntil.set(
               config.provider,
               Math.max(
                 this.pausedUntil.get(config.provider) ?? 0,
-                Date.now() + pause,
+                this.limits.now() + pause,
               ),
             )
             logger.warn('Trusten LLM rate limited, waiting before retry', {
               provider: config.provider,
               waitMs: pause,
+              attempt: rateLimitWaits,
             })
             attempt--
             continue
@@ -637,7 +743,17 @@ export class TrustenLLMClient {
             ...options,
             messages: stripImages(options.messages),
           })
-          return this.sendRequest(retry.url, retry.headers, retry.body, timeout)
+          await this.acquire(config.provider)
+          try {
+            return await this.sendRequest(
+              retry.url,
+              retry.headers,
+              retry.body,
+              timeout,
+            )
+          } finally {
+            this.release(config.provider)
+          }
         }
       }
       throw error
@@ -786,7 +902,8 @@ Analyze the above content and return your findings as JSON.`
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
       ],
-      temperature: 0.1,
+      // The same page should get the same answer on every check.
+      temperature: 0,
       maxTokens: 2048,
       requireImage: params.requireImage,
     })
