@@ -17,8 +17,10 @@ import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
 import type { BaseAnalyzer } from './analyzers/base-analyzer'
 import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
+import { DESCRIBE_CONTROL, rankControls } from './browser/control-match'
 import type { BrowserDriver } from './browser/driver'
 import { capturePageState } from './browser/page-state'
+import { CHOOSE_PRODUCT_OPTIONS } from './browser/product-options'
 import { captureStepEvidence } from './finding-capture'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
@@ -44,6 +46,17 @@ function dedupePatterns(patterns: DetectedPattern[]): DetectedPattern[] {
 
 /** Element id given to the chosen search field so the driver can type into it. */
 const SEARCH_FIELD_ID = 900_001
+/** Controls a step may click while looking for one that changes the page. */
+const MAX_CLICKS_PER_STEP = 4
+
+interface StepNavigationOutcome {
+  /** A navigate target answered 404 or 410. */
+  missingPage?: boolean
+  /** A search box, link or button for the step was found and used. */
+  foundControl?: boolean
+  /** Controls were clicked but none of them changed the page. */
+  clickedWithoutChange?: boolean
+}
 
 /**
  * In-page helper that returns the first visible, editable search field.
@@ -76,6 +89,23 @@ const FIND_SEARCH_FIELD = `function findSearchField() {
   }
   return null;
 }`
+
+/** Whether the step navigates back to the page the scan started on. */
+function returnsToStart(
+  stepDef: { navigate?: string },
+  startUrl: string,
+): boolean {
+  if (!stepDef.navigate) return false
+  try {
+    const target = new URL(
+      stepDef.navigate.replace('{baseUrl}', startUrl),
+      startUrl,
+    )
+    return normalizeUrlKey(target.href) === normalizeUrlKey(startUrl)
+  } catch {
+    return false
+  }
+}
 
 // ─── Orchestrator ───
 
@@ -368,6 +398,7 @@ export class TrustenEngine {
         let navReason = ''
         let missingPage = false
         let foundControl = false
+        let clickedWithoutChange = false
 
         if (funnelBroken && !stepDef.navigate) {
           // A prior funnel step never advanced — running this dependent step
@@ -397,12 +428,14 @@ export class TrustenEngine {
           // to the LLM navigator if the deterministic action did not advance.
           let advancedNow = false
           if (stepDef.navigate) {
+            // Returning to a fixed page starts a new part of the journey, so a
+            // missing control there again means "not offered", not "stopped".
             funnelBroken = false
             journeyUnavailable = false
+            reachedAnyStep = false
           }
           if (hasDeterministic) {
-            const outcome: { missingPage?: boolean; foundControl?: boolean } =
-              {}
+            const outcome: StepNavigationOutcome = {}
             deterministicActionPerformed = await this.executeStepNavigation(
               pid,
               stepDef,
@@ -443,8 +476,21 @@ export class TrustenEngine {
                   clickFirst: true,
                 },
                 url,
+                outcome,
               )
+              foundControl = outcome.foundControl === true
             }
+            // Going back to the start page is only setup for a step that must
+            // then search or click; reloading it is not progress on its own.
+            if (
+              !foundControl &&
+              returnsToStart(stepDef, url) &&
+              (stepDef.fillSearch ||
+                stepDef.clickText?.length ||
+                stepDef.clickFirst)
+            )
+              deterministicActionPerformed = false
+            clickedWithoutChange = outcome.clickedWithoutChange === true
             if (this.browser.waitForIdle) {
               await this.browser
                 .waitForIdle(pid, { timeout: 5000 })
@@ -580,6 +626,21 @@ export class TrustenEngine {
           journeyUnavailable = true
           navReason =
             'This website does not appear to offer this part of the journey'
+        } else if (
+          status === 'not-reached' &&
+          stepDef.optionalIfMissing &&
+          reachedAnyStep &&
+          !landedOnBrowserError &&
+          !missingPage &&
+          clickedWithoutChange
+        ) {
+          // The last part of a journey (book, subscribe, check out) has a
+          // button, but it opens nothing without details Trusten never enters.
+          // Every page the journey could reach was checked.
+          status = 'unavailable'
+          journeyUnavailable = true
+          navReason =
+            'The button here needs details Trusten does not enter, so the journey ends on this page'
         }
 
         // Only analyze when we actually navigated (or legitimately observed the
@@ -1434,7 +1495,7 @@ export class TrustenEngine {
     pageId: number,
     stepDef: import('./types').WorkflowStepDefinition,
     baseUrl: string,
-    outcome: { missingPage?: boolean; foundControl?: boolean } = {},
+    outcome: StepNavigationOutcome = {},
   ): Promise<boolean> {
     let actionPerformed = false
     // 1. Navigate to explicit URL
@@ -1465,7 +1526,7 @@ export class TrustenEngine {
         ${FIND_SEARCH_FIELD}
         if (findSearchField()) return false;
         const triggers = [...document.querySelectorAll(
-          '[class*="search-icon"], [class*="search-btn"], [class*="searchbtn"], [aria-label*="search" i][role="button"], button[class*="search"], [class*="search-trigger"]'
+          '[class*="search-icon"], [class*="search-btn"], [class*="searchbtn"], [aria-label*="search" i][role="button"], button[class*="search"], [class*="search-trigger"], button[aria-label*="search" i], a[aria-label*="search" i], summary[aria-label*="search" i], button[title*="search" i], [data-testid*="search" i]:is(button, a, [role="button"])'
         )].filter(el => {
           const rect = el.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
@@ -1590,41 +1651,94 @@ export class TrustenEngine {
       return actionPerformed
     if (candidates.length === 0) return actionPerformed
 
-    for (const text of candidates) {
-      const escaped = JSON.stringify(text.toLowerCase())
-      const script = `(function() {
-        const lc = ${escaped};
-        const all = [...document.querySelectorAll('a, button, [role="button"], input[type="submit"], input[type="button"], label')];
-        // Prefer visible, clickable elements
-        const visible = all.filter(el => {
-          const rect = el.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0;
-        });
-        const label = el => (el.getAttribute('aria-label') || el.textContent || el.value || '').toLowerCase().trim();
-        const matches = visible.filter(el => !el.disabled && label(el).includes(lc));
-        matches.sort((a, b) => Number(label(b) === lc) - Number(label(a) === lc) || label(a).length - label(b).length);
-        const match = matches[0];
-        if (match && /place order|pay now|confirm (purchase|payment|cancellation|deletion)|complete purchase|delete account|cancel subscription|cancel membership/i.test(label(match))) return false;
-        if (match && match.closest('form') && match.closest('form').querySelector('input[autocomplete^="cc-"],input[name*="card" i],input[type="password"]')) return false;
-        if (match) { match.removeAttribute('target'); match.click(); return match.textContent?.trim().slice(0, 60) || true; }
-        return false;
-      })()`
+    if (stepDef.chooseOptions) {
       try {
-        const result = await this.browser.evaluate(pageId, script)
-        if (result.value === true || typeof result.value === 'string') {
-          actionPerformed = true
-          outcome.foundControl = true
-          logger.info('Trusten: clicked element', {
-            text,
-            matched: result.value,
-          })
-          await this.waitForPageLoad(pageId)
-          break
+        const made = (
+          await this.browser.evaluate(pageId, CHOOSE_PRODUCT_OPTIONS)
+        ).value
+        if (typeof made === 'number' && made > 0) {
+          logger.info('Trusten: chose product options', { count: made })
+          await sleep(300)
         }
       } catch (err) {
-        logger.warn('Trusten: click failed', { text, error: String(err) })
+        logger.warn('Trusten: choosing product options failed', {
+          error: String(err),
+        })
       }
     }
+
+    // Try each phrase in order, and each matching control for it, until a
+    // click changes the page. A control that does nothing (an "Add to cart"
+    // matched by "cart", a button waiting for input) no longer ends the step.
+    const tried = new Set<string>()
+    let clicks = 0
+    for (const text of candidates) {
+      const clickScript = () => `(function() {
+        ${DESCRIBE_CONTROL}
+        const rankControls = ${rankControls.toString()};
+        const tried = ${JSON.stringify([...tried])};
+        const all = [...document.querySelectorAll('a, button, [role="button"], [role="link"], [role="menuitem"], input[type="submit"], input[type="button"], label')];
+        const visible = all.filter(el => {
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+        });
+        const described = visible.map(describeControl);
+        const unsafe = (el, label) =>
+          /place order|pay now|confirm (purchase|payment|cancellation|deletion)|complete purchase|delete account|cancel subscription|cancel membership/i.test(label) ||
+          (el.closest('form') && el.closest('form').querySelector('input[autocomplete^="cc-"],input[name*="card" i],input[type="password"]'));
+        const key = (el, d) => [el.tagName, d.label, d.href || ''].join('|');
+        for (const index of rankControls(described, ${JSON.stringify(text)})) {
+          const el = visible[index];
+          const d = described[index];
+          if (tried.includes(key(el, d))) continue;
+          // The best match is a final or account-protected action: stop here
+          // rather than fall through to a weaker match for the same phrase.
+          if (unsafe(el, d.label)) return false;
+          el.removeAttribute('target');
+          el.click();
+          return { key: key(el, d), label: (d.label || d.href || '').slice(0, 60) };
+        }
+        return false;
+      })()`
+      while (clicks < MAX_CLICKS_PER_STEP) {
+        let clicked: { key: string; label: string } | null = null
+        let before = ''
+        try {
+          before = (await capturePageState(this.browser, pageId)).signature
+          const result = await this.browser.evaluate(pageId, clickScript())
+          const value = result.value as { key?: string; label?: string } | false
+          if (value && typeof value === 'object' && value.key)
+            clicked = { key: value.key, label: value.label ?? '' }
+        } catch (err) {
+          logger.warn('Trusten: click failed', { text, error: String(err) })
+        }
+        if (!clicked) break
+        tried.add(clicked.key)
+        clicks++
+        actionPerformed = true
+        outcome.foundControl = true
+        logger.info('Trusten: clicked element', {
+          text,
+          matched: clicked.label,
+        })
+        await this.waitForPageLoad(pageId)
+        let after = await capturePageState(this.browser, pageId).catch(
+          () => null,
+        )
+        if (after?.signature === before && this.browser.waitForIdle) {
+          // Give a slow navigation a moment before trying another control.
+          await this.browser
+            .waitForIdle(pageId, { timeout: 3000 })
+            .catch(() => undefined)
+          after = await capturePageState(this.browser, pageId).catch(() => null)
+        }
+        if (!after || after.signature !== before) {
+          outcome.clickedWithoutChange = false
+          return actionPerformed
+        }
+      }
+    }
+    if (clicks > 0) outcome.clickedWithoutChange = true
     return actionPerformed
   }
 
