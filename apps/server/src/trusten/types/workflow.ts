@@ -106,6 +106,12 @@ export interface WorkflowStepDefinition {
    * not that the check was stopped.
    */
   optionalIfMissing?: boolean
+  /**
+   * Before clicking, pick the first available value for product choices left
+   * empty (size, colour), since add-to-cart often stays disabled until then.
+   * Choices already made and paid extras are left alone.
+   */
+  chooseOptions?: boolean
   successCriteria?: string
   /**
    * Whether this step is expected to advance the journey (move to a new

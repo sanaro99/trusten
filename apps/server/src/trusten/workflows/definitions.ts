@@ -25,6 +25,52 @@ const ADD_TO_CART_CONTROLS = [
   'book now',
 ]
 
+/** The add-to-cart step also accepts a final "Select" for flights and rooms. */
+const ADD_TO_CART_CLICKS = [...ADD_TO_CART_CONTROLS, 'add to order', 'select']
+
+/** Links to the basket. Icon-only links are matched by their /cart path. */
+const CART_LINKS = [
+  'view cart',
+  'view bag',
+  'view basket',
+  'cart',
+  'basket',
+  'bag',
+  'trolley',
+  'your trip',
+]
+
+/**
+ * Buttons that start checkout. "Continue shopping" is never taken for
+ * "continue" (see rankControls).
+ */
+export const CHECKOUT_CONTROLS = [
+  'proceed to checkout',
+  'go to checkout',
+  'continue to checkout',
+  'checkout',
+  'check out',
+  'continue',
+  'book now',
+]
+
+/** Links that open a sign-up form. */
+const SIGNUP_LINKS = [
+  'sign up',
+  'register',
+  'create account',
+  'create an account',
+  'create your account',
+  'join',
+  'get started',
+  'start free trial',
+  'start your free trial',
+  'free trial',
+  'try it free',
+  'try for free',
+  'try free',
+]
+
 /** Signs that the page already is the basket or booking summary. */
 const CART_PAGE = {
   path: '(^|/)(cart|basket|bag|trolley)(/|$)',
@@ -81,16 +127,8 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     {
       id: 'add-to-cart',
       expectsNavigation: true,
-      clickText: [
-        'add to cart',
-        'add to bag',
-        'add to basket',
-        'add to trolley',
-        'buy now',
-        'reserve',
-        'book now',
-        'select',
-      ],
+      chooseOptions: true,
+      clickText: ADD_TO_CART_CLICKS,
       instruction:
         'Add the product/flight/hotel to cart or initiate the booking. Note any pre-added extras, insurance, or add-ons.',
       aiGoal:
@@ -108,7 +146,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
     {
       id: 'cart-review',
       expectsNavigation: true,
-      clickText: ['cart', 'basket', 'bag', 'view cart', 'your trip'],
+      clickText: CART_LINKS,
       alreadyOn: CART_PAGE,
       instruction:
         'Navigate to the cart or order summary page and review what is present.',
@@ -128,7 +166,7 @@ export const CHECKOUT_WORKFLOW: ScanWorkflow = {
       id: 'checkout-start',
       optionalIfMissing: true,
       expectsNavigation: true,
-      clickText: ['proceed to checkout', 'checkout', 'continue', 'book now'],
+      clickText: CHECKOUT_CONTROLS,
       instruction:
         'Click Checkout or Proceed to Checkout and observe any new fees, charges, or pre-selected options that appear.',
       aiGoal:
@@ -160,12 +198,15 @@ export const CANCELLATION_WORKFLOW: ScanWorkflow = {
         'Find and click on the account settings, profile settings, or membership management area. Look for a user/account icon, avatar, "My Account", "Profile", "Account Settings", or similar in the header or navigation. Click it to open the account menu or settings page.',
       clickText: [
         'my account',
+        'your account',
         'account',
         'profile',
         'settings',
         'sign in',
         'log in',
         'login',
+        'log on',
+        'sign on',
       ],
       analyzersToRun: ['ObstructionAnalyzer', 'VisualAnalyzer'],
       timeout: 40,
@@ -237,14 +278,7 @@ export const SIGNUP_WORKFLOW: ScanWorkflow = {
       instruction: 'Click the Sign Up, Register, or Create Account button.',
       aiGoal:
         'Find and click the "Sign Up", "Register", "Create Account", "Join", "Join free", or "Get started" button or link. It is typically in the site header, hero section, or top navigation. After clicking, you should see a registration/signup form.',
-      clickText: [
-        'sign up',
-        'register',
-        'create account',
-        'join',
-        'join free',
-        'get started',
-      ],
+      clickText: SIGNUP_LINKS,
       analyzersToRun: [
         'ForcedActionAnalyzer',
         'PreselectionAnalyzer',
@@ -321,10 +355,16 @@ export const COOKIE_CONSENT_WORKFLOW: ScanWorkflow = {
         'manage preferences',
         'manage cookies',
         'cookie settings',
+        'cookie preferences',
         'customize',
+        'customise',
         'more options',
         'manage options',
+        'manage settings',
+        'manage choices',
         'more choices',
+        'privacy choices',
+        'privacy settings',
         'preferences',
         'settings',
         'reject all',
@@ -413,6 +453,12 @@ export const PRICING_WORKFLOW: ScanWorkflow = {
         'subscribe',
         'buy now',
         'upgrade',
+        'start free trial',
+        'start trial',
+        'free trial',
+        'try it free',
+        'try for free',
+        'sign up',
       ],
       instruction:
         'Click on the most expensive plan and observe what happens — extra charges, confusing terms.',
@@ -481,13 +527,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'signup-form',
       expectsNavigation: true,
-      clickText: [
-        'sign up',
-        'register',
-        'create account',
-        'join',
-        'get started',
-      ],
+      clickText: SIGNUP_LINKS,
       instruction:
         'Find the public signup or registration form and inspect its required fields and consent choices.',
       aiGoal:
@@ -564,16 +604,8 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'add-to-cart',
       expectsNavigation: true,
-      clickText: [
-        'add to cart',
-        'add to bag',
-        'add to basket',
-        'add to trolley',
-        'buy now',
-        'reserve',
-        'book now',
-        'select',
-      ],
+      chooseOptions: true,
+      clickText: ADD_TO_CART_CLICKS,
       instruction:
         'Add the product to the cart and document any pre-added extras, insurance, or automatic add-ons.',
       aiGoal:
@@ -591,7 +623,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
     {
       id: 'cart-review',
       expectsNavigation: true,
-      clickText: ['cart', 'basket', 'bag', 'view cart', 'your trip'],
+      clickText: CART_LINKS,
       alreadyOn: CART_PAGE,
       instruction:
         'Review the cart or order summary for unexpected items, hidden fees, or price changes from the product page.',
@@ -611,7 +643,7 @@ export const COMPREHENSIVE_WORKFLOW: ScanWorkflow = {
       id: 'checkout',
       optionalIfMissing: true,
       expectsNavigation: true,
-      clickText: ['proceed to checkout', 'checkout', 'continue', 'book now'],
+      clickText: CHECKOUT_CONTROLS,
       instruction:
         'Proceed to checkout and observe all new fees, pre-selected charges, and friction points.',
       aiGoal:

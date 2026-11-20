@@ -21,6 +21,7 @@ import {
   dismissInterferingModals,
 } from '../utils/pre-scan'
 import {
+  CHECKOUT_CONTROLS,
   CHECKOUT_WORKFLOW,
   COOKIE_CONSENT_WORKFLOW,
 } from '../workflows/definitions'
@@ -367,7 +368,12 @@ function retailJourney(
       if (step.id === 'add-to-cart')
         return {
           ...step,
-          clickText: ['add to cart', 'add to bag', 'add to basket'],
+          clickText: [
+            'add to cart',
+            'add to bag',
+            'add to basket',
+            'add to trolley',
+          ],
           aiGoal:
             'Add this product to the cart using Add to Cart, Add to Bag, or Add to Basket. Do not purchase, book, reserve, submit personal data, or confirm an order.',
         }
@@ -377,7 +383,9 @@ function retailJourney(
         return {
           ...step,
           ...(checkout ? { navigate: checkout.url } : {}),
-          clickText: ['proceed to checkout', 'checkout'],
+          clickText: CHECKOUT_CONTROLS.filter(
+            (text) => text !== 'continue' && text !== 'book now',
+          ),
           aiGoal:
             'Open the first checkout page from the cart to inspect fees and defaults. Stop at account, personal information, or payment forms. Do not fill or submit them, place an order, or book anything.',
         }
@@ -393,7 +401,7 @@ function retailJourney(
 
 function consentJourney(map: SiteMap): ScanWorkflow | null {
   const controls = [...new Set(map.consentControls || [])].filter((label) =>
-    /manage (?:preferences|cookies|options)|cookie settings|customi[sz]e|more (?:options|choices)/i.test(
+    /manage (?:preferences|cookies|options|settings|choices)|cookie (?:settings|preferences)|privacy (?:settings|choices)|customi[sz]e|more (?:options|choices)/i.test(
       label,
     ),
   )
