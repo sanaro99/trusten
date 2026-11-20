@@ -1,5 +1,10 @@
 import type { WorkflowStep } from '@trusten/shared/api'
-import { assessScanCoverage, type Grade } from '@trusten/shared/domain'
+import {
+  assessScanCoverage,
+  type Grade,
+  journeyStopCause,
+  journeyStopSentence,
+} from '@trusten/shared/domain'
 import { gradeHeadline } from '@trusten/ui/content'
 
 export interface ReportSummary {
@@ -25,14 +30,11 @@ export function getReportSummary(
   const coverage = assessScanCoverage(scanType, steps)
   const { completed, total } = coverage
   const limited = coverage.status !== 'complete'
+  const stopCause = journeyStopCause(steps)
   const extensionHelps =
     coverage.status === 'blocked' ||
     coverage.status === 'missing' ||
-    steps.some(
-      (step) =>
-        step.status === 'not-reached' &&
-        /HTTP (?:401|403|429)|verification|blocked/i.test(step.navReason ?? ''),
-    )
+    stopCause === 'blocked'
   if (limited) {
     if (coverage.status === 'missing' || coverage.status === 'blocked') {
       return {
@@ -68,7 +70,7 @@ export function getReportSummary(
           : completed === 0
             ? 'The website stopped us before we could complete any journey steps. The findings below are useful, but they do not describe the whole website.'
             : completed < total
-              ? `We completed ${completed} of ${total} journey steps before the website stopped us. The findings below are real, but the overall grade is not conclusive.${coverage.missingVisual ? ' The screenshot check also did not run on every page.' : ''}`
+              ? `We completed ${completed} of ${total} journey steps. ${journeyStopSentence(stopCause ?? 'navigation')} The findings below are real, but the overall grade is not conclusive.${coverage.missingVisual ? ' The screenshot check also did not run on every page.' : ''}`
               : 'We reached every planned step, but the screenshot check did not run on every page, so layout tricks may be missed. The grade is not conclusive.',
     }
   }

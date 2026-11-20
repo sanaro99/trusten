@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
+import {
+  assessScanCoverage,
+  UNAVAILABLE_STEP_REASONS,
+} from '@trusten/shared/domain'
 import { discoverWorkflows } from './agent/discovery'
 import { PuppeteerDriver } from './browser/puppeteer-driver'
 import { TrustenEngine } from './index'
@@ -94,6 +98,35 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
           html = page(
             '<main><h1>Checkout</h1><p>Service fee $9 is added at checkout.</p><label><input type="checkbox" checked>Receive marketing offers</label><input name="card" aria-label="Card number"><button>Place order</button></main>',
           )
+        } else if (url.pathname === '/stay') {
+          html = page(
+            '<main><h1>Seaside Hotel</h1><p>$129 per night</p><a href="/stay/book">Reserve now</a></main>',
+          )
+        } else if (url.pathname === '/stay/book') {
+          // The last button does nothing without details Trusten never enters.
+          html = page(
+            '<main><h1>Your trip</h1><p>Room $129</p><p>Resort fee $45</p><button>Book now</button></main>',
+          )
+        } else if (url.pathname === '/stay-form') {
+          html = page(
+            '<main><h1>Seaside Hotel</h1><p>$129 per night</p><a href="/stay-form/book">Reserve now</a></main>',
+          )
+        } else if (url.pathname === '/stay-form/book') {
+          html = page(
+            '<main><h1>Your trip</h1><p>Room $129</p><form onsubmit="return false"><label>Email <input type="email" name="email" required></label><button>Book now</button></form></main>',
+          )
+        } else if (url.pathname === '/news') {
+          html = page(
+            '<header><a href="/news">Daily News</a></header><main><h1>Top stories</h1><article><a href="/news/story">Council passes the budget</a></article></main>',
+          )
+        } else if (url.pathname === '/news/story') {
+          html = page(
+            '<main><h1>Council passes the budget</h1><p>The council voted on Tuesday.</p></main>',
+          )
+        } else if (url.pathname === '/to-crashy') {
+          html = page('<main><h1>Shop</h1><a href="/crashy">Deals</a></main>')
+        } else if (url.pathname === '/crashy') {
+          html = page('<main><h1>Deals</h1><p>Only 2 left in stock</p></main>')
         } else if (url.pathname === '/to-locked') {
           html = page(
             '<main><h1>Shop</h1><a href="/browse-locked">Browse</a></main>',
@@ -329,6 +362,128 @@ describe.skipIf(!enabled)('deep scan in Chromium', () => {
     expect(result.patterns.some((p) => p.category === 'fake_scarcity')).toBe(
       true,
     )
+  }, 60_000)
+
+  test('a last button that needs details ends the journey without limiting the check', async () => {
+    const result = await engine.deepScan(`${baseUrl}/stay`, CHECKOUT_WORKFLOW)
+    const steps = result.workflowSteps ?? []
+    const last = steps.at(-1)
+    expect(last?.status).toBe('unavailable')
+    expect(last?.navReason).toBe(UNAVAILABLE_STEP_REASONS.noResponse)
+    expect(steps.some((s) => s.status === 'reached')).toBe(true)
+    const coverage = assessScanCoverage('deep', steps)
+    expect(coverage.completed).toBe(coverage.total)
+
+    const withForm = await engine.deepScan(
+      `${baseUrl}/stay-form`,
+      CHECKOUT_WORKFLOW,
+    )
+    const formStep = withForm.workflowSteps?.at(-1)
+    expect(formStep?.status).toBe('unavailable')
+    expect(formStep?.navReason).toBe(UNAVAILABLE_STEP_REASONS.needsDetails)
+  }, 120_000)
+
+  test('shop steps on a site without a shop are not counted against the check', async () => {
+    const result = await engine.deepScan(`${baseUrl}/news`, {
+      id: 'news-shop',
+      name: 'News shop',
+      description: '',
+      steps: [
+        {
+          id: 'open',
+          instruction: 'Open the first story',
+          clickFirst: true,
+          expectsNavigation: true,
+          analyzersToRun: ['UrgencyScarcityAnalyzer'],
+          timeout: 5,
+          screenshotBefore: false,
+          screenshotAfter: true,
+        },
+        {
+          id: 'add',
+          instruction: 'Add the product to the cart',
+          clickText: ['add to cart', 'add to basket'],
+          expectsNavigation: true,
+          analyzersToRun: ['SneakingAnalyzer'],
+          timeout: 5,
+          screenshotBefore: false,
+          screenshotAfter: true,
+        },
+        {
+          id: 'cart',
+          instruction: 'Review the cart',
+          clickText: ['cart'],
+          expectsNavigation: true,
+          analyzersToRun: ['SneakingAnalyzer'],
+          timeout: 5,
+          screenshotBefore: false,
+          screenshotAfter: true,
+        },
+      ],
+    })
+    const steps = result.workflowSteps ?? []
+    expect(steps.map((s) => s.status)).toEqual([
+      'reached',
+      'unavailable',
+      'unavailable',
+    ])
+    expect(steps[1].navReason).toBe(UNAVAILABLE_STEP_REASONS.notOnPage)
+    const coverage = assessScanCoverage('deep', steps)
+    expect(coverage.completed).toBe(coverage.total)
+  }, 60_000)
+
+  test('keeps the checked steps when a page stops responding mid-journey', async () => {
+    // A driver whose page dies once the journey reaches /crashy.
+    const crashing = new Proxy(browser, {
+      get(target, key) {
+        if (key === 'evaluate') {
+          return async (pageId: number, script: string) => {
+            const pages = await target.listPages()
+            const current = pages.find((p) => p.pageId === pageId)
+            if (current?.url.endsWith('/crashy'))
+              throw new Error('Target closed')
+            return target.evaluate(pageId, script)
+          }
+        }
+        const value = Reflect.get(target, key)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const crashEngine = new TrustenEngine(
+      crashing,
+      undefined,
+      store,
+      reportsDir,
+    )
+    const step = (id: string, text: string) => ({
+      id,
+      instruction: `Open ${text}`,
+      clickText: [text],
+      expectsNavigation: true,
+      analyzersToRun: ['UrgencyScarcityAnalyzer'],
+      timeout: 5,
+      screenshotBefore: false,
+      screenshotAfter: true,
+    })
+    const result = await crashEngine.deepScan(`${baseUrl}/to-crashy`, {
+      id: 'crashy',
+      name: 'Crashy',
+      description: '',
+      steps: [
+        { ...step('look', 'Look'), expectsNavigation: false },
+        step('deals', 'Deals'),
+        step('more', 'More'),
+      ],
+    })
+    const steps = result.workflowSteps ?? []
+    expect(steps.map((s) => s.status)).toEqual([
+      'observed',
+      'not-reached',
+      'skipped',
+    ])
+    expect(steps[0].screenshotPath).toBeTruthy()
+    expect(steps[1].navReason).toContain('stopped responding')
+    expect(saved.some((s) => s.id === result.id)).toBe(true)
   }, 60_000)
 
   test('rejects bot challenge content during a deep scan', async () => {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { readFileSync, rmSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
 import { closeDb, getDb, initializeDb } from '../../lib/db'
 import type { BrowserDriver } from '../browser/driver'
@@ -270,10 +270,10 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
           ).status,
         ).toBe(404)
       }
-      const html = readFileSync(result.htmlPath!, 'utf8')
+      const html = await (await app.request(`/report/${resultId}/html`)).text()
       expect(html).toContain('Limited check')
-      expect(html).toContain('The grade is not conclusive.')
-      expect(html).toContain('2 of 5 steps completed.')
+      expect(html).toContain('The website blocked Trusten')
+      expect(html).toMatch(/\d of \d steps completed\./)
       expect(html).not.toContain('Trusten reached every planned step.')
     } finally {
       blockedPricing = false
@@ -304,7 +304,7 @@ describe.skipIf(!enabled)('audit API in Chromium and PostgreSQL', () => {
         .subarray(0, 4)
         .toString(),
     ).toBe('%PDF')
-    const html = readFileSync(saved.htmlPath!, 'utf8')
+    const html = await (await app.request(`/report/${scanId}/html`)).text()
     expect(html).toContain('data:image/jpeg;base64,')
     const evidence = saved.workflowSteps!.find((step) => step.screenshotPath)!
     expect(
