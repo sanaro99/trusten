@@ -23,6 +23,7 @@ export interface CoverageStep {
   captureTruncated?: boolean
   /** The page text was analyzed even though no screenshot exists. */
   pageTextCaptured?: boolean
+  navReason?: string
 }
 
 export interface ScanCoverage {
@@ -102,4 +103,102 @@ export function assessScanCoverage(
     textOnly,
     unavailable,
   }
+}
+
+/**
+ * Why a journey step was left out of coverage (status `unavailable`). Saved as
+ * the step's `navReason`, so the wording here must stay stable.
+ */
+export const UNAVAILABLE_STEP_REASONS = {
+  /** The journey's entry point is not on the website (no basket on a news site). */
+  notOffered: 'This website does not appear to offer this part of the journey',
+  /** A later step's control is not on the page the journey reached. */
+  notOnPage:
+    'The page Trusten reached does not offer the next part of this journey',
+  /** Going further would mean entering personal or payment details. */
+  needsDetails:
+    'The next part of this journey needs personal or payment details, which Trusten does not enter',
+  /** An optional last step's button did nothing, so the journey ends here. */
+  noResponse:
+    'The website did not move on from this page, so the journey ends here',
+} as const
+
+export interface UnavailableStepCopy {
+  label: string
+  outcome: string
+}
+
+/** Plain-language label and outcome for a step left out of coverage. */
+export function unavailableStepCopy(navReason?: string): UnavailableStepCopy {
+  if (navReason === UNAVAILABLE_STEP_REASONS.needsDetails) {
+    return {
+      label: 'Stopped before personal details',
+      outcome:
+        'Going further needs personal or payment details, which Trusten never enters. The pages before this step were checked, so it is not counted against the check.',
+    }
+  }
+  if (navReason === UNAVAILABLE_STEP_REASONS.noResponse) {
+    return {
+      label: 'Journey ended here',
+      outcome:
+        'Trusten pressed the button for this step, but the website stayed on the same page, often because it wants details Trusten does not enter. The pages before this step were checked, so it is not counted against the check.',
+    }
+  }
+  if (navReason === UNAVAILABLE_STEP_REASONS.notOnPage) {
+    return {
+      label: 'Not found',
+      outcome:
+        'Trusten did not find this part of the journey on the pages it reached, so it is not counted against the check.',
+    }
+  }
+  return {
+    label: 'Not on this website',
+    outcome:
+      'Trusten did not find this part of the journey on the website, so it is not counted against the check.',
+  }
+}
+
+export type JourneyStopCause = 'blocked' | 'page-error' | 'ai' | 'navigation'
+
+/** Why a journey did not reach every step, for limited-check copy. */
+export function journeyStopCause(
+  steps: readonly CoverageStep[],
+): JourneyStopCause | null {
+  const stopped = steps.filter(
+    (step) => step.status === 'not-reached' || step.status === 'no-navigation',
+  )
+  if (stopped.length === 0) return null
+  const reasons = stopped.map((step) => step.navReason ?? '')
+  if (
+    steps.some((step) => isAccessChallengeUrl(step.url)) ||
+    reasons.some((r) => /HTTP (?:401|403|429)|verification|blocked/i.test(r))
+  )
+    return 'blocked'
+  if (
+    reasons.some((r) =>
+      /HTTP [45]\d\d|did not load the next page|stopped responding/i.test(r),
+    )
+  )
+    return 'page-error'
+  if (
+    reasons.some((r) =>
+      /LLM unavailable|No LLM configured|snapshot unavailable/i.test(r),
+    )
+  )
+    return 'ai'
+  return 'navigation'
+}
+
+const STOP_CAUSE_SENTENCES: Record<JourneyStopCause, string> = {
+  blocked: 'The website blocked Trusten before every step was reached.',
+  'page-error':
+    'A page on the website failed to load, so not every step was reached.',
+  ai: 'The AI navigator was unavailable for part of the journey, so not every step was reached.',
+  navigation:
+    'Trusten could not get past one part of the journey, so not every step was reached.',
+}
+
+/** One plain sentence saying why a journey stopped early. */
+export function journeyStopSentence(cause: JourneyStopCause): string {
+  return STOP_CAUSE_SENTENCES[cause]
 }

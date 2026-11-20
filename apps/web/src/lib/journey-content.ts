@@ -1,4 +1,5 @@
 import type { WorkflowStep } from '@trusten/shared/api'
+import { unavailableStepCopy } from '@trusten/shared/domain'
 
 export interface JourneyStepContent {
   title: string
@@ -168,12 +169,12 @@ export function getJourneyStepContent(step: WorkflowStep): JourneyStepContent {
     }
   }
   if (step.status === 'unavailable') {
+    const copy = unavailableStepCopy(step.navReason)
     return {
       ...action,
       status: 'pending',
-      statusLabel: 'Not on this website',
-      outcome:
-        'Trusten did not find this part of the journey on the website, so it is not counted against the check.',
+      statusLabel: copy.label,
+      outcome: copy.outcome,
       pageLabel: pageLabel(step.url),
     }
   }

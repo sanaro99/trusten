@@ -23,6 +23,28 @@ describe('getReportSummary', () => {
     const stalled = steps(['observed', 'not-reached'])
     expect(getReportSummary('A', 0, stalled).extensionHelps).toBe(false)
   })
+  test('says why a journey stopped instead of always blaming the website', () => {
+    const blocked = steps(['observed', 'reached', 'not-reached'])
+    blocked[2].navReason = 'Target page returned HTTP 403'
+    expect(getReportSummary('A', 0, blocked).sub).toContain(
+      'The website blocked Trusten',
+    )
+    const aiDown = steps(['observed', 'reached', 'not-reached'])
+    aiDown[2].navReason = 'LLM fallback: LLM unavailable: Error: 429'
+    const aiSub = getReportSummary('A', 0, aiDown).sub
+    expect(aiSub).toContain('AI navigator was unavailable')
+    expect(aiSub).not.toContain('website stopped')
+    const stalled = steps(['observed', 'reached', 'not-reached'])
+    expect(getReportSummary('A', 0, stalled).sub).toContain(
+      'could not get past one part of the journey',
+    )
+  })
+  test('steps left out because they need personal details keep the check complete', () => {
+    const ended = steps(['observed', 'reached', 'unavailable'])
+    ended[2].navReason =
+      'The next part of this journey needs personal or payment details, which Trusten does not enter'
+    expect(getReportSummary('B', 1, ended).limited).toBe(false)
+  })
   test('names stopped journey steps before the screenshot check', () => {
     const partial = steps(['observed', 'reached', 'not-reached'])
     partial[1].visualCheckAvailable = false

@@ -5,7 +5,13 @@
  *                            the step screenshots from their saved positions
  */
 
-import { assessScanCoverage } from '@trusten/shared/domain'
+import {
+  assessScanCoverage,
+  type JourneyStopCause,
+  journeyStopCause,
+  journeyStopSentence,
+  unavailableStepCopy,
+} from '@trusten/shared/domain'
 import {
   getPatternContent,
   SEVERITY_COLOR,
@@ -248,6 +254,7 @@ const REPORT_HEADLINES: Record<string, string> = {
 
 function reportCoverageNote(
   coverage: ReturnType<typeof assessScanCoverage>,
+  stopCause: JourneyStopCause | null,
 ): string {
   if (coverage.status === 'blocked')
     return 'A verification page stopped the check. This result does not assess the requested website.'
@@ -256,7 +263,7 @@ function reportCoverageNote(
   if (coverage.textOnly)
     return 'Trusten checked the words on this page, but no screenshot was captured, so visual tricks were not reviewed. The grade is not conclusive.'
   if (coverage.status !== 'complete' && coverage.completed < coverage.total)
-    return 'The website stopped Trusten before every step was reached. This result only describes the pages Trusten could check.'
+    return `${journeyStopSentence(stopCause ?? 'navigation')} This result only describes the pages Trusten could check.`
   if (coverage.missingVisual)
     return 'The screenshot check did not run on every page, so layout tricks may be missed. The grade is not conclusive.'
   if (coverage.status !== 'complete')
@@ -294,7 +301,10 @@ export function generateReportHtml(
     : coverage.scope === 'page'
       ? 'Result for the checked page'
       : REPORT_HEADLINES[result.score.grade]
-  const coverageNote = reportCoverageNote(coverage)
+  const coverageNote = reportCoverageNote(
+    coverage,
+    journeyStopCause(workflowSteps),
+  )
 
   const coverageHtml = workflowSteps.length
     ? `<div class="coverage-card ${limited ? 'coverage-limited' : 'coverage-complete'}">
@@ -466,7 +476,11 @@ const STEP_STATUS_STYLE: Record<string, [string, string, string]> = {
 function stepStatusBadge(step: WorkflowStep): string {
   const s = step.status ? STEP_STATUS_STYLE[step.status] : undefined
   if (!s) return ''
-  return `<span style="flex-shrink:0;align-self:flex-start;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:3px 9px;border-radius:999px;color:${s[1]};background:${s[2]}">${s[0]}</span>`
+  const label =
+    step.status === 'unavailable'
+      ? unavailableStepCopy(step.navReason).label
+      : s[0]
+  return `<span style="flex-shrink:0;align-self:flex-start;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:3px 9px;border-radius:999px;color:${s[1]};background:${s[2]}">${label}</span>`
 }
 
 function renderStep(step: WorkflowStep): string {
@@ -607,7 +621,7 @@ function publicStepOutcome(step: WorkflowStep): string {
     return 'Trusten could not continue this part of the journey.'
   }
   if (step.status === 'unavailable') {
-    return 'This part of the journey was not found on the website, so it is not counted.'
+    return unavailableStepCopy(step.navReason).outcome
   }
   return ''
 }

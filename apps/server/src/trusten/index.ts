@@ -12,6 +12,7 @@
 import {
   consolidateFindings,
   isAccessChallengeUrl,
+  UNAVAILABLE_STEP_REASONS,
 } from '@trusten/shared/domain'
 import { logger } from '../lib/logger'
 import { navigateWithAI } from './agent/navigator'
@@ -20,6 +21,11 @@ import { ALL_ANALYZERS, getAnalyzers } from './analyzers/registry'
 import type { BrowserDriver } from './browser/driver'
 import { capturePageState } from './browser/page-state'
 import { captureStepEvidence } from './finding-capture'
+import {
+  ASKS_FOR_DETAILS_SCRIPT,
+  interruptedSteps,
+  unavailableStepReason,
+} from './journey-outcome'
 import { publish } from './live/hub'
 import { getTrustenLLM } from './llm/client'
 import { ScanIncompleteError } from './scan-incomplete-error'
@@ -240,6 +246,8 @@ export class TrustenEngine {
     let pageId: number | null = null
     const allPatterns: DetectedPattern[] = []
     const workflowSteps: WorkflowStep[] = []
+    let finish: (() => Promise<ScanResult>) | null = null
+    let finishing = false
 
     try {
       const {
@@ -264,6 +272,63 @@ export class TrustenEngine {
       await this.waitForPageLoad(pid)
       await this.captureUsableContext(pid)
 
+      finish = async (): Promise<ScanResult> => {
+        finishing = true
+        // Collapse duplicate findings that the same page produced across steps
+        // (e.g. when a step did not advance) so a re-analyzed page can't inflate
+        // the score or clutter the report.
+        const dedupedPatterns = dedupePatterns(allPatterns)
+        const score = calculateScore(dedupedPatterns)
+        const completedAt = new Date().toISOString()
+
+        const result: ScanResult = {
+          id: scanId,
+          url,
+          domain: new URL(url).hostname,
+          scanType: 'deep',
+          ...(opts.parentAuditId ? { parentAuditId: opts.parentAuditId } : {}),
+          startedAt,
+          completedAt,
+          patterns: dedupedPatterns,
+          score,
+          workflowSteps,
+        }
+
+        // Resolve the recorded session video path (file is flushed on page close,
+        // which happens in the finally block below; the path is known now).
+        try {
+          const vp = await this.browser.videoPath?.(pid)
+          if (vp) result.videoPath = vp
+        } catch {
+          /* video recording is best-effort */
+        }
+
+        // Flush recorded evidence before making the result available to readers.
+        await this.browser.closePage(pid).catch(() => undefined)
+        pageId = null
+
+        // Generate HTML + PDF report, persist to DB
+        const { pdfPath, htmlPath } = await this.generateReport(
+          result,
+          workflow.name,
+          pid,
+        )
+        result.pdfPath = pdfPath
+        result.htmlPath = htmlPath
+
+        await this.persistScan(result, workflow.id)
+
+        logger.info('Trusten deep scan complete', {
+          url,
+          workflow: workflow.id,
+          totalPatterns: allPatterns.length,
+          grade: score.grade,
+          pdfPath,
+        })
+
+        return result
+      }
+
       const fakeProfile = generateFakeProfile()
       // Consent workflows must inspect the original banner and preference path.
       // Other journeys clear obstructions only when navigation begins.
@@ -283,8 +348,9 @@ export class TrustenEngine {
       let funnelBroken = false
       // A step has reached a new page, so a later miss is a real stop.
       let reachedAnyStep = false
-      // The journey's entry point is missing from this website.
-      let journeyUnavailable = false
+      // Why the rest of this journey cannot be followed without counting
+      // against coverage (entry point missing, or personal details needed).
+      let unavailableReason: string | null = null
       // Last real web address, so steps never report Chrome's error page URL.
       let lastPageUrl = url
       logger.info('Trusten deep scan navigation mode', {
@@ -368,14 +434,18 @@ export class TrustenEngine {
         let navReason = ''
         let missingPage = false
         let foundControl = false
+        // The AI navigator stopped before typing personal or payment details.
+        let aiAtDetailsBoundary = false
+        // The step's page was an error or verification page: not evidence.
+        let stoppedOnErrorPage = false
 
         if (funnelBroken && !stepDef.navigate) {
           // A prior funnel step never advanced — running this dependent step
           // would just re-analyze the same (earlier) page. Skip it honestly.
-          status = journeyUnavailable ? 'unavailable' : 'skipped'
-          navReason = journeyUnavailable
-            ? 'This website does not appear to offer this part of the journey'
-            : 'Skipped: an earlier funnel step did not advance, so this page was never reached'
+          status = unavailableReason ? 'unavailable' : 'skipped'
+          navReason =
+            unavailableReason ??
+            'Skipped: an earlier funnel step did not advance, so this page was never reached'
           logger.info(`Trusten step ${stepNumber} skipped`, {
             reason: navReason,
           })
@@ -398,7 +468,7 @@ export class TrustenEngine {
           let advancedNow = false
           if (stepDef.navigate) {
             funnelBroken = false
-            journeyUnavailable = false
+            unavailableReason = null
           }
           if (hasDeterministic) {
             const outcome: { missingPage?: boolean; foundControl?: boolean } =
@@ -480,8 +550,12 @@ export class TrustenEngine {
               Math.min(Math.floor(stepDef.timeout / 6), 6),
               journeyLog,
             )
-            navAdvanced = navResult.success && navResult.advanced
-            if (!navResult.success) {
+            aiAtDetailsBoundary = navResult.reason.startsWith(
+              'Stopped at an evidence-only boundary',
+            )
+            navAdvanced =
+              navResult.advanced && (navResult.success || aiAtDetailsBoundary)
+            if (!navResult.success && !navAdvanced) {
               status = 'not-reached'
               funnelBroken = true
             }
@@ -561,25 +635,37 @@ export class TrustenEngine {
           }
         }
 
-        // The journey's first move found nothing to click: the website does
-        // not seem to offer this journey (no basket, no pricing page, no
-        // cookie banner). That is not a blocked check.
-        if (
-          status === 'not-reached' &&
-          (!reachedAnyStep || stepDef.optionalIfMissing) &&
-          !landedOnBrowserError &&
-          (missingPage ||
-            (!foundControl &&
-              !!(
-                stepDef.fillSearch ||
-                stepDef.clickText?.length ||
-                stepDef.clickFirst
-              )))
-        ) {
-          status = 'unavailable'
-          journeyUnavailable = true
-          navReason =
-            'This website does not appear to offer this part of the journey'
+        // A step that found nothing to use, or that would need personal
+        // details, shows what the website offers; it is not a blocked check.
+        if (status === 'not-reached' && !landedOnBrowserError) {
+          const pageUnchanged = currentState.signature === before.signature
+          const pageAsksForDetails =
+            foundControl &&
+            pageUnchanged &&
+            stepDef.optionalIfMissing === true &&
+            (await this.browser
+              .evaluate(pid, ASKS_FOR_DETAILS_SCRIPT)
+              .then((r) => r.value === true)
+              .catch(() => false))
+          const reason = unavailableStepReason({
+            reachedAnyStep,
+            optional: stepDef.optionalIfMissing === true,
+            missingPage,
+            foundControl,
+            hasDeterministicTarget: !!(
+              stepDef.fillSearch ||
+              stepDef.clickText?.length ||
+              stepDef.clickFirst
+            ),
+            pageUnchanged,
+            aiAtDetailsBoundary,
+            pageAsksForDetails,
+          })
+          if (reason) {
+            status = 'unavailable'
+            unavailableReason = reason
+            navReason = reason
+          }
         }
 
         // Only analyze when we actually navigated (or legitimately observed the
@@ -600,13 +686,18 @@ export class TrustenEngine {
             // this journey, but the steps already checked keep their evidence.
             if (!(error instanceof ScanIncompleteError)) throw error
             context = null
+            stoppedOnErrorPage = true
             funnelBroken = true
             const missingPage =
               error.httpStatus === 404 || error.httpStatus === 410
             status =
               missingPage && !reachedAnyStep ? 'unavailable' : 'not-reached'
-            if (status === 'unavailable') journeyUnavailable = true
-            navReason = error.message
+            if (status === 'unavailable')
+              unavailableReason = UNAVAILABLE_STEP_REASONS.notOffered
+            navReason =
+              status === 'unavailable'
+                ? UNAVAILABLE_STEP_REASONS.notOffered
+                : error.message
             logger.info(`Trusten step ${stepNumber} stopped on its page`, {
               status,
               reason: error.message,
@@ -652,7 +743,8 @@ export class TrustenEngine {
           status === 'skipped' ||
           status === 'no-navigation' ||
           status === 'unavailable' ||
-          landedOnBrowserError
+          landedOnBrowserError ||
+          stoppedOnErrorPage
             ? { screenshotB64: '', screenshotPath: '' }
             : await this.captureStepScreenshot(
                 pid,
@@ -699,59 +791,21 @@ export class TrustenEngine {
         })
       }
 
-      // Collapse duplicate findings that the same page produced across steps
-      // (e.g. when a step did not advance) so a re-analyzed page can't inflate
-      // the score or clutter the report.
-      const dedupedPatterns = dedupePatterns(allPatterns)
-      const score = calculateScore(dedupedPatterns)
-      const completedAt = new Date().toISOString()
-
-      const result: ScanResult = {
-        id: scanId,
-        url,
-        domain: new URL(url).hostname,
-        scanType: 'deep',
-        ...(opts.parentAuditId ? { parentAuditId: opts.parentAuditId } : {}),
-        startedAt,
-        completedAt,
-        patterns: dedupedPatterns,
-        score,
-        workflowSteps,
-      }
-
-      // Resolve the recorded session video path (file is flushed on page close,
-      // which happens in the finally block below; the path is known now).
-      try {
-        const vp = await this.browser.videoPath?.(pid)
-        if (vp) result.videoPath = vp
-      } catch {
-        /* video recording is best-effort */
-      }
-
-      // Flush recorded evidence before making the result available to readers.
-      await this.browser.closePage(pid)
-      pageId = null
-
-      // Generate HTML + PDF report, persist to DB
-      const { pdfPath, htmlPath } = await this.generateReport(
-        result,
-        workflow.name,
-        pid,
+      return await finish()
+    } catch (error) {
+      // A page that crashes or hangs part-way through a journey ends the
+      // journey; the steps already checked keep their evidence.
+      const checkedAny = workflowSteps.some(
+        (step) => step.status === 'reached' || step.status === 'observed',
       )
-      result.pdfPath = pdfPath
-      result.htmlPath = htmlPath
-
-      await this.persistScan(result, workflow.id)
-
-      logger.info('Trusten deep scan complete', {
+      if (!finish || finishing || !checkedAny) throw error
+      logger.warn('Trusten deep scan interrupted; keeping checked steps', {
         url,
         workflow: workflow.id,
-        totalPatterns: allPatterns.length,
-        grade: score.grade,
-        pdfPath,
+        error: String(error),
       })
-
-      return result
+      workflowSteps.push(...interruptedSteps(workflow, workflowSteps, error))
+      return await finish()
     } finally {
       if (pageId !== null) {
         await this.browser.closePage(pageId).catch(() => undefined)

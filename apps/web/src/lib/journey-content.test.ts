@@ -39,6 +39,20 @@ describe('journey content', () => {
     expect(content.outcome).not.toMatch(/LLM|deterministic/i)
   })
 
+  test('says why a step was left out of the check', () => {
+    const ended = getJourneyStepContent(
+      step({
+        status: 'unavailable',
+        navReason:
+          'The next part of this journey needs personal or payment details, which Trusten does not enter',
+      }),
+    )
+    expect(ended.statusLabel).toBe('Stopped before personal details')
+    expect(ended.status).toBe('pending')
+    const missing = getJourneyStepContent(step({ status: 'unavailable' }))
+    expect(missing.statusLabel).toBe('Not on this website')
+  })
+
   test('counts legacy recorded steps as completed', () => {
     expect(
       completedJourneySteps([

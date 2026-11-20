@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { assessScanCoverage } from './scan-coverage'
+import {
+  assessScanCoverage,
+  journeyStopCause,
+  journeyStopSentence,
+  UNAVAILABLE_STEP_REASONS,
+  unavailableStepCopy,
+} from './scan-coverage'
 
 const captured = {
   url: 'https://example.com/',
@@ -105,5 +111,83 @@ describe('scan coverage', () => {
         { ...captured, url: 'https://example.com/cart', status: 'reached' },
       ]).status,
     ).toBe('complete')
+  })
+  test('a journey that ends before personal details stays complete', () => {
+    const coverage = assessScanCoverage('deep', [
+      captured,
+      { ...captured, status: 'reached', url: 'https://example.com/book' },
+      {
+        url: 'https://example.com/book',
+        status: 'unavailable',
+        navReason: UNAVAILABLE_STEP_REASONS.needsDetails,
+      },
+    ])
+    expect(coverage.status).toBe('complete')
+    expect(coverage.completed).toBe(2)
+    expect(coverage.total).toBe(2)
+  })
+})
+
+describe('unavailable step copy', () => {
+  test('names why each step was left out', () => {
+    expect(unavailableStepCopy(UNAVAILABLE_STEP_REASONS.notOffered).label).toBe(
+      'Not on this website',
+    )
+    expect(unavailableStepCopy(UNAVAILABLE_STEP_REASONS.notOnPage).label).toBe(
+      'Not found',
+    )
+    expect(
+      unavailableStepCopy(UNAVAILABLE_STEP_REASONS.needsDetails).outcome,
+    ).toContain('never enters')
+    expect(unavailableStepCopy(UNAVAILABLE_STEP_REASONS.noResponse).label).toBe(
+      'Journey ended here',
+    )
+  })
+  test('older saved steps without a known reason keep the original wording', () => {
+    expect(unavailableStepCopy(undefined).label).toBe('Not on this website')
+    expect(unavailableStepCopy('Target page returned HTTP 404').label).toBe(
+      'Not on this website',
+    )
+  })
+})
+
+describe('journey stop cause', () => {
+  const stopped = (navReason: string) => [
+    captured,
+    { url: 'https://example.com/next', status: 'not-reached', navReason },
+  ]
+  test('reads the reason a journey stopped', () => {
+    expect(journeyStopCause([captured])).toBeNull()
+    expect(journeyStopCause(stopped('Target page returned HTTP 403'))).toBe(
+      'blocked',
+    )
+    expect(journeyStopCause(stopped('Target page returned HTTP 500'))).toBe(
+      'page-error',
+    )
+    expect(
+      journeyStopCause(
+        stopped('The page stopped responding during this step (Target closed)'),
+      ),
+    ).toBe('page-error')
+    expect(
+      journeyStopCause(
+        stopped('LLM fallback: LLM unavailable: Error: rate limited'),
+      ),
+    ).toBe('ai')
+    expect(journeyStopCause(stopped('LLM fallback: Stuck: no cart'))).toBe(
+      'navigation',
+    )
+  })
+  test('treats a verification page as a block', () => {
+    expect(
+      journeyStopCause([
+        { ...captured, url: 'https://example.com/captcha' },
+        { url: 'https://example.com/', status: 'not-reached' },
+      ]),
+    ).toBe('blocked')
+  })
+  test('never blames the website for an AI outage', () => {
+    expect(journeyStopSentence('ai')).not.toMatch(/website blocked/)
+    expect(journeyStopSentence('navigation')).not.toMatch(/website/)
   })
 })

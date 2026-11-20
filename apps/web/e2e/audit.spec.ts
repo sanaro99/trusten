@@ -438,7 +438,7 @@ test('the audit result limits its verdict when the overview succeeded but a link
   ).toBeVisible()
   await expect(
     page.getByText(
-      'We completed 1 of 4 journey steps before the website stopped us.',
+      'We completed 1 of 4 journey steps. Trusten could not get past one part of the journey',
       { exact: false },
     ),
   ).toBeVisible()
