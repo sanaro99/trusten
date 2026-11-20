@@ -6,6 +6,13 @@ Each analyzer is **hybrid**: deterministic rules first (regex, DOM/CSS, form/coo
 state), then optional LLM augmentation for ambiguous language. They take an `AnalyzerContext`
 (URL, DOM, visible text, screenshot, network requests, cookies) and emit `DetectedPattern[]`.
 
+The five text analyzers that can ask the AI (urgency, misdirection, sneaking, obstruction and
+interface manipulation) share **one AI request per page**: `PageLLMBatch` collects what each
+one wants to check and sends a single request listing those focus areas, and each analyzer
+keeps only its own categories from the answer. The screenshot check is a separate request.
+Requests are paced to the provider's free-tier rate and wait out a 429 rather than failing;
+see `TRUSTEN_LLM_RPM` in [development.md](development.md).
+
 | Analyzer | Categories |
 |---|---|
 | `UrgencyScarcityAnalyzer` | fake_urgency, fake_scarcity, fake_social_proof |

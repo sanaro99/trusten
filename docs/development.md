@@ -62,7 +62,9 @@ Do not hand-edit the development schema.
 | `TRUSTEN_LLM_VISION_TIMEOUT_MS` | `25000` | Per-attempt LLM timeout for screenshot checks |
 | `TRUSTEN_LLM_VISION_RETRIES` | `1` | Extra attempts when a screenshot check times out |
 | `TRUSTEN_LLM_CONCURRENCY` | `3` | AI requests sent to one provider at a time; the rest wait in a queue |
-| `TRUSTEN_LLM_RATE_LIMIT_WAIT_MS` | `20000` | Longest Retry-After a rate-limited (429) request waits out before one retry |
+| `TRUSTEN_LLM_RPM` | per provider | Requests per minute sent to the AI provider. Defaults to each free tier (Gemini 10, Groq 30, OpenRouter 20, NVIDIA 40, Cloudflare 300, Ollama unlimited); `0` turns pacing off |
+| `TRUSTEN_LLM_RATE_LIMIT_RETRIES` | `4` | Times one request waits out a 429 before trying the next provider |
+| `TRUSTEN_LLM_RATE_LIMIT_WAIT_MS` | `60000` | Longest single 429 wait; a longer Retry-After (such as a daily quota) moves on to the next provider |
 | `TRUSTEN_IGNORE_ROBOTS` | — | `1` bypasses robots.txt (local testing) |
 | `TRUSTEN_RATE_WINDOW_MS` | `60000` | Per-domain scan rate-limit window |
 | `NODE_ENV` | — | `development` enables pretty logs |

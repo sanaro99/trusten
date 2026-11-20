@@ -54,6 +54,7 @@ const SKIP_LINK =
 
 export class MisdirectionAnalyzer extends BaseAnalyzer {
   name = 'MisdirectionAnalyzer'
+  override readonly usesTextLLM = true
   categories = [
     DarkPatternCategory.CONFIRMSHAMING,
     DarkPatternCategory.TRICK_WORDING,

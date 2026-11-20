@@ -36,6 +36,7 @@ const VISUAL_WEIGHT_PATTERN =
 
 export class InterfaceManipulationAnalyzer extends BaseAnalyzer {
   name = 'InterfaceManipulationAnalyzer'
+  override readonly usesTextLLM = true
   categories = [DarkPatternCategory.FAKE_HIERARCHY]
 
   async analyze(context: AnalyzerContext): Promise<AnalyzerResult> {
